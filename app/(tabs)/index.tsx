@@ -186,6 +186,7 @@ function SearchHeader({
           // Search expands in place, so this must match ScreenHeader's top pad
           // exactly — a different value would visibly jolt the screen on open.
           paddingTop: insets.top + theme.space.headerTop,
+          paddingBottom: theme.space.headerBottom,
           backgroundColor: theme.color.surface,
           borderBottomColor: theme.color.border
         }
@@ -355,7 +356,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderStyle: 'dashed'
   },
-  searchHeader: { paddingHorizontal: 20, paddingBottom: 10, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
+  searchHeader: { paddingHorizontal: 20, gap: 8, borderBottomWidth: StyleSheet.hairlineWidth },
   scopeRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   searchRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   searchField: { flex: 1, height: 44, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 12, borderWidth: 1 },

@@ -74,6 +74,8 @@ export const SPACE = {
   header: 20,
   /** Breathing room above the header row, on top of the safe-area inset. */
   headerTop: 12,
+  /** Gap between the header's contents and its bottom border. */
+  headerBottom: 12,
   card: 14,
   group: 12,
   row: 12,

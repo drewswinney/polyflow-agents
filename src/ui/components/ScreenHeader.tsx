@@ -8,6 +8,13 @@ import { Icon } from './Icon'
 import { Text } from './Text'
 
 /**
+ * Height of the title line the centred pill has to clear. The design pins the
+ * pill above the title's optical centre rather than beside it, so this is a
+ * measurement of the type, not a spacing choice.
+ */
+const TITLE_BLOCK_HEIGHT = 26
+
+/**
  * The Polyflow navbar treatment: translucent white over 12px blur, a 1px bottom
  * border, pinned above a scrolling body. Right-side actions are bare icons in a
  * 44px tap slot — no chip, no border (design §Design system).
@@ -34,7 +41,15 @@ export function ScreenHeader({
       tint="light"
       style={[
         styles.wrap,
-        { paddingTop: insets.top + theme.space.headerTop, borderBottomColor: theme.color.border }
+        {
+          // Both pads sit on the wrap, not inside the row. The row is a fixed
+          // 52px by the design, so padding placed there would only shuffle the
+          // title within it — the header has to grow from outside to actually
+          // gain white space.
+          paddingTop: insets.top + theme.space.headerTop,
+          paddingBottom: theme.space.headerBottom,
+          borderBottomColor: theme.color.border
+        }
       ]}
     >
       <View style={styles.row}>
@@ -54,7 +69,17 @@ export function ScreenHeader({
         <View style={styles.rightSlot}>{right}</View>
       </View>
 
-      {center ? <View pointerEvents="box-none" style={styles.center}>{center}</View> : null}
+      {center ? (
+        <View
+          pointerEvents="box-none"
+          // The pill rides just above the bottom-aligned title, so its offset is
+          // measured from the same edge the title is: raising the bottom padding
+          // without this would drop the pill onto the title.
+          style={[styles.center, { bottom: theme.space.headerBottom + TITLE_BLOCK_HEIGHT }]}
+        >
+          {center}
+        </View>
+      ) : null}
     </BlurView>
   )
 }
@@ -69,13 +94,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     paddingHorizontal: 20,
-    paddingBottom: 8,
     gap: 6
   },
   backSlot: { width: 34, height: 34, marginLeft: -9, alignItems: 'center', justifyContent: 'center' },
   titleBlock: { flex: 1, minWidth: 0 },
   rightSlot: { minWidth: 44, alignItems: 'flex-end', justifyContent: 'center' },
-  // top: -6 against a bottom-aligned 52px row, so the pill rides above the
-  // title's optical centre exactly as drawn.
-  center: { position: 'absolute', left: 0, right: 0, bottom: 34, alignItems: 'center' }
+  center: { position: 'absolute', left: 0, right: 0, alignItems: 'center' }
 })
