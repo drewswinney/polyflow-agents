@@ -85,10 +85,10 @@ vendored and why the desktop client is reference-only.
 
 Built: the scaffold, the vendored client and its React Native shims, the domain
 seam with Hermes and mock backends, the theme layer, Sessions with in-place
-search, and Chat with token streaming, tool cards, approvals, cancel and
-reconnect.
+search, Chat with token streaming, tool cards, approvals, cancel and reconnect,
+and Activity / Logs / Tools / Model on a live agent-wide event stream.
 
-Not built yet: settings rendered from `/api/config/schema`, the Activity event
-stream, logs, push-to-talk voice, and the push relay. Four designed features have
-no API to back them and are descoped rather than faked — see §2.6 of the
-architecture.
+Not built yet: settings rendered from `/api/config/schema`, cron, notifications,
+push-to-talk voice, and the push relay. Several designed features have no API to
+back them and are left absent rather than faked — see §2.6 of the architecture
+and the commit history for each call.

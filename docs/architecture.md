@@ -793,8 +793,8 @@ Before the app can connect to `10.0.0.68`:
 | **M1** | Host prep (§11) + pairing/onboarding (§7.8) | Real remote connection over Tailscale | host prep is the owner's; the app side ships in M5's add-agent |
 | **M2** | Sessions list + read-only transcript + search | REST layer, normalisation, agent scoping | **done** |
 | **M3** | Live chat: streaming, tool cards, approvals, cancel, reconnect | The core product | **done** |
-| **M4** | Settings from `/api/config/schema` + capability gating | G2, and the seam holding up | capability gating done; schema-driven forms open |
-| **M5** | Activity, logs, agent switcher, add-agent | G6 | switcher + add-agent done; activity and logs open |
+| **M4** | Settings from `/api/config/schema` + capability gating | G2, and the seam holding up | capability gating and the model picker done; schema-driven forms open |
+| **M5** | Activity, logs, agent switcher, add-agent | G6 | **done** — spend/turns, the live event stream, logs with payload detail, tools & integrations, switcher, add-agent |
 | **M6** | Android parity pass + EAS pipeline for both | G5 | both platforms bundle; no EAS pipeline yet |
 | **M7** | Push relay + notification actions | G1 on a phone, properly | open |
 
