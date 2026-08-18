@@ -1,0 +1,32 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "strict": true,
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@/assets/*": [
+        "./assets/*"
+      ],
+      "@hermes/shared": [
+        "./src/backends/hermes/adapters/shared.ts"
+      ],
+      "@hermes/types": [
+        "./vendor/hermes/types/hermes.ts"
+      ]
+    },
+    "noEmit": true,
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "vendor/hermes/reference"
+  ]
+}

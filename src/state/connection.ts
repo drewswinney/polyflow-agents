@@ -1,0 +1,132 @@
+/**
+ * Owns the single live backend and the mobile-specific reconnect triggers.
+ *
+ * The upstream gateway client already handles the socket lifecycle and brings a
+ * 15s connect timeout chosen so a sleep/wake reconnect cannot hang the composer
+ * (§5.4). What it cannot know about is a phone: this adds foreground and
+ * network-transition triggers on top, and never treats a dropped socket in
+ * background as an error the user has to see (§10.3).
+ */
+
+import NetInfo from '@react-native-community/netinfo'
+import { useEffect, useRef, useState } from 'react'
+import { AppState, type AppStateStatus } from 'react-native'
+
+import { activateBackend, MOCK_HOST, releaseBackend } from '@/backends/registry'
+import type { Agent, AgentBackend, ConnectionState } from '@/domain'
+import { readAgentToken } from '@/platform/secure-store'
+
+export interface Connection {
+  backend: AgentBackend | null
+  state: ConnectionState
+  /** Non-null when the last connect attempt failed. */
+  error: string | null
+  /** Consecutive failed attempts, for the retry line in the offline banner (§7.16). */
+  attempt: number
+  reconnect: () => void
+}
+
+/**
+ * Connect lazily on agent switch, and hold exactly one socket (§5.2).
+ *
+ * Mounted once, at the root, so the socket survives navigation between tabs and
+ * into a chat rather than being torn down and re-dialled per screen.
+ */
+export function useConnection(agent: Agent): Connection {
+  const [backend, setBackend] = useState<AgentBackend | null>(null)
+  const [state, setState] = useState<ConnectionState>('idle')
+  const [error, setError] = useState<string | null>(null)
+  const [attempt, setAttempt] = useState(0)
+  const [nonce, setNonce] = useState(0)
+  const wasBackgrounded = useRef(false)
+
+  useEffect(() => {
+    let cancelled = false
+    const controller = new AbortController()
+
+    async function open() {
+      setError(null)
+
+      // The mock needs no credential; a real host without one is a pairing
+      // problem, surfaced rather than retried forever.
+      const token = agent.host === MOCK_HOST ? 'mock' : await readAgentToken(agent.id)
+
+      if (cancelled) return
+
+      if (!token) {
+        setState('error')
+        setError('No pairing token stored for this agent.')
+
+        return
+      }
+
+      const next = activateBackend(agent, token)
+
+      if (cancelled) return
+
+      setBackend(next)
+      const unsubscribe = next.connectionState.subscribe(value => {
+        if (!cancelled) setState(value)
+      })
+
+      try {
+        await next.connect(controller.signal)
+
+        if (!cancelled) setAttempt(0)
+      } catch (cause) {
+        if (!cancelled) {
+          setError(cause instanceof Error ? cause.message : String(cause))
+          setAttempt(count => count + 1)
+        }
+      }
+
+      return unsubscribe
+    }
+
+    const pending = open()
+
+    return () => {
+      cancelled = true
+      controller.abort()
+      void pending.then(unsubscribe => unsubscribe?.())
+    }
+  }, [agent, nonce])
+
+  // Switching agents re-scopes the whole app; the previous socket goes with it.
+  useEffect(() => releaseBackend, [])
+
+  const reconnect = () => setNonce(value => value + 1)
+
+  // Foreground → verify the socket. Neither OS keeps a WebSocket alive in
+  // background indefinitely, so a closed socket on resume is expected, not an error.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (next: AppStateStatus) => {
+      if (next === 'active' && wasBackgrounded.current) {
+        wasBackgrounded.current = false
+        setNonce(value => value + 1)
+      } else if (next !== 'active') {
+        wasBackgrounded.current = true
+      }
+    })
+
+    return () => subscription.remove()
+  }, [])
+
+  // A cell ↔ wifi ↔ tailnet transition invalidates the socket's path even when
+  // the socket itself has not noticed yet; force a redial.
+  useEffect(() => {
+    let previous: string | null = null
+
+    return NetInfo.addEventListener(info => {
+      const current = `${info.type}:${info.isInternetReachable}`
+
+      if (previous !== null && previous !== current && info.isConnected) {
+        setNonce(value => value + 1)
+      }
+
+      previous = current
+    })
+  }, [])
+
+  return { backend, state, error, attempt, reconnect }
+}
