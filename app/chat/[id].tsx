@@ -1,6 +1,6 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useCallback, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native'
 
 import type { TranscriptEntry } from '@/domain'
@@ -8,6 +8,7 @@ import { useActiveConnection } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { useSessionStream } from '@/state/session-stream'
 import { useIsStreaming } from '@/state/stream-tail'
+import { useVoiceInbox } from '@/state/voice-inbox'
 import { ApprovalSheet } from '@/ui/components/ApprovalSheet'
 import { Composer } from '@/ui/components/Composer'
 import { ConnectionBanner } from '@/ui/components/ConnectionBanner'
@@ -38,6 +39,19 @@ export default function ChatScreen() {
 
   const stream = useSessionStream(backend, id, state)
   const streaming = useIsStreaming(stream.tail)
+  const pendingVoice = useVoiceInbox(inbox => inbox.pending)
+  const takeVoice = useVoiceInbox(inbox => inbox.take)
+
+  // Dictation comes back through chat's own send path rather than being sent by
+  // the voice screen, so it gets the optimistic bubble and the offline outbox
+  // like any typed message.
+  useEffect(() => {
+    if (!pendingVoice) return
+
+    const text = takeVoice()
+
+    if (text) stream.send(text)
+  }, [pendingVoice, takeVoice, stream])
 
   const renderItem = useCallback(
     ({ item }: { item: TranscriptEntry }) => (
@@ -116,6 +130,7 @@ export default function ChatScreen() {
           queued={stream.outbox.length}
           onSend={stream.send}
           onStop={stream.cancel}
+          onVoice={backend?.capabilities.media.audioIn ? () => router.push(`/voice/${id}`) : undefined}
         />
       </KeyboardAvoidingView>
 

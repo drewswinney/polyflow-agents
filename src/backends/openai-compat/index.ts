@@ -137,4 +137,40 @@ export class OpenAiCompatBackend implements AgentBackend {
   async setModel(): Promise<never> {
     throw new NotImplemented('model selection')
   }
+
+  async getApprovalPolicy(): Promise<never> {
+    throw new NotImplemented('approval policy')
+  }
+
+  async setApprovalPolicy(): Promise<never> {
+    throw new NotImplemented('approval policy')
+  }
+
+  async listConfigFields(): Promise<never> {
+    throw new NotImplemented('a config schema')
+  }
+
+  async setConfigValue(): Promise<never> {
+    throw new NotImplemented('config writes')
+  }
+
+  async listCronJobs(): Promise<never> {
+    throw new NotImplemented('cron')
+  }
+
+  async setCronJobEnabled(): Promise<never> {
+    throw new NotImplemented('cron')
+  }
+
+  async triggerCronJob(): Promise<never> {
+    throw new NotImplemented('cron')
+  }
+
+  async transcribe(): Promise<never> {
+    throw new NotImplemented('transcription')
+  }
+
+  async speak(): Promise<never> {
+    throw new NotImplemented('speech')
+  }
 }

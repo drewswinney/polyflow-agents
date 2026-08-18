@@ -83,12 +83,24 @@ vendored and why the desktop client is reference-only.
 
 ## Where this is
 
-Built: the scaffold, the vendored client and its React Native shims, the domain
-seam with Hermes and mock backends, the theme layer, Sessions with in-place
-search, Chat with token streaming, tool cards, approvals, cancel and reconnect,
-and Activity / Logs / Tools / Model on a live agent-wide event stream.
+Every screen in the design handoff is built: Sessions and search, Chat with
+token streaming, tool cards and blocking approvals, Activity, Logs & events,
+Tools & integrations, Model, Cron, Notifications, Voice, the agent switcher and
+add-agent — on top of the domain seam, the vendored Hermes client and its React
+Native shims, and a theme layer whose accent follows the selected agent.
 
-Not built yet: settings rendered from `/api/config/schema`, cron, notifications,
-push-to-talk voice, and the push relay. Several designed features have no API to
-back them and are left absent rather than faked — see §2.6 of the architecture
-and the commit history for each call.
+Settings are **generated from `/api/config/schema`**, so a setting Hermes adds
+appears here on the next fetch rather than in the next app release.
+
+Two things are deliberately not what the design drew, because no API backs them:
+
+- **Voice is push-to-talk, not realtime.** Hermes's audio surface is three
+  request/response REST endpoints with no duplex channel, so barge-in has
+  nothing to interrupt.
+- **Notifications are local-only.** Delivery once the app is closed needs a
+  relay on the agent host; its contract is written up in
+  [docs/push-relay.md](docs/push-relay.md).
+
+Smaller absences — no approval countdown, no CPU/memory/disk tiles, no QR
+pairing, no MCP reachability — are §2.6 of the architecture. In each case the
+absence is stated once on screen rather than rendered as an empty tile.

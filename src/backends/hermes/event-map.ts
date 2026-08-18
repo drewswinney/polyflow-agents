@@ -267,6 +267,7 @@ export function toEventRecord(event: GatewayEvent, now: number): EventRecord {
     name: event.type,
     detail: str(payload?.name) || str(payload?.message) || str(payload?.status) || '',
     status: event.type === 'error' || payload?.error ? 'error' : 'info',
+    sessionId: event.session_id || undefined,
     payload: event.payload
   }
 }

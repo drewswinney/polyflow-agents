@@ -14,8 +14,12 @@
 
 import type {
   AnalyticsResponse,
+  AudioSpeakResponse,
+  AudioTranscriptionResponse,
   ConfigSchemaResponse,
+  CronJob,
   HermesConfig,
+  HermesConfigRecord,
   LogsResponse,
   McpServerSummary,
   ModelInfoResponse,
@@ -57,6 +61,11 @@ function isLoopback(host: string): boolean {
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
+
+/** Audio endpoints scale with payload size, between three and ten minutes. */
+function audioTimeoutMs(estimate: number): number {
+  return Math.min(600_000, Math.max(180_000, Math.ceil(estimate)))
+}
 
 export class HermesRest {
   private readonly config: HermesRestConfig
@@ -165,6 +174,11 @@ export class HermesRest {
     return this.request<ConfigSchemaResponse>('/api/config/schema')
   }
 
+  /** The flat key → value record the schema describes. */
+  configRecord(): Promise<HermesConfigRecord> {
+    return this.request<HermesConfigRecord>('/api/config')
+  }
+
   modelInfo(): Promise<ModelInfoResponse> {
     return this.request<ModelInfoResponse>('/api/model/info')
   }
@@ -181,6 +195,49 @@ export class HermesRest {
 
   mcpServers(): Promise<{ servers: McpServerSummary[] }> {
     return this.request<{ servers: McpServerSummary[] }>('/api/mcp/servers')
+  }
+
+  cronJobs(): Promise<CronJob[]> {
+    return this.request<CronJob[]>('/api/cron/jobs', { timeoutMs: 60_000 })
+  }
+
+  cronPause(id: string): Promise<void> {
+    return this.request<void>(`/api/cron/jobs/${encodeURIComponent(id)}/pause`, { method: 'POST' })
+  }
+
+  cronResume(id: string): Promise<void> {
+    return this.request<void>(`/api/cron/jobs/${encodeURIComponent(id)}/resume`, { method: 'POST' })
+  }
+
+  /**
+   * The trigger endpoint deliberately waits for the whole job so its response
+   * reflects the persisted result, and an agent job can run for a long time.
+   * Upstream allows it a full day; a phone should not hold a request open that
+   * long, so this caps at five minutes and lets the event stream report the rest.
+   */
+  cronTrigger(id: string): Promise<void> {
+    return this.request<void>(`/api/cron/jobs/${encodeURIComponent(id)}/trigger`, {
+      method: 'POST',
+      timeoutMs: 300_000
+    })
+  }
+
+  transcribe(dataUrl: string, mimeType: string): Promise<AudioTranscriptionResponse> {
+    return this.request<AudioTranscriptionResponse>('/api/audio/transcribe', {
+      method: 'POST',
+      body: { data_url: dataUrl, mime_type: mimeType },
+      // Transcription blocks on provider STT and base64 handling; the clip's
+      // own length is the only signal for how long that takes.
+      timeoutMs: audioTimeoutMs(dataUrl.length * 0.1)
+    })
+  }
+
+  speak(text: string): Promise<AudioSpeakResponse> {
+    return this.request<AudioSpeakResponse>('/api/audio/speak', {
+      method: 'POST',
+      body: { text },
+      timeoutMs: audioTimeoutMs(text.length * 35)
+    })
   }
 
   analytics(days = 7): Promise<AnalyticsResponse> {

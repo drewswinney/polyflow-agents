@@ -10,7 +10,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.drewswinney.agenthandheld"
+      "bundleIdentifier": "com.drewswinney.agenthandheld",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "package": "com.drewswinney.agenthandheld",
@@ -22,7 +25,10 @@
       },
       "predictiveBackGestureEnabled": false
     },
-    "web": { "output": "static", "favicon": "./assets/images/favicon.png" },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/images/favicon.png"
+    },
     "plugins": [
       "expo-router",
       "expo-secure-store",
@@ -33,8 +39,22 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
+      ],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Hermes Handheld uses the microphone so you can dictate a message to your agent."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#6d28d9"
+        }
       ]
     ],
-    "experiments": { "typedRoutes": true }
+    "experiments": {
+      "typedRoutes": true
+    }
   }
 }

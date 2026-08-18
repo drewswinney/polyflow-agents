@@ -793,10 +793,10 @@ Before the app can connect to `10.0.0.68`:
 | **M1** | Host prep (§11) + pairing/onboarding (§7.8) | Real remote connection over Tailscale | host prep is the owner's; the app side ships in M5's add-agent |
 | **M2** | Sessions list + read-only transcript + search | REST layer, normalisation, agent scoping | **done** |
 | **M3** | Live chat: streaming, tool cards, approvals, cancel, reconnect | The core product | **done** |
-| **M4** | Settings from `/api/config/schema` + capability gating | G2, and the seam holding up | capability gating and the model picker done; schema-driven forms open |
+| **M4** | Settings from `/api/config/schema` + capability gating | G2, and the seam holding up | **done** — the settings form is generated from the server's own schema |
 | **M5** | Activity, logs, agent switcher, add-agent | G6 | **done** — spend/turns, the live event stream, logs with payload detail, tools & integrations, switcher, add-agent |
-| **M6** | Android parity pass + EAS pipeline for both | G5 | both platforms bundle; no EAS pipeline yet |
-| **M7** | Push relay + notification actions | G1 on a phone, properly | open |
+| **M6** | Android parity pass + EAS pipeline for both | G5 | both platforms bundle; `eas.json` carries development / preview / production profiles |
+| **M7** | Push relay + notification actions | G1 on a phone, properly | **blocked on host work** — the app half ships as local notifications; the relay's contract is specified in [`push-relay.md`](push-relay.md) |
 
 **M0 was the gate**, and it held: the vendored client runs outside Electron, with
 two small shims and one correction to how much of it is vendorable (§9.1).

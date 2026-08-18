@@ -40,8 +40,7 @@ export default function SettingsScreen() {
   // A row appears because the backend reports that surface *and* there is a
   // screen behind it. A row that navigates nowhere is worse than an absent one —
   // the design's rule is that what is missing is stated once, never rendered as
-  // something you can press. Cron is the current gap: Hermes reports it, and
-  // §7.10's cron screen is not built, so it stays out until it is.
+  // something you can press.
   const agentRows = [
     {
       key: 'model',
@@ -56,6 +55,20 @@ export default function SettingsScreen() {
       icon: 'plug',
       show: (capabilities?.extras.mcp ?? false) || (capabilities?.extras.skills ?? false),
       go: () => router.push('/tools')
+    },
+    {
+      key: 'cron',
+      label: 'Cron jobs',
+      icon: 'clock',
+      show: capabilities?.extras.cron ?? false,
+      go: () => router.push('/cron')
+    },
+    {
+      key: 'config',
+      label: 'Agent configuration',
+      icon: 'sliders',
+      show: capabilities?.settings.schemaDriven ?? false,
+      go: () => router.push('/config')
     }
   ].filter(row => row.show)
 
@@ -109,6 +122,8 @@ export default function SettingsScreen() {
             This phone
           </Text>
           <Card>
+            <SettingsRow label="Notifications" icon="bell" onPress={() => router.push('/notifications')} />
+            <Divider />
             <SettingsRow label="Logs & events" icon="list" onPress={() => router.push('/logs')} />
           </Card>
         </View>

@@ -1,14 +1,15 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { router } from 'expo-router'
 import { ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import type { McpServerStatus, SkillSummary } from '@/domain'
+import type { ApprovalPolicy, McpServerStatus, SkillSummary } from '@/domain'
 import { useActiveConnection } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { Card, Divider } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { Segmented } from '@/ui/components/Segmented'
 import { Text } from '@/ui/components/Text'
 import { useTheme } from '@/ui/ThemeProvider'
 
@@ -29,8 +30,22 @@ export default function ToolsScreen() {
   const insets = useSafeAreaInsets()
   const agent = useSelectedAgent()
   const { backend } = useActiveConnection()
+  const queryClient = useQueryClient()
 
   const capabilities = backend?.capabilities
+  const policyKey = ['agent', agent.id, 'approval-policy'] as const
+
+  const policy = useQuery({
+    queryKey: policyKey,
+    enabled: Boolean(backend) && (capabilities?.approvals.policy ?? false),
+    queryFn: () => backend!.getApprovalPolicy()
+  })
+
+  const setPolicy = useMutation({
+    mutationFn: (next: ApprovalPolicy) => backend!.setApprovalPolicy(next),
+    // The agent normalises the value it stores, so read back rather than assume.
+    onSettled: () => queryClient.invalidateQueries({ queryKey: policyKey })
+  })
 
   const servers = useQuery({
     queryKey: ['agent', agent.id, 'mcp'],
@@ -91,9 +106,36 @@ export default function ToolsScreen() {
           </View>
         ) : null}
 
-        {/* Approval policy is one decision and gets one control, but the config
-            key behind it is not yet confirmed against the API — see §7.10. It
-            is left out rather than wired to a guess. */}
+        {capabilities?.approvals.policy ? (
+          <View style={styles.group}>
+            <Text variant="sectionHeader" style={styles.groupLabel}>
+              Approval policy
+            </Text>
+            <Card style={styles.policyCard}>
+              <Text variant="rowLabel">Ask me before</Text>
+              {/* One decision, one control. Three independent switches would let
+                  the user express states the backend's `approvals.mode` enum —
+                  off / smart / manual — does not have. */}
+              <Segmented<ApprovalPolicy>
+                label="Ask me before"
+                value={policy.data ?? 'destructive'}
+                options={[
+                  { value: 'nothing', label: 'Nothing' },
+                  { value: 'destructive', label: 'Destructive' },
+                  { value: 'every_tool', label: 'Every tool' }
+                ]}
+                onChange={next => setPolicy.mutate(next)}
+              />
+              <Text variant="secondary">
+                {policy.data === 'nothing'
+                  ? 'The agent runs everything without stopping to ask.'
+                  : policy.data === 'every_tool'
+                    ? 'Every tool call waits for you, including reads.'
+                    : 'The agent stops only for commands it judges destructive.'}
+              </Text>
+            </Card>
+          </View>
+        ) : null}
       </ScrollView>
     </View>
   )
@@ -151,5 +193,6 @@ const styles = StyleSheet.create({
   skillRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 8 },
   tile: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   rowBody: { flex: 1, minWidth: 0, gap: 2 },
-  empty: { padding: 16 }
+  empty: { padding: 16 },
+  policyCard: { padding: 14, gap: 10 }
 })

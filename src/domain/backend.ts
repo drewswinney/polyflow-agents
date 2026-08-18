@@ -9,8 +9,11 @@
 import type { Capabilities } from './capabilities'
 import type {
   AgentError,
+  ApprovalPolicy,
   ClarifyRequest,
+  ConfigField,
   ContentBlock,
+  CronJobSummary,
   EventRecord,
   McpServerStatus,
   ModelOption,
@@ -110,6 +113,34 @@ export interface AgentBackend {
   listModels(): Promise<ModelOption[]>
   /** Requires `capabilities.settings.model`. */
   setModel(option: ModelOption): Promise<void>
+
+  /** Requires `capabilities.approvals.policy`. */
+  getApprovalPolicy(): Promise<ApprovalPolicy>
+  /** Requires `capabilities.approvals.policy`. */
+  setApprovalPolicy(policy: ApprovalPolicy): Promise<void>
+
+  /** Requires `capabilities.settings.schemaDriven`. Fields with their current values. */
+  listConfigFields(): Promise<ConfigField[]>
+  /** Requires `capabilities.settings.schemaDriven`. */
+  setConfigValue(key: string, value: string): Promise<void>
+
+  /** Requires `capabilities.extras.cron`. */
+  listCronJobs(): Promise<CronJobSummary[]>
+  /** Requires `capabilities.extras.cron`. */
+  setCronJobEnabled(id: string, enabled: boolean): Promise<void>
+  /** Requires `capabilities.extras.cron`. Runs the job now. */
+  triggerCronJob(id: string): Promise<void>
+
+  /**
+   * Requires `capabilities.media.audioIn`. Takes a base64 data URL.
+   *
+   * Push-to-talk, not a duplex channel: Hermes's audio surface is three
+   * request/response REST endpoints, so speech is recorded, sent, and comes
+   * back as text (§2.6, §7.9).
+   */
+  transcribe(dataUrl: string, mimeType: string): Promise<string>
+  /** Requires `capabilities.media.audioOut`. Returns audio as a data URL. */
+  speak(text: string): Promise<{ dataUrl: string; mimeType: string }>
 }
 
 export interface SessionSearchHit {

@@ -16,6 +16,18 @@ export function relativeTime(at: number, now = Date.now()): string {
   return new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+/** How long until a future moment: `in 6m`, `in 3h`, `in 2d`. */
+export function untilTime(at: number, now = Date.now()): string {
+  const delta = at - now
+
+  if (delta <= 0) return 'due'
+  if (delta < MINUTE) return 'in under a minute'
+  if (delta < HOUR) return `in ${Math.floor(delta / MINUTE)}m`
+  if (delta < DAY) return `in ${Math.floor(delta / HOUR)}h`
+
+  return `in ${Math.floor(delta / DAY)}d`
+}
+
 export function clockTime(at: number): string {
   const date = new Date(at)
 

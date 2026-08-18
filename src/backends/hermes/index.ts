@@ -18,10 +18,13 @@ import {
 
 import {
   type AgentBackend,
+  type ApprovalPolicy,
   type Capabilities,
+  type ConfigField,
   type ConnectionState,
   createObservable,
   type ContentBlock,
+  type CronJobSummary,
   type EventRecord,
   type McpServerStatus,
   type ModelOption,
@@ -380,6 +383,128 @@ export class HermesBackend implements AgentBackend {
       body: { scope: 'main', provider: option.provider, model: option.id }
     })
   }
+
+  async getApprovalPolicy(): Promise<ApprovalPolicy> {
+    const result = await this.gateway.request<{ value?: string }>('config.get', { key: APPROVAL_MODE_KEY })
+
+    return POLICY_FROM_MODE[String(result?.value ?? '')] ?? 'destructive'
+  }
+
+  async setApprovalPolicy(policy: ApprovalPolicy): Promise<void> {
+    await this.gateway.request('config.set', { key: APPROVAL_MODE_KEY, value: POLICY_TO_MODE[policy] })
+  }
+
+  /**
+   * Settings, rendered from the schema the server publishes.
+   *
+   * The schema describes the fields; `/api/config` holds the values. Neither is
+   * useful alone, so they are read together and zipped here — a field the
+   * schema declares but the config has not set yet shows as empty rather than
+   * being dropped.
+   */
+  async listConfigFields(): Promise<ConfigField[]> {
+    const [schema, record] = await Promise.all([this.rest.configSchema(), this.rest.configRecord()])
+
+    const order = schema.category_order ?? []
+
+    return Object.entries(schema.fields)
+      .map(([key, field]) => ({
+        key,
+        category: field.category ?? 'General',
+        description: field.description ?? '',
+        type: field.type ?? 'string',
+        options: (field.options ?? []).map(option => String(option)),
+        value: record[key] === undefined || record[key] === null ? '' : String(record[key])
+      }))
+      .sort((a, b) => {
+        const byCategory = categoryRank(a.category, order) - categoryRank(b.category, order)
+
+        return byCategory !== 0 ? byCategory : a.key.localeCompare(b.key)
+      })
+  }
+
+  /**
+   * Written through the gateway's per-key `config.set`, not `PUT /api/config`.
+   *
+   * The REST route replaces the whole config record, so writing one field
+   * through it means read-modify-write — and any setting changed elsewhere
+   * between the read and the write is silently reverted. Per-key avoids that
+   * entirely. Values are strings because that is what the RPC takes.
+   */
+  async setConfigValue(key: string, value: string): Promise<void> {
+    await this.gateway.request('config.set', { key, value })
+  }
+
+  async listCronJobs(): Promise<CronJobSummary[]> {
+    const jobs = await this.rest.cronJobs()
+
+    return jobs.map(job => ({
+      id: job.id,
+      name: (job.name ?? '').trim() || job.id,
+      schedule: job.schedule_display ?? job.schedule?.display ?? job.schedule?.expr ?? 'unscheduled',
+      enabled: job.enabled,
+      nextRunAt: parseTimestamp(job.next_run_at),
+      lastRunAt: parseTimestamp(job.last_run_at),
+      lastError: job.last_error ?? null,
+      model: job.model ?? null
+    }))
+  }
+
+  async setCronJobEnabled(id: string, enabled: boolean): Promise<void> {
+    await (enabled ? this.rest.cronResume(id) : this.rest.cronPause(id))
+  }
+
+  async triggerCronJob(id: string): Promise<void> {
+    await this.rest.cronTrigger(id)
+  }
+
+  async transcribe(dataUrl: string, mimeType: string): Promise<string> {
+    const result = await this.rest.transcribe(dataUrl, mimeType)
+
+    if (!result.ok) throw new Error('The agent could not transcribe that clip.')
+
+    return result.transcript
+  }
+
+  async speak(text: string): Promise<{ dataUrl: string; mimeType: string }> {
+    const result = await this.rest.speak(text)
+
+    if (!result.ok) throw new Error('The agent could not synthesise that text.')
+
+    return { dataUrl: result.data_url, mimeType: result.mime_type }
+  }
+}
+
+/** Hermes's own key and vocabulary for the approval policy. */
+const APPROVAL_MODE_KEY = 'approvals.mode'
+
+const POLICY_TO_MODE: Record<ApprovalPolicy, string> = {
+  nothing: 'off',
+  destructive: 'smart',
+  every_tool: 'manual'
+}
+
+const POLICY_FROM_MODE: Record<string, ApprovalPolicy> = {
+  off: 'nothing',
+  smart: 'destructive',
+  manual: 'every_tool'
+}
+
+function categoryRank(category: string, order: string[]): number {
+  const index = order.indexOf(category)
+
+  // Categories the server did not rank sort after the ones it did, rather than
+  // jumping to the front on a -1.
+  return index === -1 ? order.length : index
+}
+
+/** Cron timestamps come back as ISO strings, not epochs. */
+function parseTimestamp(value: string | null | undefined): number | null {
+  if (!value) return null
+
+  const parsed = Date.parse(value)
+
+  return Number.isNaN(parsed) ? null : parsed
 }
 
 const LOG_LINE = /^(?<time>[\d-]{10}[ T][\d:]{8})\S*\s+(?<level>[A-Z]+)\s+(?<rest>.*)$/

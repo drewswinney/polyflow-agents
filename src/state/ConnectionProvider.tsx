@@ -4,6 +4,7 @@ import type { Agent } from '@/domain'
 
 import { type Connection, useConnection } from './connection'
 import { useEventLogTap } from './event-log'
+import { useNotificationTap } from './notification-tap'
 
 const ConnectionContext = createContext<Connection | null>(null)
 
@@ -18,6 +19,9 @@ export function ConnectionProvider({ agent, children }: { agent: Agent; children
   // elsewhere — those screens should open onto history, not start filling as
   // you watch.
   useEventLogTap(connection.backend, agent.id)
+
+  // Only fires while the app is backgrounded — see the tap's own comment.
+  useNotificationTap(connection.backend, agent)
 
   return <ConnectionContext.Provider value={connection}>{children}</ConnectionContext.Provider>
 }

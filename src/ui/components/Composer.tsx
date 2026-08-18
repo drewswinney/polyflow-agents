@@ -19,13 +19,17 @@ export function Composer({
   offline,
   queued,
   onSend,
-  onStop
+  onStop,
+  onVoice
 }: {
   streaming: boolean
   offline: boolean
   queued: number
   onSend: (text: string) => void
   onStop: () => void
+  /** Omitted when the agent reports no audio input — the mic is then absent,
+   *  not disabled (§4.1). */
+  onVoice?: () => void
 }) {
   const theme = useTheme()
   const gradient = useGradient()
@@ -80,10 +84,15 @@ export function Composer({
             style={[styles.input, { color: theme.color.gray800, fontFamily: theme.font.body }]}
             onSubmitEditing={submit}
           />
-          {!typing ? (
-            <View style={[styles.mic, { backgroundColor: theme.color.secondaryTint }]}>
+          {!typing && onVoice ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Talk to the agent"
+              onPress={onVoice}
+              style={[styles.mic, { backgroundColor: theme.color.secondaryTint }]}
+            >
               <Icon name="microphone" size={14} color={theme.color.secondary} />
-            </View>
+            </Pressable>
           ) : null}
         </View>
 

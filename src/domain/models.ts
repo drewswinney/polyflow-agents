@@ -186,6 +186,8 @@ export interface EventRecord {
   name: string
   detail: string
   status: 'ok' | 'error' | 'info'
+  /** The session that raised it, when there was one. Lets a notification open it. */
+  sessionId?: SessionId
   /** Full payload, pretty-printed on expansion. */
   payload?: unknown
 }
@@ -239,4 +241,44 @@ export interface ModelOption {
   id: string
   provider: string
   selected: boolean
+}
+
+/**
+ * The approval policy, as one decision with one control (§7.10).
+ *
+ * These map onto Hermes's `approvals.mode` config key — `off` / `smart` /
+ * `manual` — which is why there are exactly three: the design's segmented
+ * control and the backend's enum happen to agree, and inventing a fourth
+ * option would have nothing to write to.
+ */
+export type ApprovalPolicy = 'nothing' | 'destructive' | 'every_tool'
+
+/**
+ * One setting, as the *server* describes it (§2.3).
+ *
+ * This is the highest-leverage decision in the app: the Settings UI renders
+ * from the schema the backend publishes rather than hardcoding a form per
+ * setting, so the app does not need a release every time Hermes adds a toggle.
+ */
+export interface ConfigField {
+  key: string
+  category: string
+  description: string
+  type: 'boolean' | 'list' | 'number' | 'select' | 'string' | 'text'
+  /** Only meaningful for `select`. */
+  options: string[]
+  /** Current value, always as a string — that is how `config.set` takes it. */
+  value: string
+}
+
+export interface CronJobSummary {
+  id: string
+  name: string
+  /** Human-readable schedule, e.g. `every day at 03:15`. */
+  schedule: string
+  enabled: boolean
+  nextRunAt: number | null
+  lastRunAt: number | null
+  lastError: string | null
+  model: string | null
 }

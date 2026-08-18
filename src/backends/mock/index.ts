@@ -9,10 +9,13 @@
 
 import {
   type AgentBackend,
+  type ApprovalPolicy,
   type Capabilities,
+  type ConfigField,
   type ConnectionState,
   createObservable,
   type ContentBlock,
+  type CronJobSummary,
   type EventRecord,
   type McpServerStatus,
   type ModelOption,
@@ -32,11 +35,13 @@ import {
 
 export const MOCK_CAPABILITIES: Capabilities = {
   sessions: { search: true, rename: true, pin: true },
-  settings: { schemaDriven: false, model: true, providers: false },
-  extras: { cron: false, skills: true, mcp: true, profiles: false },
+  settings: { schemaDriven: true, model: true, providers: false },
+  extras: { cron: true, skills: true, mcp: true, profiles: false },
   approvals: { requests: true, policy: true },
   activity: { spend: true, events: true },
-  media: { images: false, audioIn: false, audioOut: false }
+  // Push-to-talk is exercisable against the mock; speech synthesis is not, and
+  // says so rather than returning silence.
+  media: { images: false, audioIn: true, audioOut: false }
 }
 
 const MINUTE = 60_000
@@ -367,6 +372,132 @@ export class MockBackend implements AgentBackend {
 
   async setModel(option: ModelOption): Promise<void> {
     this.models = this.models.map(model => ({ ...model, selected: model.id === option.id }))
+  }
+
+  private approvalPolicy: ApprovalPolicy = 'destructive'
+  private config: ConfigField[] = [
+    {
+      key: 'agent.reasoning_effort',
+      category: 'Agent',
+      description: 'How much the agent thinks before answering.',
+      type: 'select',
+      options: ['low', 'medium', 'high'],
+      value: 'medium'
+    },
+    {
+      key: 'display.timestamps',
+      category: 'Display',
+      description: 'Show a timestamp on every message.',
+      type: 'boolean',
+      options: [],
+      value: 'false'
+    },
+    {
+      key: 'display.personality',
+      category: 'Display',
+      description: 'Which personality the agent answers in.',
+      type: 'string',
+      options: [],
+      value: 'default'
+    },
+    {
+      key: 'sessions.auto_archive_days',
+      category: 'Sessions',
+      description: 'Archive sessions untouched for this many days.',
+      type: 'number',
+      options: [],
+      value: '30'
+    }
+  ]
+
+  private cronJobs: CronJobSummary[] = [
+    {
+      id: 'nightly-backup',
+      name: 'nightly backup',
+      schedule: 'every day at 03:15',
+      enabled: true,
+      nextRunAt: Date.now() + 6 * 60 * MINUTE,
+      lastRunAt: Date.now() - 18 * 60 * MINUTE,
+      lastError: null,
+      model: 'haiku-4.5'
+    },
+    {
+      id: 'zfs-scrub',
+      name: 'zfs scrub',
+      schedule: 'first Sunday of the month',
+      enabled: true,
+      nextRunAt: Date.now() + 9 * 24 * 60 * MINUTE,
+      lastRunAt: Date.now() - 3 * 24 * 60 * MINUTE,
+      lastError: null,
+      model: null
+    },
+    {
+      id: 'digest',
+      name: 'morning digest',
+      schedule: 'weekdays at 07:00',
+      enabled: false,
+      nextRunAt: null,
+      lastRunAt: Date.now() - 5 * 24 * 60 * MINUTE,
+      lastError: 'home-assistant MCP unreachable',
+      model: 'haiku-4.5'
+    }
+  ]
+
+  async getApprovalPolicy(): Promise<ApprovalPolicy> {
+    await tick(60)
+
+    return this.approvalPolicy
+  }
+
+  async setApprovalPolicy(policy: ApprovalPolicy): Promise<void> {
+    this.approvalPolicy = policy
+  }
+
+  async listConfigFields(): Promise<ConfigField[]> {
+    await tick(110)
+
+    return this.config
+  }
+
+  async setConfigValue(key: string, value: string): Promise<void> {
+    this.config = this.config.map(field => (field.key === key ? { ...field, value } : field))
+  }
+
+  async listCronJobs(): Promise<CronJobSummary[]> {
+    await tick(100)
+
+    return this.cronJobs
+  }
+
+  async setCronJobEnabled(id: string, enabled: boolean): Promise<void> {
+    this.cronJobs = this.cronJobs.map(job => (job.id === id ? { ...job, enabled } : job))
+  }
+
+  async triggerCronJob(id: string): Promise<void> {
+    const job = this.cronJobs.find(row => row.id === id)
+
+    for (const sink of this.eventSinks) {
+      sink({
+        id: `cron-${Date.now()}`,
+        at: Date.now(),
+        name: 'cron.fired',
+        detail: `${job?.name ?? id} · started`,
+        status: 'ok',
+        payload: { job: id, triggered: 'manually' }
+      })
+    }
+  }
+
+  async transcribe(dataUrl: string, _mimeType: string): Promise<string> {
+    await tick(700)
+
+    // Clip length stands in for content: the mock cannot hear, so it answers
+    // with something plausible rather than pretending to have understood.
+    return dataUrl.length > 1000 ? 'Check the pool status and tell me if the scrub finished.' : 'Status?'
+  }
+
+  async speak(_text: string): Promise<{ dataUrl: string; mimeType: string }> {
+    throw new Error('The mock agent has no voice.')
   }
 
   private emit(id: SessionId, update: SessionUpdate): void {

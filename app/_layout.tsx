@@ -69,6 +69,10 @@ export default function RootLayout() {
               <Stack.Screen name="logs" />
               <Stack.Screen name="tools" />
               <Stack.Screen name="model" />
+              <Stack.Screen name="cron" />
+              <Stack.Screen name="config" />
+              <Stack.Screen name="notifications" />
+              <Stack.Screen name="voice/[id]" />
               <Stack.Screen name="agents/new" options={{ presentation: 'modal' }} />
             </Stack>
           </ConnectionProvider>
