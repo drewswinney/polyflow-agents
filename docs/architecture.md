@@ -3,8 +3,11 @@
 A cross-platform (iOS + Android) mobile client for a [Hermes](https://github.com/) agent,
 designed so the agent harness behind it can be swapped later.
 
-**Status:** design draft. No implementation yet.
-**Decisions locked:** React Native + Expo · Tailscale transport · both platforms from day one.
+**Status:** design draft, reconciled against the visual design handoff.
+**Decisions locked:** React Native + Expo · Tailscale transport · both platforms from
+day one · multi-agent, one active at a time.
+
+> Section numbers §1–§7 are referenced by `docs/design/github.md`. Keep them stable.
 
 ---
 
@@ -15,14 +18,16 @@ designed so the agent harness behind it can be swapped later.
 | G1 | Chat with the agent across multiple, persistent sessions | List, resume, search, rename, pin, delete |
 | G2 | Manage the agent from Settings | Model, providers, skills, MCP servers, cron, profiles |
 | G3 | Connect to the agent host remotely | Tailscale; SSH retained for admin only |
-| G4 | Allow the harness to be swapped later | Hermes today; another ACP-speaking agent tomorrow |
+| G4 | Allow the harness to be swapped later | Hermes today; an OpenAI-compatible agent as the second tier |
 | G5 | One codebase, two platforms | No iOS-only or Android-only feature paths |
+| G6 | Manage several agents, one active at a time | The whole app re-scopes on switch; nothing merges across agents |
 
 ### Non-goals (v1)
 
 - Hosting the agent on-device. The phone is a **client**; the agent runs on the host.
 - Replacing the Hermes desktop app. This targets phone-shaped, on-the-go use.
-- Local inference or offline agent turns. Offline = read cached transcripts only.
+- Local inference or offline agent turns. Offline = read cached transcripts, queue sends.
+- A combined cross-agent view. No merged approval queue, no merged spend (§7.13).
 
 ---
 
@@ -61,7 +66,7 @@ Three pieces in the Hermes tree, all free of React/JSX:
 
 This is the core argument for the TypeScript stack: in Swift or Kotlin we would
 hand-port ~2,800 lines of client code, then re-port on every Hermes release.
-Hermes is actively developed. Here we vendor and diff instead. See §8.
+Hermes is actively developed. Here we vendor and diff instead. See §9.
 
 ### 2.3 The REST surface (abridged)
 
@@ -123,20 +128,34 @@ Three consequences for the UI:
    `sudo.request`, `secret.request` all mean "the turn is halted until you
    answer." On a phone this is the *defining* interaction — a laptop user is
    already looking at the screen; a phone user is not. This drives the
-   notification design (§9.2).
+   notification design (§10.2).
 3. **`background.complete`** exists, meaning turns can finish while the app is
    backgrounded. This is what makes push notifications worth building.
 
 ### 2.5 Current host state
 
-Observed on the `hermes` host (`10.0.0.68`, Debian 13, key auth via `~/.ssh/hermes`):
+Observed on the `hermes` host (`10.0.0.68`, Debian 13 on Proxmox, key auth via
+`~/.ssh/hermes`):
 
 - Hermes installed at `~/.local/bin/hermes`, source tree at `~/.hermes/hermes-agent`
 - `hermes serve` **not currently running** — only port 22 is listening
 - Tailscale **not installed**
 - A messaging gateway is configured (`gateway.pid`, `channel_directory.json`, Discord threads)
 
-Both gaps are addressed in §10.
+Both gaps are addressed in §12.
+
+### 2.6 What Hermes does *not* provide
+
+The visual design (`docs/design/`) specifies four things the API cannot back
+today. Each was checked against the Hermes source, not assumed. These are the
+main reason the design and this document disagree anywhere.
+
+| Design element | Reality | Resolution |
+|---|---|---|
+| Voice mode: `realtime · 180ms round trip`, barge-in | Audio is three request/response REST endpoints — `/api/audio/transcribe`, `/api/audio/speak`, `/api/audio/elevenlabs/voices`. No duplex channel exists | **Descoped to push-to-talk** (§7.9) |
+| Activity: CPU / memory / disk tiles | No `/api/monitoring`, `/metrics`, `/system` or `/host` endpoint. `hermes monitoring` is OTLP export to an operator endpoint, explicitly "content-free by construction" | **Tiles dropped**; ship what is backed (§7.5) |
+| Approval countdown, `expires 4:52` | `expires_at` appears only on OAuth types (`OAuthProviderStatus`, `OAuthPollResponse`). Approval requests carry no TTL | **No countdown** until the API grows one (§7.6) |
+| QR pairing, `hermes pair` | `hermes pairing` is `list / approve / revoke / clear-pending`. No `pair` subcommand, no token issuance, no QR flow | **Manual host + token only** (§7.8) |
 
 ---
 
@@ -154,12 +173,12 @@ Four layers, strictly one-directional. The rule that makes G4 achievable is that
 │                         Zustand (local/ephemeral)         │
 ├───────────────────────────────────────────────────────────┤
 │  Domain    ★            AgentBackend interface            │
-│                         Session, Message, ToolCall, ...   │
+│                         Agent, Session, Message, ToolCall │
 │                         ← the harness-swap seam           │
 ├───────────────────────────────────────────────────────────┤
-│  Backends               HermesBackend  (REST + WS)        │
-│                         AcpBackend     (future)           │
-│                         MockBackend    (tests, demos)     │
+│  Backends               HermesBackend    (REST + WS)      │
+│                         OpenAiCompatBackend               │
+│                         MockBackend      (tests, demos)   │
 ├───────────────────────────────────────────────────────────┤
 │  Vendored               @hermes/shared, hermes types      │
 └───────────────────────────────────────────────────────────┘
@@ -171,10 +190,19 @@ Four layers, strictly one-directional. The rule that makes G4 achievable is that
 
 ## 4. The `AgentBackend` seam
 
-Modelled on **ACP** (Agent Client Protocol) vocabulary rather than Hermes's REST
-shapes. ACP is what Zed and VS Code use to drive Claude Code, Gemini CLI, and
-others — and Hermes already speaks it via `hermes acp`. Designing to ACP's
-semantics means a future `AcpBackend` is a genuine drop-in, not a rewrite.
+Two backends ship in v1, matching the two agent kinds the design offers when
+adding an agent (§7.14):
+
+- **`hermes`** — full support: sessions, streaming, tools, approvals, skills, cron, MCP
+- **`other`** — any agent that speaks **OpenAI-compatible streaming**; deliberately
+  reduced to model and tools
+
+An earlier draft built this seam on **ACP** (Agent Client Protocol) vocabulary.
+That was over-engineering for v1: ACP is a richer protocol than the second tier
+actually needs, and OpenAI-compatible streaming is what an arbitrary agent is
+overwhelmingly likely to already speak. ACP remains a natural *third* backend —
+`hermes acp` exists, and the interface below is close enough to ACP's session
+model that adding it later is additive.
 
 ```ts
 export interface AgentBackend {
@@ -218,6 +246,8 @@ type SessionUpdate =
   | { kind: 'turn_complete';         stopReason: StopReason }
   | { kind: 'usage';                 usage: Usage }
   | { kind: 'error';                 error: AgentError }
+
+type ToolStatus = 'pending' | 'running' | 'ok' | 'error' | 'unknown'
 ```
 
 `HermesBackend` maps Hermes events onto this (`message.delta` →
@@ -225,23 +255,32 @@ type SessionUpdate =
 + `tool_call_update`, and so on). The mapping table lives in one file and is the
 only place that knows Hermes's event names.
 
+`unknown` is a first-class `ToolStatus`, not an error: when a socket drops
+mid-turn the app must not guess whether a tool completed (§5.4, §7.16).
+
 ### 4.1 Capability negotiation
 
-Not every harness has cron jobs, skills, or MCP servers. Rather than assume, the
-backend declares what it supports and the UI hides what isn't there:
+Not every harness has cron jobs, skills or MCP servers. The backend declares what
+it supports and the UI omits what isn't there. The design draws this explicitly —
+a non-Hermes agent's Settings lists what it *doesn't* report as chips, and
+Activity explains the absence in a card rather than rendering blank tiles.
 
 ```ts
 interface Capabilities {
   sessions: { search: boolean; rename: boolean; pin: boolean }
   settings: { schemaDriven: boolean; model: boolean; providers: boolean }
   extras:   { cron: boolean; skills: boolean; mcp: boolean; profiles: boolean }
+  approvals:{ requests: boolean; policy: boolean }
+  activity: { spend: boolean; events: boolean }
   media:    { images: boolean; audioIn: boolean; audioOut: boolean }
 }
 ```
 
-`HermesBackend` reports nearly everything true. A minimal `AcpBackend` reports
-sessions + prompt only, and Settings degrades to "connection + model" — no dead
-buttons, no crashes.
+`HermesBackend` reports nearly everything true. `OpenAiCompatBackend` reports
+sessions plus prompt and little else. The governing rule, taken from the design:
+
+> Absent capabilities are stated once, never rendered as blank tiles — and never
+> shown disabled.
 
 ### 4.2 Anti-goals for this layer
 
@@ -251,7 +290,7 @@ buttons, no crashes.
 
 ---
 
-## 5. Transport & auth
+## 5. Agents, transport & auth
 
 ### 5.1 Why Tailscale
 
@@ -273,7 +312,25 @@ Tailscale removes that entire failure class for the cost of one install.
 SSH stays in the picture for **host administration** (starting `hermes serve`,
 reading logs), not as the app's data path.
 
-### 5.2 Connection model
+### 5.2 The Agent is the unit
+
+**Agent** is the single user-facing noun. It owns the backend kind, the
+connection and the profile, so the harness is a *property* of an agent rather
+than a concept the user ever meets.
+
+```ts
+interface Agent {
+  id: string
+  displayName: string           // "home hermes", "garage pi"
+  kind: 'hermes' | 'other'      // never shown in UI as a label
+  icon: string                  // one distinct glyph per agent
+  host: string                  // hermes.tailnet.ts.net:9119
+  authMode: 'token' | 'oauth'
+  profile?: string              // Hermes multi-profile support
+  connection: 'connected' | 'idle' | 'offline'
+  capabilities: Capabilities
+}
+```
 
 ```
 Phone (Tailscale)  ──── WSS/HTTPS ────►  hermes host (Tailscale)
@@ -281,21 +338,19 @@ Phone (Tailscale)  ──── WSS/HTTPS ────►  hermes host (Tailscal
                                           bound to tailnet addr :9119
 ```
 
-A **Connection** is the user-configurable unit, stored encrypted on-device:
+Three rules follow, and all three are drawn in the design:
 
-```ts
-interface Connection {
-  id: string
-  label: string              // "home hermes"
-  baseUrl: string            // https://hermes.tailnet.ts.net:9119
-  authMode: 'token' | 'oauth'
-  profile?: string           // Hermes multi-profile support
-}
-```
+1. **Sessions are agent-scoped.** Session IDs are only unique within a backend, so
+   the sessions list, search, activity and settings all filter by
+   `selectedAgentId`. This is the part that is genuinely painful to retrofit.
+2. **One live socket at a time.** Holding a socket per agent costs battery and
+   loses to background limits anyway. Connect lazily on switch. The consequence:
+   background completion for *non-selected* agents can only arrive by push, which
+   is why §10.2 picks the server-side relay.
+3. **Nothing merges across agents.** No combined approval queue, no combined spend.
 
-Multiple connections are supported from day one — it costs little now and is
-painful to retrofit. Secrets go in `expo-secure-store` (Keychain / Android
-Keystore), never in AsyncStorage or Zustand-persisted state.
+Secrets go in `expo-secure-store` (Keychain / Android Keystore), never in
+AsyncStorage or Zustand-persisted state.
 
 ### 5.3 Auth flow
 
@@ -312,9 +367,10 @@ A phone that wakes from background after an hour has a stale everything; the
 reconnect path must be mint-then-dial, in that order. `resolveGatewayWsUrl()` in
 `@hermes/shared` already implements exactly this — another argument for vendoring.
 
-Device enrolment uses `hermes pairing`: the app shows a pairing code, the user
-approves it on the host (`hermes pairing approve`), and revocation is
-`hermes pairing revoke`. This gives a real "lost my phone" story.
+Device enrolment uses `hermes pairing`: the user runs `hermes pairing approve` on
+the host, and `hermes pairing revoke` gives a real "lost my phone" story. Note
+that there is **no QR flow and no token-issuance command** (§2.6) — enrolment is
+host + token, typed (§7.8).
 
 ### 5.4 Reconnect
 
@@ -327,6 +383,15 @@ rather than reinventing, and add mobile-specific triggers:
 - On reconnect: re-fetch the active session transcript to close any gap in the
   delta stream. **Never** assume the stream resumes losslessly.
 
+The design specifies the user-visible half of this, and it is better than a bare
+retry. Session state is authoritative on the agent; the app is a reconnecting
+client that replays from the last event it saw:
+
+- Outgoing messages **queue in an outbox** and send on reconnect
+- The transcript keeps the truncated sentence and marks a **stream-cut point**
+- In-flight tool calls become `unknown` — the app does not guess the outcome
+- The agent keeps working on the VM regardless; the banner says so
+
 ---
 
 ## 6. Project structure
@@ -336,50 +401,87 @@ agent-handheld/
 ├── app/                        # expo-router routes
 │   ├── (tabs)/
 │   │   ├── sessions.tsx
-│   │   ├── chat/[id].tsx
+│   │   ├── activity.tsx
 │   │   └── settings/
+│   ├── chat/[id].tsx
 │   └── onboarding/
 ├── src/
-│   ├── domain/                 ★ AgentBackend, models, capabilities
+│   ├── domain/                 ★ AgentBackend, Agent, models, capabilities
 │   ├── backends/
 │   │   ├── hermes/             REST client, WS client, event mapping
-│   │   ├── acp/                (future)
+│   │   ├── openai-compat/
 │   │   └── mock/
 │   ├── state/                  TanStack Query hooks, Zustand stores
-│   ├── ui/                     components, theme
+│   ├── ui/                     components, theme tokens
 │   └── platform/               notifications, secure storage, haptics
-├── vendor/hermes/              vendored upstream TS (see §8)
-└── docs/architecture.md        this file
+├── vendor/hermes/              vendored upstream TS (see §9)
+└── docs/
+    ├── architecture.md         this file
+    └── design/                 visual handoff (README, canvas, screen map)
 ```
 
 The directory should be renamed from `agent-handheld-ios` → `agent-handheld`,
-since iOS is no longer the whole story.
+matching `docs/design/github.md`, which already records the repo as
+`drewswinney/agent-handheld`. That remote does not exist yet.
 
 ---
 
 ## 7. Screens
 
 Identical information architecture on both platforms; only the chrome differs.
+`docs/design/README.md` is the authoritative visual spec — exact hex values, type
+sizes, spacing and touch targets. This section covers **behaviour and API
+backing**; it deliberately does not duplicate the tokens.
+
+Three tabs: **Sessions · Activity · Settings**. Everything else is a sub-screen
+reached by a back chevron.
+
+| # | Screen | Kind | Backed by |
+|---|---|---|---|
+| 7.1 | Sessions | tab | `/api/sessions` |
+| 7.2 | Chat | sub | `/api/ws`, `prompt.submit`, `process.kill` |
+| 7.3 | *(streaming performance)* | — | — |
+| 7.4 | Settings | tab | `/api/config/schema`, `/api/model/*` |
+| 7.5 | Activity | tab | `/api/analytics/usage`, `/api/logs` |
+| 7.6 | Approval sheet | modal | `approval.request` → `approval.respond` |
+| 7.7 | Search | in-place | `/api/sessions/search` |
+| 7.8 | Pairing / onboarding | sub | `hermes pairing approve` (manual) |
+| 7.9 | Voice (push-to-talk) | sub | `/api/audio/transcribe`, `/api/audio/speak` |
+| 7.10 | Tools & integrations | sub | `/api/mcp/servers`, `/api/skills` |
+| 7.11 | Model & behavior | sub | `/api/model/*`, `/api/memory` |
+| 7.12 | Notifications | sub | device-local + push relay (§10.2) |
+| 7.13 | Agent switcher | popover | local state |
+| 7.14 | Add an agent | sub | local + reachability probe |
+| 7.15 | Logs & events | sub | `/api/logs` |
+| 7.16 | Connection lost | state | — |
 
 ### 7.1 Sessions
 
-List with title, last-message preview, relative time, model badge, pinned state.
-Backed by `/api/sessions`, search via `/api/sessions/search` (server-side — the
-store is SQLite with FTS5, so don't filter client-side). Swipe actions for
-pin/delete/rename. Pull to refresh. Grouped by recency.
+List with title, last-message preview, relative time, model badge, pinned state,
+grouped by recency. Backed by `/api/sessions`, **filtered by `selectedAgentId`**.
+Search via `/api/sessions/search` (server-side — the store is SQLite with FTS5,
+so don't filter client-side). Swipe actions for pin/delete/rename.
+
+A session blocked on the user surfaces a status strip on its card ("Waiting on
+your answer"). The design pairs that with a countdown, which has no backing field
+(§2.6) — ship the strip without the timer.
+
+An **empty state** for a freshly paired agent offers three concrete, agent-specific
+starter prompts rather than a bare "no sessions" message.
 
 ### 7.2 Chat
 
 The core screen and the one that earns the app.
 
-- Streaming assistant text with token-level updates
+- Streaming assistant text with token-level updates and a block cursor
 - Collapsed **thinking/reasoning** blocks, expandable
-- **Tool calls as first-class cards** — name, status, collapsible output. Do not
-  render tool traffic as chat text; on a phone it drowns the conversation
-- **Inline approval prompts** for `approval.request` / `sudo.request` /
-  `secret.request` — big, unmissable, one-tap Allow/Deny
-- Composer: text, image attach, voice input via `/api/audio/transcribe`
-- Cancel button while a turn is running (`process.kill`)
+- **Tool calls as first-class cards** — name, argument summary, duration, status,
+  collapsible output. Do not render tool traffic as chat text; on a phone it
+  drowns the conversation
+- Composer: text, attachment, push-to-talk mic (§7.9)
+- One 48px action slot with three states — disabled → send → **stop**. Cancel
+  (`process.kill`) lives in the composer while streaming, *not* in the overflow menu
+- Overflow menu: rename session, switch model, view raw events
 - Usage/cost readout from `session.usage`
 
 ### 7.3 Streaming performance
@@ -399,16 +501,141 @@ behind the same interface — contained, not architectural.
 
 ### 7.4 Settings
 
-Sections: **Connection**, **Model & Providers**, **Skills**, **MCP Servers**,
-**Cron**, **Profiles**, **Ops** (doctor, logs, usage), **About**.
+Sections: **Connection**, **Agent** (model & providers, skills, MCP servers, cron),
+**This phone** (notifications, logs & usage), **About**.
 
-Model/provider and most config render from `/api/config/schema` (§2.3). Sections
-are gated on `capabilities` (§4.1). Destructive actions (revoke pairing, reset
-memory, delete session) require explicit confirmation.
+Rendered from `/api/config/schema` (§2.3) and gated on `capabilities` (§4.1). A
+non-Hermes agent shows only Model and Tools, plus a card naming what it doesn't
+report and a destructive "Remove this agent" row. Destructive actions require
+explicit confirmation.
+
+### 7.5 Activity
+
+Spend today against cap (`/api/analytics/usage`), uptime and round-trip latency
+(measured client-side), a dependency-down alert row, and an **event stream** of
+`tool.result` / `approval.granted` / `cron.fired` / `session.resumed` rows.
+
+The design's 2×2 grid also shows CPU, memory and disk. **Those three are cut** —
+no endpoint backs them (§2.6). Applying the design's own rule, the absence is
+stated once rather than rendered as blank tiles. If host metrics become
+worthwhile later, they need a companion service on the VM, not a Hermes change.
+
+### 7.6 Approval sheet
+
+Blocking bottom sheet over a dimmed transcript. Shield icon, plain-language
+consequence sentence naming the host, the exact command in a mono code block,
+then three outcomes: **Allow once** / **Always allow** / **Deny** →
+`approval.respond`. The held tool card shows `held`.
+
+No expiry countdown (§2.6). If the API grows a TTL, the countdown is additive.
+
+### 7.7 Search
+
+Expands **in place** in the header — not a route, not a modal. Scope label names
+the current agent. Results show title, timestamp and a context snippet with the
+query term highlighted, followed by an all-sessions list. Cancel collapses back.
+
+### 7.8 Pairing / onboarding
+
+Two steps. Manual enrolment only: host:port, masked pairing token with an eye
+toggle, display name. The design leads with a QR scanner and names `hermes pair`;
+neither exists (§2.6), so the manual path is promoted to primary until it does.
+
+### 7.9 Voice — push-to-talk
+
+**Descoped from the designed realtime mode.** Hermes has no duplex audio channel,
+so barge-in and a 180ms round trip are not buildable today (§2.6). v1 is:
+
+record → `/api/audio/transcribe` → normal turn → optional `/api/audio/speak`.
+
+Everything still lands in the text transcript, and "Type" still returns to the
+composer without ending the session — both preserved from the design. The
+designed listening/speaking screens are kept in `docs/design/` for a later
+realtime pass; building them would require new server-side work alongside §10.2.
+
+### 7.10 Tools & integrations
+
+MCP servers are **navigation rows, not toggles** — each has status, a tool list
+and its own failure mode. Approval policy is a **single segmented control**
+(Nothing / Destructive / Every tool), not independent switches. Skills list with
+versions plus an install-from-hub row.
+
+Governing rule from the design: toggles are only for genuine on/off preferences;
+objects with their own status are navigation rows; one decision gets one control.
+
+### 7.11 Model & behavior
+
+Radio list of models with provider and context metadata, temperature slider,
+system-prompt preview with edit, and a persistent-memory toggle backed by
+`/api/memory`. Header carries a Save action.
+
+### 7.12 Notifications
+
+Toggle list (approval requests, agent needs input, cron results, every message),
+quiet hours, and a lock-screen preview showing inline **Allow** / **Deny** action
+chips. Those chips must round-trip `approval.respond`, which is only possible via
+the push relay in §10.2.
+
+### 7.13 Agent switcher
+
+Popover from the centered header pill. Rows show status dot, icon, name and a
+kind/state token (`hermes · 28ms`, `hermes · idle 3d`, `openai-agents`,
+`hermes · offline`), with a check on the current agent and an "Add an agent" row.
+Offline agents stay listed and dimmed rather than disappearing. Selecting one
+re-scopes the entire app (§5.2).
+
+### 7.14 Add an agent
+
+**Kind first**, because it determines everything after: "Another Hermes" (full
+support) or "Something else" (any agent speaking OpenAI-compatible streaming).
+Then host:port, token, display name. Reachability is probed before pairing;
+offline hosts can still be saved. Opening line sets the model: *"Agents stay
+separate. Sessions, settings, and history never mix between them."*
+
+### 7.15 Logs & events
+
+Filter chips (All / Tools / Approvals / Errors), 48px event rows with timestamp,
+name and status token, one expandable to pretty-printed JSON. Backed by
+`/api/logs`.
+
+### 7.16 Connection lost mid-turn
+
+Warning banner with retry countdown, a dashed **stream-cut marker** in the
+transcript, in-flight tool cards showing `unknown`, and a composer that queues the
+draft ("1 message queued — sends on reconnect"). See §5.4.
 
 ---
 
-## 8. Staying in sync with upstream
+## 8. Design system
+
+`docs/design/README.md` is authoritative. Summary of what binds implementation:
+
+- **Polyflow** — indigo/violet. Three typefaces with a strict split:
+  **Outfit** (display: titles, stat numbers), **Inter** (UI: body, rows, labels),
+  **Space Mono** (all machine data: hosts, ports, model ids, latency, token
+  counts, timestamps, commands, JSON). Keep the three-way split.
+- Every control **≥44px**; primary buttons 48–52px.
+- Radii step: 6px controls, 10px grouped rows, 12px content cards, 100px pills,
+  14px bottom sheets.
+- Shadows are diffuse with **no y-offset** — on Android this needs `elevation`
+  plus a border, since elevation implies a downward shadow.
+- The 135° gradient (`#1d4ed8 → #6d28d9`) is reserved for the **composer send
+  button and the user's own chat bubbles**. Not for screen-level primary actions.
+- No emoji.
+
+Two implementation notes carried from the handoff: the `.dc.html` is a **visual
+reference, not code to port** — rebuild in RN primitives with the project's own
+StyleSheet layer; and RN has no radial gradient, so the voice/empty-state auras
+become layered absolute circles or a static asset.
+
+**Open: the design is light-mode only.** No dark palette is specified anywhere in
+the token set, and mobile users will expect one. Deciding this early is much
+cheaper than retrofitting — every token above needs a dark counterpart, and the
+gradient and tinted icon tiles need checking on a dark ground.
+
+---
+
+## 9. Staying in sync with upstream
 
 The payoff of the TypeScript choice — but only if managed deliberately.
 
@@ -424,51 +651,60 @@ The payoff of the TypeScript choice — but only if managed deliberately.
 Known adaptation points: `hermes.ts` imports `@/global` (`HermesConnection`) and
 `@/store/transcript-tail`, both Electron-renderer concepts. These get mobile
 shims. `WebSocketLike` is typed as the DOM `WebSocket`, which React Native
-provides — likely compatible as-is, to be confirmed in the spike (§11).
+provides — likely compatible as-is, to be confirmed in the spike (§13).
 
 ---
 
-## 9. Platform specifics
+## 10. Platform specifics
 
-### 9.1 Build & release
+### 10.1 Build & release
 
 Expo with EAS Build — cloud builds for both platforms, which also sidesteps the
 **missing local Xcode** blocker (this Mac has only CommandLineTools: no
 `xcodebuild`, no `simctl`). Android needs no local toolchain either. EAS Update
 for JS-only fixes without a store round-trip.
 
-### 9.2 Notifications
+Fonts: Outfit and Inter as variable fonts via `expo-font`; Space Mono from Google
+Fonts. Also needed: `expo-blur` (headers, voice), `expo-linear-gradient`,
+`expo-secure-store`, `react-native-safe-area-context`, `@shopify/flash-list`.
+
+### 10.2 Notifications
 
 The feature that makes a phone client meaningfully different from the desktop app.
 `approval.request` and `background.complete` (§2.4) are the triggers: the agent
 is blocked on you, or it finished while you were away.
 
-This requires a small server-side piece — Hermes has no push support today. Two
-options, deferred to the implementation doc:
+This requires a small server-side piece — Hermes has no push support today. **Use
+a relay on the host** that watches the event stream and posts to Expo's push
+service. Two facts from this document force that choice over reusing the
+messaging gateway:
 
-- **(a)** A tiny relay on the host that watches the event stream and posts to
-  Expo's push service. Simple, one more moving part.
-- **(b)** Reuse the existing Hermes **messaging gateway** (already configured on
-  the host) as the delivery channel. Less new code, but couples notification
-  delivery to a chat platform.
+- Only one agent holds a live socket (§5.2), so notifications for *other* agents
+  cannot come from the app at all
+- The lock-screen **Allow / Deny** chips (§7.12) must round-trip
+  `approval.respond`, which needs a real endpoint, not a chat message
 
-Until this exists, the app can only surface these while foregrounded — acceptable
+Until it exists, the app can only surface these while foregrounded — acceptable
 for v1, but it should be v1.1.
 
-### 9.3 Background behaviour
+**Design open item:** a notification for an agent that isn't currently selected
+must switch agents before opening the target screen.
+
+### 10.3 Background behaviour
 
 Neither OS will keep a WebSocket alive indefinitely in background. The design
 assumes disconnection is normal: reconnect on foreground, re-fetch the transcript,
 reconcile. Do not treat a dropped socket as an error state the user must see.
 
-### 9.4 Divergences to accept
+### 10.4 Divergences to accept
 
 Keep these few and contained: share sheet, back-gesture semantics, notification
-permission timing, and Tailscale's per-OS VPN behaviour. Everything else is shared.
+permission timing, Android's dashed-border and elevation quirks, and Tailscale's
+per-OS VPN behaviour. Everything else is shared.
 
 ---
 
-## 10. Host prerequisites
+## 11. Host prerequisites
 
 Before the app can connect to `10.0.0.68`:
 
@@ -480,37 +716,42 @@ Before the app can connect to `10.0.0.68`:
 
 ---
 
-## 11. Risks & open questions
+## 12. Risks & open questions
 
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Streaming render perf in RN | Medium | §7.3 ladder; native component as contained fallback |
-| Vendored client drifts from upstream | Medium | Pinned ref + CI typecheck (§8) |
+| Vendored client drifts from upstream | Medium | Pinned ref + CI typecheck (§9) |
 | Hermes API is undocumented and may change | Medium | It's the desktop app's own API — breaking it breaks their product too |
-| No push support in Hermes today | Medium | §9.2, deferred to v1.1 |
+| No push support in Hermes today | Medium | §10.2, deferred to v1.1 |
+| Four designed features have no API (§2.6) | Medium | Descoped in §7.5, §7.6, §7.8, §7.9 |
+| Design is light-mode only | Medium | Decide before M3; retrofitting a dark palette is expensive (§8) |
 | Exact WS RPC params unverified | Low | Read from `hermes.ts`; confirm in spike |
-| No local Xcode | Low | EAS cloud builds (§9.1) |
+| No local Xcode | Low | EAS cloud builds (§10.1) |
 
 **Open questions**
 
-1. Do we need multi-profile support in v1, or is one profile enough to start?
-2. Should Settings be full-parity with the desktop app, or a deliberate subset?
-3. Is voice input (`/api/audio/transcribe`) a v1 feature or later?
-4. Notification path (a) or (b) from §9.2?
+1. Dark mode in v1, or light-only and accept the retrofit cost later?
+2. Do we need Hermes multi-profile support in v1, or is one profile per agent enough?
+3. Is the OpenAI-compatible backend a v1 deliverable, or does v1 ship Hermes-only
+   with the seam proven by `MockBackend`?
+4. Not yet designed (from the handoff): the resumed state after a drop, an expired
+   approval, full-payload log detail, and notification-taps that must switch agents.
 
 ---
 
-## 12. Milestones
+## 13. Milestones
 
 | M | Deliverable | Proves |
 |---|---|---|
 | **M0** | Spike: vendor `@hermes/shared`, connect to `/api/ws` from Expo, print events | The whole thesis — that upstream TS runs unmodified on RN |
-| **M1** | Host prep (§10) + onboarding/pairing flow | Real remote connection over Tailscale |
-| **M2** | Sessions list + read-only transcript | REST layer, normalisation |
-| **M3** | Live chat: streaming, tool cards, approvals, cancel | The core product |
+| **M1** | Host prep (§11) + pairing/onboarding (§7.8) | Real remote connection over Tailscale |
+| **M2** | Sessions list + read-only transcript + search | REST layer, normalisation, agent scoping |
+| **M3** | Live chat: streaming, tool cards, approvals, cancel, reconnect | The core product |
 | **M4** | Settings from `/api/config/schema` + capability gating | G2, and the seam holding up |
-| **M5** | Android parity pass + EAS pipeline for both | G5 |
-| **M6** | Push notifications | G1 on a phone, properly |
+| **M5** | Activity, logs, agent switcher, add-agent | G6 |
+| **M6** | Android parity pass + EAS pipeline for both | G5 |
+| **M7** | Push relay + notification actions | G1 on a phone, properly |
 
 **M0 is the gate.** It is a day of work and it validates or kills the stack
 choice before anything is built on top of it. Do not skip it.
