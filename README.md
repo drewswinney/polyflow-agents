@@ -14,6 +14,13 @@ npm install
 npm start          # then press i / a, or scan the QR with Expo Go
 ```
 
+**Pinned to Expo SDK 54** (React Native 0.81, React 19.1) so the store build of
+Expo Go loads it directly. Expo Go only runs the SDK it was built against, so
+this pin is what keeps `npm start` → scan → running on a phone with no build
+step. Bump it deliberately, alongside the Expo Go on the device — and note that
+Expo Go stops being an option the moment the app needs a native module outside
+the SDK, at which point §10.1's EAS development build takes over.
+
 The app boots against a **demo agent** backed by `MockBackend`, so there is
 something to run before any host prep exists. The mock streams tokens, opens a
 tool card, raises a blocking approval and settles — the whole Chat path without
