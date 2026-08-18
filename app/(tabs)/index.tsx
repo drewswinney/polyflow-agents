@@ -182,7 +182,13 @@ function SearchHeader({
     <View
       style={[
         styles.searchHeader,
-        { paddingTop: insets.top + 8, backgroundColor: theme.color.surface, borderBottomColor: theme.color.border }
+        {
+          // Search expands in place, so this must match ScreenHeader's top pad
+          // exactly — a different value would visibly jolt the screen on open.
+          paddingTop: insets.top + theme.space.headerTop,
+          backgroundColor: theme.color.surface,
+          borderBottomColor: theme.color.border
+        }
       ]}
     >
       <View style={styles.scopeRow}>

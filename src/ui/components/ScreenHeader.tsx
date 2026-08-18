@@ -32,7 +32,10 @@ export function ScreenHeader({
     <BlurView
       intensity={12}
       tint="light"
-      style={[styles.wrap, { paddingTop: insets.top, borderBottomColor: theme.color.border }]}
+      style={[
+        styles.wrap,
+        { paddingTop: insets.top + theme.space.headerTop, borderBottomColor: theme.color.border }
+      ]}
     >
       <View style={styles.row}>
         {onBack ? (

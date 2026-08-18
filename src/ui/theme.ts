@@ -72,6 +72,8 @@ export const RADIUS = {
 export const SPACE = {
   screen: 16,
   header: 20,
+  /** Breathing room above the header row, on top of the safe-area inset. */
+  headerTop: 12,
   card: 14,
   group: 12,
   row: 12,
