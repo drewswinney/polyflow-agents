@@ -27,6 +27,7 @@
   ],
   "exclude": [
     "node_modules",
-    "vendor/hermes/reference"
+    "vendor/hermes/reference",
+    "scripts"
   ]
 }

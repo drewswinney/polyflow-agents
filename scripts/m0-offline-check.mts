@@ -15,8 +15,20 @@
 
 import assert from 'node:assert/strict'
 
+import type { SessionUpdate } from '../src/domain/backend.ts'
 import { JsonRpcGatewayClient } from '../vendor/hermes/shared/json-rpc-gateway.ts'
 import { mapGatewayEvent } from '../src/backends/hermes/event-map.ts'
+
+/** Assert an update's kind and narrow to it, so the checks below read as data. */
+function expect<K extends SessionUpdate['kind']>(
+  update: SessionUpdate | undefined,
+  kind: K
+): Extract<SessionUpdate, { kind: K }> {
+  assert.ok(update, `expected a ${kind} update, got nothing`)
+  assert.equal(update.kind, kind)
+
+  return update as Extract<SessionUpdate, { kind: K }>
+}
 
 // --- A socket the client is happy to drive ---------------------------------
 
@@ -109,8 +121,7 @@ assert.deepEqual(map('message.delta', { text: [{ text: 'a' }, { text: 'b' }] })[
   text: 'ab'
 })
 
-const started = map('tool.start', { tool_id: 't1', name: 'shell', context: 'zpool status' })[0]
-assert.equal(started.kind, 'tool_call')
+const started = expect(map('tool.start', { tool_id: 't1', name: 'shell', context: 'zpool status' })[0], 'tool_call')
 assert.equal(started.call.status, 'running')
 assert.equal(started.call.summary, 'zpool status')
 
@@ -119,26 +130,28 @@ const settled = map('tool.complete', { tool_id: 't1', name: 'shell', result: 'ON
 assert.deepEqual(settled[0], { kind: 'tool_call_update', id: 't1', status: 'ok', output: 'ONLINE' })
 assert.equal(settled[1].kind, 'event', 'a completed tool should also reach the event log')
 
-const failed = map('tool.complete', { tool_id: 't2', name: 'shell', error: 'ECONNREFUSED' })
-assert.equal(failed[0].status, 'error', 'an error payload must settle the card as error, not ok')
+const failed = expect(map('tool.complete', { tool_id: 't2', name: 'shell', error: 'ECONNREFUSED' })[0], 'tool_call_update')
+assert.equal(failed.status, 'error', 'an error payload must settle the card as error, not ok')
 
-const approval = map('approval.request', {
-  request_id: 'req-1',
-  command: 'sudo zfs destroy tank/x',
-  description: 'destroys a dataset'
-})[0]
-assert.equal(approval.kind, 'permission_request')
+const approval = expect(
+  map('approval.request', {
+    request_id: 'req-1',
+    command: 'sudo zfs destroy tank/x',
+    description: 'destroys a dataset'
+  })[0],
+  'permission_request'
+)
 assert.equal(approval.req.sudo, true, 'a sudo command should be recognised as one')
 assert.equal(approval.req.allowPermanent, true, 'allow_permanent is opt-out, not opt-in')
 assert.equal(approval.req.expiresAt, null, 'approvals carry no TTL in the API today')
 
-const usage = map('session.usage', { usage: { input: 10, output: 4, total: 14 } })[0]
+const usage = expect(map('session.usage', { usage: { input: 10, output: 4, total: 14 } })[0], 'usage')
 assert.deepEqual(usage, {
   kind: 'usage',
   usage: { inputTokens: 10, outputTokens: 4, contextTokens: 14, costUsd: undefined }
 })
 
 // Anything with no chat meaning still has to reach Logs & events.
-assert.equal(map('gateway.ready', {})[0].kind, 'event')
+expect(map('gateway.ready', {})[0], 'event')
 
 console.log('M0 offline check passed: vendored gateway client runs, and Hermes events normalise.')
