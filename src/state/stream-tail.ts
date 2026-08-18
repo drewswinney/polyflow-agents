@@ -10,6 +10,8 @@
  * flush on a ~60ms timer, so a fast provider cannot drive one render per token.
  */
 
+import { useSyncExternalStore } from 'react'
+
 const FLUSH_INTERVAL_MS = 60
 
 export interface TailSnapshot {
@@ -114,4 +116,22 @@ export function createStreamTail(): StreamTail {
       listeners.clear()
     }
   }
+}
+
+/**
+ * Subscribe to *only* whether a turn is streaming.
+ *
+ * Reading `tail.getSnapshot()` during render looks equivalent and is not: the
+ * screen has no subscription, so the composer would never learn that a turn
+ * started and would never flip to Stop. Selecting the boolean rather than the
+ * snapshot keeps the flush cadence out of the screen — React bails out when the
+ * value is unchanged, so this re-renders when streaming starts and stops, not
+ * once per 60ms flush.
+ */
+export function useIsStreaming(tail: StreamTail): boolean {
+  return useSyncExternalStore(
+    tail.subscribe,
+    () => tail.getSnapshot().streaming,
+    () => false
+  )
 }

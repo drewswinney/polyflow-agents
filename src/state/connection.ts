@@ -47,6 +47,12 @@ export function useConnection(agent: Agent): Connection {
     async function open() {
       setError(null)
 
+      // An explicit reconnect must actually redial. The gateway client
+      // short-circuits connect() on an already-open socket, so without tearing
+      // the previous one down first, "Reconnect" would be a no-op exactly when
+      // the socket is half-dead and the user is asking for help.
+      if (nonce > 0) releaseBackend()
+
       // The mock needs no credential; a real host without one is a pairing
       // problem, surfaced rather than retried forever.
       const token = agent.host === MOCK_HOST ? 'mock' : await readAgentToken(agent.id)

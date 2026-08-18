@@ -7,6 +7,7 @@ import type { TranscriptEntry } from '@/domain'
 import { useActiveConnection } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { useSessionStream } from '@/state/session-stream'
+import { useIsStreaming } from '@/state/stream-tail'
 import { ApprovalSheet } from '@/ui/components/ApprovalSheet'
 import { Composer } from '@/ui/components/Composer'
 import { ConnectionBanner } from '@/ui/components/ConnectionBanner'
@@ -36,7 +37,7 @@ export default function ChatScreen() {
   const listRef = useRef<FlashListRef<TranscriptEntry>>(null)
 
   const stream = useSessionStream(backend, id, state)
-  const tailSnapshot = stream.tail.getSnapshot()
+  const streaming = useIsStreaming(stream.tail)
 
   const renderItem = useCallback(
     ({ item }: { item: TranscriptEntry }) => (
@@ -110,7 +111,7 @@ export default function ChatScreen() {
         )}
 
         <Composer
-          streaming={tailSnapshot.streaming}
+          streaming={streaming}
           offline={state !== 'open'}
           queued={stream.outbox.length}
           onSend={stream.send}
