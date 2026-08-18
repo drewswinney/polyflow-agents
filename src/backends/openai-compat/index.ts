@@ -13,6 +13,7 @@ import {
   type Capabilities,
   type ConnectionState,
   createObservable,
+  type EventRecord,
   type Observable,
   type SessionUpdate,
   type Unsubscribe
@@ -102,5 +103,38 @@ export class OpenAiCompatBackend implements AgentBackend {
 
   subscribe(_id: string, _sink: (u: SessionUpdate) => void): Unsubscribe {
     return () => undefined
+  }
+
+  subscribeEvents(_sink: (record: EventRecord) => void): Unsubscribe {
+    return () => undefined
+  }
+
+  // Every one of these is false in `OPENAI_COMPAT_CAPABILITIES`, so the UI omits
+  // the screen and never calls them. Throwing is the honest answer if it does:
+  // a fabricated empty list would read on screen as "this agent has no skills"
+  // rather than "this agent cannot say".
+
+  async getUsage(): Promise<never> {
+    throw new NotImplemented('usage')
+  }
+
+  async listEvents(): Promise<never> {
+    throw new NotImplemented('events')
+  }
+
+  async listMcpServers(): Promise<never> {
+    throw new NotImplemented('MCP servers')
+  }
+
+  async listSkills(): Promise<never> {
+    throw new NotImplemented('skills')
+  }
+
+  async listModels(): Promise<never> {
+    throw new NotImplemented('model listing')
+  }
+
+  async setModel(): Promise<never> {
+    throw new NotImplemented('model selection')
   }
 }

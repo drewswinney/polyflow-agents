@@ -66,6 +66,9 @@ export default function RootLayout() {
             <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: NEUTRAL.bg } }}>
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="chat/[id]" />
+              <Stack.Screen name="logs" />
+              <Stack.Screen name="tools" />
+              <Stack.Screen name="model" />
               <Stack.Screen name="agents/new" options={{ presentation: 'modal' }} />
             </Stack>
           </ConnectionProvider>

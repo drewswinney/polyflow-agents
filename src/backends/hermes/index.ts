@@ -22,6 +22,9 @@ import {
   type ConnectionState,
   createObservable,
   type ContentBlock,
+  type EventRecord,
+  type McpServerStatus,
+  type ModelOption,
   type NewSessionOptions,
   type Observable,
   type PermissionOutcome,
@@ -31,10 +34,12 @@ import {
   type SessionSummary,
   type SessionTranscript,
   type SessionUpdate,
-  type Unsubscribe
+  type SkillSummary,
+  type Unsubscribe,
+  type UsageSummary
 } from '@/domain'
 
-import { mapGatewayEvent, type MapContext } from './event-map'
+import { mapGatewayEvent, type MapContext, toEventRecord } from './event-map'
 import { toSearchHit, toSessionSummary, toTranscriptEntries } from './normalize'
 import { HermesRest, type HermesRestConfig } from './rest'
 
@@ -78,6 +83,7 @@ export class HermesBackend implements AgentBackend {
   private readonly gateway: JsonRpcGatewayClient
   private readonly state = createObservable<ConnectionState>('idle')
   private readonly sinks = new Map<SessionId, Set<(u: SessionUpdate) => void>>()
+  private readonly eventSinks = new Set<(record: EventRecord) => void>()
   private readonly mapContext: MapContext = { now: 0, toolStartedAt: new Map() }
   private detachGateway: Unsubscribe | null = null
 
@@ -164,6 +170,16 @@ export class HermesBackend implements AgentBackend {
   }
 
   private dispatch(event: GatewayEvent): void {
+    this.mapContext.now = Date.now()
+
+    // Activity and Logs are agent-scoped: every event reaches them, including
+    // ones for a session nobody has open.
+    if (this.eventSinks.size) {
+      const record = toEventRecord(event, this.mapContext.now)
+
+      for (const sink of this.eventSinks) sink(record)
+    }
+
     const sessionId = event.session_id
 
     if (!sessionId) return
@@ -171,8 +187,6 @@ export class HermesBackend implements AgentBackend {
     const sinks = this.sinks.get(sessionId)
 
     if (!sinks?.size) return
-
-    this.mapContext.now = Date.now()
 
     for (const update of mapGatewayEvent(event, this.mapContext)) {
       for (const sink of sinks) sink(update)
@@ -277,5 +291,112 @@ export class HermesBackend implements AgentBackend {
 
       if (sinks.size === 0) this.sinks.delete(id)
     }
+  }
+
+  subscribeEvents(sink: (record: EventRecord) => void): Unsubscribe {
+    this.eventSinks.add(sink)
+
+    return () => {
+      this.eventSinks.delete(sink)
+    }
+  }
+
+  // --- Capability-gated surfaces -----------------------------------------
+
+  async getUsage(): Promise<UsageSummary> {
+    const analytics = await this.rest.analytics(1)
+    const today = analytics.daily.at(-1) ?? null
+
+    // `actual` is set when the provider quoted a price; `estimated` is Hermes's
+    // own pricing-table math. Subscription auth quotes neither, which is why
+    // both can legitimately be zero — reported as null rather than "$0.00".
+    const spend = today ? today.actual_cost || today.estimated_cost : 0
+
+    return {
+      spendTodayUsd: spend > 0 ? spend : null,
+      // Hermes exposes no per-day spend cap endpoint; the design's cap line has
+      // nothing behind it, so it stays absent rather than invented.
+      spendCapUsd: null,
+      turnsToday: today?.api_calls ?? 0,
+      tokensToday: today ? today.input_tokens + today.output_tokens : 0,
+      latencyMs: null
+    }
+  }
+
+  /**
+   * `/api/logs` returns raw log lines, not structured events. They are parsed
+   * into rows on a best-effort basis; the live socket is the authoritative
+   * source of structured events, and this is what fills the screen before any
+   * arrive.
+   */
+  async listEvents(limit = 200): Promise<EventRecord[]> {
+    const { lines } = await this.rest.logs(limit)
+
+    return lines
+      .filter(line => line.trim().length > 0)
+      .map((line, index) => parseLogLine(line, index))
+      .reverse()
+  }
+
+  async listMcpServers(): Promise<McpServerStatus[]> {
+    const { servers } = await this.rest.mcpServers()
+
+    return servers.map(server => ({
+      name: server.name,
+      enabled: server.enabled,
+      transport: server.transport,
+      toolCount: server.tools?.length ?? 0,
+      tools: server.tools
+    }))
+  }
+
+  async listSkills(): Promise<SkillSummary[]> {
+    const skills = await this.rest.skills()
+
+    return skills.map(skill => ({
+      name: skill.name,
+      category: skill.category,
+      description: skill.description,
+      enabled: skill.enabled,
+      provenance: skill.provenance ?? 'unknown'
+    }))
+  }
+
+  async listModels(): Promise<ModelOption[]> {
+    const [options, info] = await Promise.all([this.rest.modelOptions(), this.rest.modelInfo()])
+
+    return (options.providers ?? []).flatMap(provider =>
+      (provider.models ?? []).map(model => ({
+        id: model,
+        provider: provider.slug,
+        selected: model === info.model && provider.slug === info.provider
+      }))
+    )
+  }
+
+  async setModel(option: ModelOption): Promise<void> {
+    await this.rest.request('/api/model/set', {
+      method: 'POST',
+      body: { scope: 'main', provider: option.provider, model: option.id }
+    })
+  }
+}
+
+const LOG_LINE = /^(?<time>[\d-]{10}[ T][\d:]{8})\S*\s+(?<level>[A-Z]+)\s+(?<rest>.*)$/
+
+/** Best-effort structure over a raw log line; unparseable lines still show. */
+function parseLogLine(line: string, index: number): EventRecord {
+  const match = LOG_LINE.exec(line)
+  const at = match?.groups?.time ? Date.parse(match.groups.time.replace(' ', 'T')) : Number.NaN
+  const level = match?.groups?.level ?? ''
+  const rest = match?.groups?.rest ?? line
+
+  return {
+    id: `log-${index}`,
+    at: Number.isNaN(at) ? 0 : at,
+    name: level ? level.toLowerCase() : 'log',
+    detail: rest.trim(),
+    status: level === 'ERROR' || level === 'CRITICAL' ? 'error' : level === 'WARNING' ? 'info' : 'info',
+    payload: line
   }
 }

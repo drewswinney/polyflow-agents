@@ -189,3 +189,54 @@ export interface EventRecord {
   /** Full payload, pretty-printed on expansion. */
   payload?: unknown
 }
+
+/**
+ * What Activity can actually show (§7.5).
+ *
+ * CPU, memory and disk are deliberately absent: no endpoint backs them, and
+ * `hermes monitoring` is OTLP export that is content-free by construction
+ * (§2.6). A field here means some backend can really answer it.
+ */
+export interface UsageSummary {
+  /** Spend for today in USD, or null when the backend never quotes a price. */
+  spendTodayUsd: number | null
+  /** Configured cap, when there is one. */
+  spendCapUsd: number | null
+  turnsToday: number
+  tokensToday: number
+  /** Measured client-side, not reported by the host. */
+  latencyMs: number | null
+}
+
+/**
+ * An MCP server as the API describes it.
+ *
+ * `/api/mcp/servers` reports configuration, not reachability — health needs an
+ * explicit `POST /api/mcp/servers/{name}/test`. So this models what is known
+ * (`on` / `off` and the tools it declares) rather than the design's
+ * "unreachable, retrying", which would be a guess.
+ */
+export interface McpServerStatus {
+  name: string
+  enabled: boolean
+  transport: string
+  toolCount: number
+  /** Null when the backend has not reported a tool list yet. */
+  tools: string[] | null
+}
+
+export interface SkillSummary {
+  name: string
+  category: string
+  description: string
+  enabled: boolean
+  /** 'agent' = learned locally, 'bundled' = ships with the harness, 'hub' = installed. */
+  provenance: 'agent' | 'bundled' | 'hub' | 'unknown'
+}
+
+export interface ModelOption {
+  /** The model id as the harness names it, e.g. `sonnet-4.5`. */
+  id: string
+  provider: string
+  selected: boolean
+}

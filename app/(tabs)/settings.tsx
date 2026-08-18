@@ -37,11 +37,26 @@ export default function SettingsScreen() {
   const capabilities = backend?.capabilities
   const missing = capabilities ? missingCapabilityLabels(capabilities) : []
 
+  // A row appears because the backend reports that surface *and* there is a
+  // screen behind it. A row that navigates nowhere is worse than an absent one —
+  // the design's rule is that what is missing is stated once, never rendered as
+  // something you can press. Cron is the current gap: Hermes reports it, and
+  // §7.10's cron screen is not built, so it stays out until it is.
   const agentRows = [
-    { key: 'model', label: 'Model & providers', icon: 'microchip', show: capabilities?.settings.model ?? false },
-    { key: 'skills', label: 'Skills', icon: 'book', show: capabilities?.extras.skills ?? false },
-    { key: 'mcp', label: 'MCP servers', icon: 'plug', show: capabilities?.extras.mcp ?? false },
-    { key: 'cron', label: 'Cron jobs', icon: 'clock', show: capabilities?.extras.cron ?? false }
+    {
+      key: 'model',
+      label: 'Model & providers',
+      icon: 'microchip',
+      show: capabilities?.settings.model ?? false,
+      go: () => router.push('/model')
+    },
+    {
+      key: 'tools',
+      label: 'Tools & integrations',
+      icon: 'plug',
+      show: (capabilities?.extras.mcp ?? false) || (capabilities?.extras.skills ?? false),
+      go: () => router.push('/tools')
+    }
   ].filter(row => row.show)
 
   return (
@@ -82,7 +97,7 @@ export default function SettingsScreen() {
               {agentRows.map((row, index) => (
                 <View key={row.key}>
                   {index > 0 ? <Divider /> : null}
-                  <SettingsRow label={row.label} icon={row.icon} />
+                  <SettingsRow label={row.label} icon={row.icon} onPress={row.go} />
                 </View>
               ))}
             </Card>
@@ -94,9 +109,7 @@ export default function SettingsScreen() {
             This phone
           </Text>
           <Card>
-            <SettingsRow label="Notifications" icon="bell" />
-            <Divider />
-            <SettingsRow label="Logs & usage" icon="list" />
+            <SettingsRow label="Logs & events" icon="list" onPress={() => router.push('/logs')} />
           </Card>
         </View>
 
@@ -134,11 +147,21 @@ export default function SettingsScreen() {
   )
 }
 
-function SettingsRow({ label, icon, value }: { label: string; icon: string; value?: string }) {
+function SettingsRow({
+  label,
+  icon,
+  value,
+  onPress
+}: {
+  label: string
+  icon: string
+  value?: string
+  onPress: () => void
+}) {
   const theme = useTheme()
 
   return (
-    <Pressable accessibilityRole="button" style={styles.row}>
+    <Pressable accessibilityRole="button" onPress={onPress} style={styles.row}>
       <View style={[styles.rowTile, { backgroundColor: theme.color.secondaryTint }]}>
         <Icon name={icon} size={13} color={theme.color.secondary} />
       </View>

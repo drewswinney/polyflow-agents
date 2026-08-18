@@ -3,6 +3,7 @@ import { createContext, type ReactNode, useContext } from 'react'
 import type { Agent } from '@/domain'
 
 import { type Connection, useConnection } from './connection'
+import { useEventLogTap } from './event-log'
 
 const ConnectionContext = createContext<Connection | null>(null)
 
@@ -12,6 +13,11 @@ const ConnectionContext = createContext<Connection | null>(null)
  */
 export function ConnectionProvider({ agent, children }: { agent: Agent; children: ReactNode }) {
   const connection = useConnection(agent)
+
+  // Tapped here rather than on Activity, so the log accumulates while you are
+  // elsewhere — those screens should open onto history, not start filling as
+  // you watch.
+  useEventLogTap(connection.backend, agent.id)
 
   return <ConnectionContext.Provider value={connection}>{children}</ConnectionContext.Provider>
 }

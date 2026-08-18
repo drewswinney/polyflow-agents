@@ -176,6 +176,9 @@ export function useSessionStream(
           break
 
         case 'event':
+          // Chat does not render raw events. They reach Activity and Logs
+          // through the backend's agent-wide tap (`subscribeEvents`), which
+          // sees them whether or not this session is open.
           break
       }
     })

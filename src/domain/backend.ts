@@ -12,6 +12,8 @@ import type {
   ClarifyRequest,
   ContentBlock,
   EventRecord,
+  McpServerStatus,
+  ModelOption,
   NewSessionOptions,
   PermissionOutcome,
   PermissionRequest,
@@ -19,10 +21,12 @@ import type {
   SessionQuery,
   SessionSummary,
   SessionTranscript,
+  SkillSummary,
   StopReason,
   ToolCall,
   ToolStatus,
-  Usage
+  Usage,
+  UsageSummary
 } from './models'
 
 export type ConnectionState = 'idle' | 'connecting' | 'open' | 'closed' | 'error'
@@ -77,6 +81,35 @@ export interface AgentBackend {
 
   // Live stream
   subscribe(id: SessionId, sink: (u: SessionUpdate) => void): Unsubscribe
+
+  /**
+   * Every event the agent emits, not just one session's.
+   *
+   * Activity and Logs are agent-scoped, not session-scoped: a cron job firing
+   * or an MCP server dropping belongs on those screens whether or not the
+   * session that caused it is open (§7.5, §7.15).
+   */
+  subscribeEvents(sink: (record: EventRecord) => void): Unsubscribe
+
+  // --- Capability-gated surfaces -----------------------------------------
+  //
+  // Each of these is guarded by a flag in `capabilities`. The UI omits the
+  // screen when the flag is false and therefore never calls the method, so a
+  // backend that cannot answer is free to throw rather than fake a shape
+  // (§4.1). None of them exist to be called speculatively.
+
+  /** Requires `capabilities.activity.spend`. */
+  getUsage(): Promise<UsageSummary>
+  /** Requires `capabilities.activity.events`. Historical rows, newest first. */
+  listEvents(limit?: number): Promise<EventRecord[]>
+  /** Requires `capabilities.extras.mcp`. */
+  listMcpServers(): Promise<McpServerStatus[]>
+  /** Requires `capabilities.extras.skills`. */
+  listSkills(): Promise<SkillSummary[]>
+  /** Requires `capabilities.settings.model`. */
+  listModels(): Promise<ModelOption[]>
+  /** Requires `capabilities.settings.model`. */
+  setModel(option: ModelOption): Promise<void>
 }
 
 export interface SessionSearchHit {

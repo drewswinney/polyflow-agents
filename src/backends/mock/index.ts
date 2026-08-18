@@ -13,6 +13,9 @@ import {
   type ConnectionState,
   createObservable,
   type ContentBlock,
+  type EventRecord,
+  type McpServerStatus,
+  type ModelOption,
   type NewSessionOptions,
   type Observable,
   type PermissionOutcome,
@@ -22,7 +25,9 @@ import {
   type SessionSummary,
   type SessionTranscript,
   type SessionUpdate,
-  type Unsubscribe
+  type SkillSummary,
+  type Unsubscribe,
+  type UsageSummary
 } from '@/domain'
 
 export const MOCK_CAPABILITIES: Capabilities = {
@@ -143,8 +148,15 @@ export class MockBackend implements AgentBackend {
 
   private readonly state = createObservable<ConnectionState>('idle')
   private readonly sinks = new Map<SessionId, Set<(u: SessionUpdate) => void>>()
+  private readonly eventSinks = new Set<(record: EventRecord) => void>()
   private readonly cancelled = new Set<SessionId>()
   private sessions: MockSession[]
+  private models: ModelOption[] = [
+    { id: 'sonnet-4.5', provider: 'anthropic', selected: true },
+    { id: 'opus-4.5', provider: 'anthropic', selected: false },
+    { id: 'haiku-4.5', provider: 'anthropic', selected: false },
+    { id: 'gpt-4o-mini', provider: 'openai', selected: false }
+  ]
 
   /** Set false to skip the approval beat — used by the empty-agent fixture. */
   constructor(private readonly options: { withApproval?: boolean; seed?: boolean } = {}) {
@@ -291,8 +303,80 @@ export class MockBackend implements AgentBackend {
     }
   }
 
+  subscribeEvents(sink: (record: EventRecord) => void): Unsubscribe {
+    this.eventSinks.add(sink)
+
+    return () => {
+      this.eventSinks.delete(sink)
+    }
+  }
+
+  async getUsage(): Promise<UsageSummary> {
+    await tick(120)
+
+    return { spendTodayUsd: 1.84, spendCapUsd: 10, turnsToday: 37, tokensToday: 214_800, latencyMs: 28 }
+  }
+
+  async listEvents(limit = 200): Promise<EventRecord[]> {
+    await tick(100)
+    const now = Date.now()
+
+    const rows: Array<[string, string, EventRecord['status'], number]> = [
+      ['tool.complete', 'shell · zpool status · 412ms', 'ok', 2],
+      ['approval.request', 'shell · zfs destroy -r tank/backup@repl-*', 'info', 3],
+      ['cron.fired', 'nightly-backup · started', 'ok', 48],
+      ['mcp.error', 'home-assistant · ECONNREFUSED', 'error', 61],
+      ['session.resumed', 'Proxmox backup window', 'info', 92]
+    ]
+
+    return rows.slice(0, limit).map(([name, detail, status, minutesAgo], index) => ({
+      id: `evt-${index}`,
+      at: now - minutesAgo * MINUTE,
+      name,
+      detail,
+      status,
+      payload: { name, detail, mock: true }
+    }))
+  }
+
+  async listMcpServers(): Promise<McpServerStatus[]> {
+    await tick(90)
+
+    return [
+      { name: 'home-assistant', enabled: true, transport: 'stdio', toolCount: 9, tools: ['light', 'climate'] },
+      { name: 'filesystem', enabled: true, transport: 'stdio', toolCount: 4, tools: ['read', 'write'] },
+      { name: 'github', enabled: false, transport: 'http', toolCount: 0, tools: null }
+    ]
+  }
+
+  async listSkills(): Promise<SkillSummary[]> {
+    await tick(90)
+
+    return [
+      { name: 'zfs-maintenance', category: 'ops', description: 'Scrub, snapshot and prune tank', enabled: true, provenance: 'agent' },
+      { name: 'proxmox', category: 'ops', description: 'Backup windows and VM lifecycle', enabled: true, provenance: 'hub' },
+      { name: 'summarise', category: 'writing', description: 'Condense long output', enabled: false, provenance: 'bundled' }
+    ]
+  }
+
+  async listModels(): Promise<ModelOption[]> {
+    await tick(90)
+
+    return this.models
+  }
+
+  async setModel(option: ModelOption): Promise<void> {
+    this.models = this.models.map(model => ({ ...model, selected: model.id === option.id }))
+  }
+
   private emit(id: SessionId, update: SessionUpdate): void {
     for (const sink of this.sinks.get(id) ?? []) sink(update)
+
+    // Everything that happens in a turn is also an event — that is what makes
+    // Activity and Logs live rather than a periodic poll.
+    if (this.eventSinks.size) {
+      for (const sink of this.eventSinks) sink(toEventRecord(update))
+    }
   }
 
   private stopped(id: SessionId): boolean {
@@ -377,5 +461,36 @@ export class MockBackend implements AgentBackend {
         expiresAt: null
       }
     })
+  }
+}
+
+/** A normalised update, described the way the event log wants it. */
+function toEventRecord(update: SessionUpdate): EventRecord {
+  const at = Date.now()
+  const base = { id: `${update.kind}-${at}-${Math.trunc(Math.random() * 1e6)}`, at }
+
+  switch (update.kind) {
+    case 'tool_call':
+      return { ...base, name: 'tool.start', detail: `${update.call.name} · ${update.call.summary}`, status: 'info', payload: update.call }
+    case 'tool_call_update':
+      return {
+        ...base,
+        name: 'tool.complete',
+        detail: `${update.id} · ${update.status}`,
+        status: update.status === 'error' ? 'error' : 'ok',
+        payload: update
+      }
+    case 'permission_request':
+      return { ...base, name: 'approval.request', detail: update.req.command, status: 'info', payload: update.req }
+    case 'turn_complete':
+      return { ...base, name: 'message.complete', detail: update.stopReason, status: 'ok', payload: update }
+    case 'error':
+      return { ...base, name: 'error', detail: update.error.message, status: 'error', payload: update.error }
+    case 'usage':
+      return { ...base, name: 'session.usage', detail: `${update.usage.outputTokens} out`, status: 'info', payload: update.usage }
+    case 'event':
+      return update.record
+    default:
+      return { ...base, name: update.kind, detail: '', status: 'info', payload: update }
   }
 }
