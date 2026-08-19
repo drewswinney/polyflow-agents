@@ -35,7 +35,7 @@ export interface Connection {
  * Mounted once, at the root, so the socket survives navigation between tabs and
  * into a chat rather than being torn down and re-dialled per screen.
  */
-export function useConnection(agent: Agent): Connection {
+export function useConnection(agent: Agent | null): Connection {
   const patchAgent = useAgents(state => state.patch)
   const [backend, setBackend] = useState<AgentBackend | null>(null)
   const [state, setState] = useState<ConnectionState>('idle')
@@ -50,6 +50,14 @@ export function useConnection(agent: Agent): Connection {
 
     async function open() {
       setError(null)
+
+      // Nothing to dial before onboarding has run. Idle, not error: an empty
+      // registry is a first run, not a failure.
+      if (!agent) {
+        setState('idle')
+
+        return
+      }
 
       // An explicit reconnect must actually redial. The gateway client
       // short-circuits connect() on an already-open socket, so without tearing

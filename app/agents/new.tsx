@@ -115,7 +115,10 @@ export default function AddAgentScreen() {
     try {
       await saveAgentCredential(agent.id, credential)
       await add(agent)
-      router.back()
+      // `replace`, not `back`: this screen is also the first-run destination,
+      // where there is no history to return to and `back()` is a no-op that
+      // leaves you staring at the form you just submitted.
+      router.replace('/')
     } catch (cause) {
       setSaveError(cause instanceof Error ? cause.message : String(cause))
       setSaving(false)

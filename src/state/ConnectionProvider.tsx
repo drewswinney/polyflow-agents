@@ -13,13 +13,13 @@ const ConnectionContext = createContext<Connection | null>(null)
  * Mounted once at the root so the single live socket (§5.2) survives navigation
  * between tabs and into a chat, instead of being re-dialled per screen.
  */
-export function ConnectionProvider({ agent, children }: { agent: Agent; children: ReactNode }) {
+export function ConnectionProvider({ agent, children }: { agent: Agent | null; children: ReactNode }) {
   const connection = useConnection(agent)
 
   // Tapped here rather than on Activity, so the log accumulates while you are
   // elsewhere — those screens should open onto history, not start filling as
   // you watch.
-  useEventLogTap(connection.backend, agent.id)
+  useEventLogTap(connection.backend, agent?.id ?? '')
 
   // Only fires while the app is backgrounded — see the tap's own comment.
   useNotificationTap(connection.backend, agent)
@@ -32,8 +32,8 @@ export function ConnectionProvider({ agent, children }: { agent: Agent; children
   const setConnection = useAgents(state => state.setConnection)
 
   useEffect(() => {
-    setConnection(agent.id, describeConnection(connection.state))
-  }, [agent.id, connection.state, setConnection])
+    if (agent) setConnection(agent.id, describeConnection(connection.state))
+  }, [agent, connection.state, setConnection])
 
   return <ConnectionContext.Provider value={connection}>{children}</ConnectionContext.Provider>
 }

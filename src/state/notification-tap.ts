@@ -14,7 +14,7 @@ import { notifyLocally } from '@/platform/notifications'
 
 import { shouldNotify, useNotificationPrefs } from './notification-prefs'
 
-export function useNotificationTap(backend: AgentBackend | null, agent: Agent): void {
+export function useNotificationTap(backend: AgentBackend | null, agent: Agent | null): void {
   const prefs = useNotificationPrefs()
   const appState = useRef<AppStateStatus>(AppState.currentState)
 
@@ -27,7 +27,7 @@ export function useNotificationTap(backend: AgentBackend | null, agent: Agent): 
   }, [])
 
   useEffect(() => {
-    if (!backend) return
+    if (!backend || !agent) return
 
     return backend.subscribeEvents((record: EventRecord) => {
       if (appState.current === 'active') return
