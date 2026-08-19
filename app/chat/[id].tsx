@@ -50,10 +50,9 @@ export default function ChatScreen() {
   /**
    * Whether the transcript is parked at the bottom.
    *
-   * Following the tail is FlashList's job now (`maintainVisibleContentPosition`
-   * below); this only decides whether a *pending approval* is worth yanking the
-   * view to. A ref, not state, because it changes on every scroll frame and
-   * nothing should re-render for it.
+   * Only decides whether a *pending approval* is worth yanking the view to, and
+   * whether the keyboard rising should take the tail with it. A ref, not state,
+   * because it changes on every scroll frame and nothing should re-render.
    */
   const atBottom = useRef(true)
 
@@ -62,6 +61,58 @@ export default function ChatScreen() {
    * this drives the pending-approval bar, and nothing else may pay per frame.
    */
   const [scrolledAway, setScrolledAway] = useState(false)
+
+  /**
+   * Where the incoming turn starts, and whether the view is still holding it.
+   *
+   * A reply is read from its first line. Parking at the bottom of it means
+   * reading a message backwards — the top scrolls away as fast as the bottom
+   * arrives — so the view parks at the top of what just came in and lets the
+   * rest fill the screen beneath it.
+   *
+   * The offset it starts at is simply how tall the transcript was the moment
+   * before, which is what `contentHeight` is here to remember.
+   */
+  const contentHeight = useRef(0)
+  const anchor = useRef<number | null>(null)
+  const holdAnchor = useRef(false)
+
+  // A turn opens on the first chunk or tool call of a reply, which is the
+  // moment there is something new to read.
+  useEffect(() => {
+    holdAnchor.current = stream.turnActive
+    if (stream.turnActive) anchor.current = null
+  }, [stream.turnActive])
+
+  const onContentSizeChange = useCallback((_width: number, height: number) => {
+    const previous = contentHeight.current
+
+    contentHeight.current = height
+
+    if (!holdAnchor.current) return
+
+    // Captured on the first growth *after* the turn opened, so the message you
+    // sent is already measured into the height being captured.
+    if (anchor.current === null) {
+      anchor.current = previous
+      listRef.current?.scrollToOffset({ offset: previous, animated: true })
+
+      return
+    }
+
+    // Held rather than re-aimed. Until the reply is a screen tall the list
+    // cannot scroll that far and the offset clamps, so each token that arrives
+    // buys a little more of the distance and the first line climbs to the top;
+    // from then on this is the offset it is already at, and the view stops.
+    // Unanimated — an animation here would be re-started every frame.
+    listRef.current?.scrollToOffset({ offset: anchor.current, animated: false })
+  }, [])
+
+  // Dragging is taking over: the reader has chosen a position, and nothing may
+  // pull them off it for the rest of the turn.
+  const releaseAnchor = useCallback(() => {
+    holdAnchor.current = false
+  }, [])
 
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
@@ -99,6 +150,9 @@ export default function ChatScreen() {
   useEffect(() => {
     if (!approvalId || stream.loading) return
     if (approvalId !== restoredApprovalId && !atBottom.current) return
+
+    // The turn is halted on an answer from you, so it outranks reading position.
+    holdAnchor.current = false
 
     // The footer holding the card is only measured a frame after mount, so an
     // immediate scrollToEnd lands short of it. One frame is enough.
@@ -171,8 +225,8 @@ export default function ChatScreen() {
             contentContainerStyle={styles.list}
             // Only when there is something to say. An always-mounted header
             // that grows and shrinks with the connection is a height change at
-            // the top of the list, which the bottom anchoring then has to
-            // absorb — that is the flicker.
+            // the top of the list, which every scroll position below it then
+            // has to absorb — that is the flicker.
             ListHeaderComponent={
               stream.loadError ? (
                 <View style={styles.header}>
@@ -209,16 +263,13 @@ export default function ChatScreen() {
             }
             onScroll={onScroll}
             scrollEventThrottle={16}
-            // The list's own bottom-anchoring, in place of the hand-rolled
-            // scrollToEnd effects this replaces: it opens already at the last
-            // message rather than animating down to it, and follows anything
-            // that grows below — tokens, a new card — while you are parked
-            // there. The threshold is a fraction of the viewport, so ~10% of
-            // the screen is the "still following" band.
-            maintainVisibleContentPosition={{
-              startRenderingFromBottom: true,
-              autoscrollToBottomThreshold: 0.1
-            }}
+            // Opens already at the last message rather than rendering from the
+            // top and animating down to it. Deliberately *without*
+            // `autoscrollToBottomThreshold`: following the bottom is the thing
+            // the anchor above replaces, and the two would fight every frame.
+            maintainVisibleContentPosition={{ startRenderingFromBottom: true }}
+            onContentSizeChange={onContentSizeChange}
+            onScrollBeginDrag={releaseAnchor}
             // Dragging the transcript down takes the keyboard with it, the way
             // it does in Messages. Android has no interactive mode, so the
             // keyboard leaves on the drag instead of tracking the finger.
