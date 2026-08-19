@@ -10,40 +10,54 @@
 
 import * as SecureStore from 'expo-secure-store'
 
-const CREDENTIAL_PREFIX = 'agent-credential:'
-/** Pre-union key, kept only so an agent added before this change still connects. */
-const LEGACY_TOKEN_PREFIX = 'agent-token:'
+/**
+ * SecureStore keys are validated against `/^[\w.-]+$/` — alphanumerics, `.`,
+ * `-` and `_` only. A `:` separator (the obvious choice, and the one this used
+ * at first) throws on every read *and* write, so the store was unusable rather
+ * than merely wrong. Hence the dot.
+ */
+const CREDENTIAL_PREFIX = 'agent-credential.'
+
+/** Agent ids are app-generated and already safe, but a key must never throw. */
+function credentialKey(agentId: string): string {
+  const safe = agentId.replace(/[^\w.-]/g, '_')
+
+  if (!safe) throw new Error('An agent id cannot be empty.')
+
+  return `${CREDENTIAL_PREFIX}${safe}`
+}
 
 export type AgentCredential =
   | { kind: 'token'; token: string }
   | { kind: 'password'; provider: string; username: string; password: string }
 
 export async function saveAgentCredential(agentId: string, credential: AgentCredential): Promise<void> {
-  await SecureStore.setItemAsync(`${CREDENTIAL_PREFIX}${agentId}`, JSON.stringify(credential), {
+  await SecureStore.setItemAsync(credentialKey(agentId), JSON.stringify(credential), {
     keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY
   })
 }
 
 export async function readAgentCredential(agentId: string): Promise<AgentCredential | null> {
-  const raw = await SecureStore.getItemAsync(`${CREDENTIAL_PREFIX}${agentId}`)
+  const raw = await SecureStore.getItemAsync(credentialKey(agentId))
 
-  if (raw) {
-    try {
-      return JSON.parse(raw) as AgentCredential
-    } catch {
-      // A corrupt entry is treated as absent: the user re-pairs rather than
-      // the app failing to start.
-      return null
-    }
+  if (!raw) return null
+
+  try {
+    return JSON.parse(raw) as AgentCredential
+  } catch {
+    // A corrupt entry is treated as absent: the user re-pairs rather than the
+    // app failing to start.
+    return null
   }
-
-  const legacy = await SecureStore.getItemAsync(`${LEGACY_TOKEN_PREFIX}${agentId}`)
-
-  return legacy ? { kind: 'token', token: legacy } : null
 }
 
-/** The "lost my phone" half of enrolment lives on the host (`hermes pairing revoke`). */
+/**
+ * Forget an agent's credential.
+ *
+ * Note this is only half a revocation: the host has no per-device credential to
+ * revoke (§5.3), so removing it here stops *this* phone without invalidating
+ * anything server-side.
+ */
 export async function forgetAgentCredential(agentId: string): Promise<void> {
-  await SecureStore.deleteItemAsync(`${CREDENTIAL_PREFIX}${agentId}`)
-  await SecureStore.deleteItemAsync(`${LEGACY_TOKEN_PREFIX}${agentId}`)
+  await SecureStore.deleteItemAsync(credentialKey(agentId))
 }
