@@ -28,9 +28,9 @@ app's *bridge*, not an HTTP client, so on a phone there is nothing in it to run.
 vendored types. That keeps the expensive half (types, which change with every
 API addition) synced, and owns the cheap half (a `fetch` wrapper) locally.
 
-## React Native gaps found in M0
+## React Native gaps
 
-Both are real, both are in vendored code, and both are shimmed in
+All three are real, all are in vendored code, and all are shimmed in
 `src/platform/polyfills.ts` rather than by patching the vendor tree:
 
 1. **`URL`** — `JsonRpcGatewayClient.connect()` validates its argument with
@@ -42,6 +42,13 @@ Both are real, both are in vendored code, and both are shimmed in
    with `new DOMException('Aborted', 'AbortError')`. `DOMException` is not a
    global in Hermes, the JS engine RN runs, so an abort would throw a
    `ReferenceError` *instead of* the intended rejection. Fixed by a shim class.
+
+3. **`window.location`** — `buildHermesWebSocketUrl()` guards on
+   `typeof window === 'undefined'` and otherwise reads `window.location.host`.
+   That guard asks the wrong question on RN, where `window` exists but
+   `window.location` does not, so every dial threw *"Cannot read property 'host'
+   of undefined"* before a socket was opened. Found on device, not by reading:
+   it needs a real dial against a real host, which no bundle check performs.
 
 `WebSocketLike` is typed as the DOM `WebSocket`; RN provides one with
 `addEventListener` support, and `WebSocket.OPEN` is present. No shim needed.

@@ -13,6 +13,7 @@
  * delivered". Nothing here should be read as making it unnecessary.
  */
 
+import Constants from 'expo-constants'
 import * as Notifications from 'expo-notifications'
 import { Platform } from 'react-native'
 
@@ -54,10 +55,43 @@ export async function ensureNotificationPermission(): Promise<boolean> {
   return permissionGranted
 }
 
+/**
+ * This device's Expo push token, or null when there cannot be one.
+ *
+ * Null is the normal answer in development: remote push needs a real build
+ * (Expo Go dropped it in SDK 53) and an EAS project id, and neither is worth
+ * an error — the app simply keeps working with local notifications only.
+ *
+ * The token is not stable. It rotates, which is why the caller re-registers it
+ * on every launch rather than once at install.
+ */
+export async function getPushToken(): Promise<string | null> {
+  const projectId =
+    Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId ?? undefined
+
+  if (!projectId) return null
+  if (!(await ensureNotificationPermission())) return null
+
+  try {
+    const { data } = await Notifications.getExpoPushTokenAsync({ projectId })
+
+    return data || null
+  } catch {
+    // A simulator, a development client without push entitlements, or no
+    // network. None of them are worth surfacing: push is additive.
+    return null
+  }
+}
+
 export interface LocalNotification {
   title: string
   body: string
-  /** Routed on tap; the agent is switched first if it is not the selected one. */
+  /**
+   * Routed on tap; the agent is switched first if it is not the selected one.
+   *
+   * Deliberately the same shape the host's push payload uses, so
+   * `useNotificationRouting` has one thing to handle rather than two.
+   */
   data: { agentId: string; sessionId?: string; kind: 'approval' | 'complete' }
 }
 

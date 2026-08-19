@@ -156,6 +156,32 @@ const timed = expect(map('approval.request', { request_id: 'req-2', command: 'ls
 assert.equal(timed.req.expiresAt, ctx.now + 300_000, 'the deadline is arrival plus the configured timeout')
 ctx.approvalTimeoutMs = null
 
+// A resume snapshot is the only place an approval raised while the app was
+// closed still exists, so the transcript has to be able to carry one.
+const restored = {
+  sessionId: 'ses-1',
+  title: 'restored',
+  model: null,
+  entries: [],
+  usage: null,
+  pendingApproval: {
+    id: 'req-9',
+    sessionId: 'ses-1',
+    tool: 'shell',
+    command: 'sudo rm -rf /tmp/x',
+    description: 'removes a directory',
+    sudo: true,
+    allowPermanent: true,
+    expiresAt: null
+  }
+}
+assert.equal(restored.pendingApproval?.id, 'req-9', 'a transcript must be able to carry a blocking approval')
+assert.equal(
+  restored.pendingApproval?.expiresAt,
+  null,
+  'a restored approval has no honest deadline: the host started counting before this client arrived'
+)
+
 const usage = expect(map('session.usage', { usage: { input: 10, output: 4, total: 14 } })[0], 'usage')
 assert.deepEqual(usage, {
   kind: 'usage',

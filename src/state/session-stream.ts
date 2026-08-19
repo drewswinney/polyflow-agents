@@ -41,6 +41,8 @@ export interface SessionStream {
   clarify: ClarifyRequest | null
   /** Messages typed while disconnected; they send on reconnect. */
   outbox: string[]
+  /** True from the first token until the turn ends, tool runs included. */
+  turnActive: boolean
   send: (text: string) => void
   cancel: () => void
   respondToApproval: (outcome: PermissionOutcome) => void
@@ -61,6 +63,15 @@ export function useSessionStream(
   const [approval, setApproval] = useState<PermissionRequest | null>(null)
   const [clarify, setClarify] = useState<ClarifyRequest | null>(null)
   const [outbox, setOutbox] = useState<string[]>([])
+  /**
+   * Whether a turn is still running, including while a tool executes and no
+   * tokens are arriving.
+   *
+   * Separate from the tail's own `streaming` flag because sealing the tail at a
+   * tool boundary clears that one — and the composer uses it to offer Stop. A
+   * long tool run is exactly when cancelling matters most.
+   */
+  const [turnActive, setTurnActive] = useState(false)
   const [reloadNonce, setReloadNonce] = useState(0)
 
   const tail = useMemo(() => createStreamTail(), [sessionId])
@@ -77,15 +88,28 @@ export function useSessionStream(
     let cancelled = false
     setLoading(true)
 
+
     backend
       .loadSession(sessionId)
       .then(loaded => {
         if (cancelled) return
 
         setTranscript(loaded)
-        setEntries(loaded.entries)
+        // Keep the existing array when the content is the same. A reload is
+        // routine — every reconnect refetches, because the delta stream is not
+        // resumable (§5.4) — and handing the list a new array of identical rows
+        // makes it re-key and jump to the top, throwing away wherever you were
+        // reading for no gain.
+        setEntries(current => (sameEntries(current, loaded.entries) ? current : loaded.entries))
         setUsage(loaded.usage)
         setLoadError(null)
+
+        // An approval raised while the app was closed has no live event left to
+        // deliver it — the notification is the only reason you are here, and the
+        // snapshot is the only place it still exists. Never clobber a live one:
+        // the socket is more current than the load it raced.
+        if (loaded.pendingApproval) setApproval(current => current ?? loaded.pendingApproval)
+        if (loaded.pendingClarify) setClarify(current => current ?? loaded.pendingClarify)
       })
       .catch((cause: unknown) => {
         if (!cancelled) setLoadError(cause instanceof Error ? cause.message : String(cause))
@@ -99,7 +123,19 @@ export function useSessionStream(
     }
   }, [backend, sessionId, reloadNonce])
 
-  /** Seal the streaming tail into a settled entry. */
+  /**
+ * Whether a reload produced the same transcript.
+ *
+ * Compares ids, not contents: entries are immutable once settled, so the id
+ * sequence is what changes when something is genuinely new.
+ */
+function sameEntries(current: TranscriptEntry[], next: TranscriptEntry[]): boolean {
+  if (current.length !== next.length) return false
+
+  return current.every((entry, index) => entry.id === next[index]?.id)
+}
+
+/** Seal the streaming tail into a settled entry. */
   const sealTail = useCallback(() => {
     const settled = tail.finish()
 
@@ -129,15 +165,25 @@ export function useSessionStream(
       switch (update.kind) {
         case 'agent_message_chunk':
           wasStreaming.current = true
+          setTurnActive(true)
           tail.appendText(update.text)
           break
 
         case 'agent_thought_chunk':
           wasStreaming.current = true
+          setTurnActive(true)
           tail.appendThinking(update.text)
           break
 
         case 'tool_call':
+          // Seal first. Whatever the agent said before reaching for a tool is
+          // finished prose: sealing renders it as markdown instead of leaving
+          // it as the plain-text tail, and puts it *above* the card rather than
+          // below, since the tail is the list's footer. Without this, every
+          // turn containing a tool showed unrendered markdown in the wrong
+          // order until the turn ended.
+          sealTail()
+          setTurnActive(true)
           setEntries(current => upsertTool(current, update.call))
           break
 
@@ -159,10 +205,12 @@ export function useSessionStream(
 
         case 'turn_complete':
           sealTail()
+          setTurnActive(false)
           break
 
         case 'error':
           sealTail()
+          setTurnActive(false)
           setEntries(current => [
             ...current,
             {
@@ -251,6 +299,7 @@ export function useSessionStream(
 
   const cancel = useCallback(() => {
     void backend?.cancel(sessionId)
+    setTurnActive(false)
     sealTail()
   }, [backend, sessionId, sealTail])
 
@@ -285,6 +334,7 @@ export function useSessionStream(
     loadError,
     usage,
     approval,
+    turnActive,
     clarify,
     outbox,
     send,

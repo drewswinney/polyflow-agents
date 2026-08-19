@@ -12,9 +12,12 @@ import NetInfo from '@react-native-community/netinfo'
 import { useEffect, useRef, useState } from 'react'
 import { AppState, type AppStateStatus } from 'react-native'
 
+import { probeScheme } from '@/backends/hermes'
 import { activateBackend, MOCK_HOST, releaseBackend } from '@/backends/registry'
 import type { Agent, AgentBackend, ConnectionState } from '@/domain'
 import { type AgentCredential, readAgentCredential } from '@/platform/secure-store'
+
+import { useAgents } from './agents'
 
 export interface Connection {
   backend: AgentBackend | null
@@ -32,7 +35,8 @@ export interface Connection {
  * Mounted once, at the root, so the socket survives navigation between tabs and
  * into a chat rather than being torn down and re-dialled per screen.
  */
-export function useConnection(agent: Agent): Connection {
+export function useConnection(agent: Agent | null): Connection {
+  const patchAgent = useAgents(state => state.patch)
   const [backend, setBackend] = useState<AgentBackend | null>(null)
   const [state, setState] = useState<ConnectionState>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -40,12 +44,65 @@ export function useConnection(agent: Agent): Connection {
   const [nonce, setNonce] = useState(0)
   const wasBackgrounded = useRef(false)
 
+  /**
+   * A floor under how often this can dial, and a widening gap after failures.
+   *
+   * Every connect authenticates, and the host rate-limits logins — so a trigger
+   * that fires repeatedly does not merely reconnect repeatedly, it gets the app
+   * locked out with a 429 and turns a transient fault into a stuck one. Refs,
+   * not state: this must not itself cause a render, and it must survive the
+   * effect re-running.
+   */
+  const lastDialAt = useRef(0)
+  const failures = useRef(0)
+
+  /**
+   * What a redial actually depends on.
+   *
+   * Not the agent object: its identity changes whenever *anything* on the
+   * record is written, including the connection status this very effect
+   * causes to be written. Depending on the object therefore means every
+   * connect triggers a disconnect and another connect, forever. Only these
+   * fields change where or how the socket is dialled.
+   */
+  const dialKey = agent
+    ? [agent.id, agent.host, agent.authMode, String(agent.secure ?? ''), agent.profile ?? ''].join('|')
+    : ''
+
+  // Read inside the effect so a status write does not re-run it.
+  const agentRef = useRef(agent)
+  agentRef.current = agent
+
   useEffect(() => {
     let cancelled = false
     const controller = new AbortController()
 
     async function open() {
       setError(null)
+
+      const agent = agentRef.current
+
+      // 1s floor between automatic dials, doubling per consecutive failure up
+      // to 30s. An explicit Reconnect resets the count, because a person asking
+      // is new information — the app guessing again is not.
+      const cooldown = failures.current === 0 ? 1_000 : Math.min(30_000, 1_000 * 2 ** failures.current)
+      const wait = Math.max(0, cooldown - (Date.now() - lastDialAt.current))
+
+      if (wait > 0) {
+        await new Promise(resolve => setTimeout(resolve, wait))
+
+        if (cancelled) return
+      }
+
+      lastDialAt.current = Date.now()
+
+      // Nothing to dial before onboarding has run. Idle, not error: an empty
+      // registry is a first run, not a failure.
+      if (!agent) {
+        setState('idle')
+
+        return
+      }
 
       // An explicit reconnect must actually redial. The gateway client
       // short-circuits connect() on an already-open socket, so without tearing
@@ -67,7 +124,31 @@ export function useConnection(agent: Agent): Connection {
         return
       }
 
-      const next = activateBackend(agent, credential)
+      // An agent added while the host was unreachable has no scheme on record,
+      // and guessing one is how you get a socket that never opens. Probe once,
+      // remember the answer.
+      //
+      // **Never fatal.** The probe is an optimisation, not a gate: it gives up
+      // after 5s per scheme where the real connect gets 15s, so letting it veto
+      // the attempt means a slow hop refuses a connection that would have
+      // worked. On failure the agent is used exactly as it was and the connect
+      // below reports what actually went wrong.
+      let resolved = agent
+
+      if (agent.secure === undefined && agent.host !== MOCK_HOST) {
+        try {
+          const secure = await probeScheme(agent.host)
+
+          if (cancelled) return
+
+          resolved = { ...agent, secure }
+          patchAgent(agent.id, { secure })
+        } catch {
+          if (cancelled) return
+        }
+      }
+
+      const next = activateBackend(resolved, credential)
 
       if (cancelled) return
 
@@ -79,9 +160,17 @@ export function useConnection(agent: Agent): Connection {
       try {
         await next.connect(controller.signal)
 
-        if (!cancelled) setAttempt(0)
+        if (!cancelled) {
+          failures.current = 0
+          setAttempt(0)
+        }
       } catch (cause) {
         if (!cancelled) {
+          failures.current += 1
+          // The gateway client can be left mid-dial, and a banner that says
+          // "connecting" forever is worse than one that says what went wrong:
+          // it looks like progress and hides the reason.
+          setState('error')
           setError(cause instanceof Error ? cause.message : String(cause))
           setAttempt(count => count + 1)
         }
@@ -97,12 +186,15 @@ export function useConnection(agent: Agent): Connection {
       controller.abort()
       void pending.then(unsubscribe => unsubscribe?.())
     }
-  }, [agent, nonce])
+  }, [dialKey, nonce, patchAgent])
 
   // Switching agents re-scopes the whole app; the previous socket goes with it.
   useEffect(() => releaseBackend, [])
 
-  const reconnect = () => setNonce(value => value + 1)
+  const reconnect = () => {
+    failures.current = 0
+    setNonce(value => value + 1)
+  }
 
   // Foreground → verify the socket. Neither OS keeps a WebSocket alive in
   // background indefinitely, so a closed socket on resume is expected, not an error.
@@ -125,7 +217,14 @@ export function useConnection(agent: Agent): Connection {
     let previous: string | null = null
 
     return NetInfo.addEventListener(info => {
-      const current = `${info.type}:${info.isInternetReachable}`
+      // Transport only. `isInternetReachable` is tri-state and flaps — null
+      // while probing, then true, then null again — and it was part of this
+      // key, so every flap redialled. Each redial replaced the backend, which
+      // reloaded the transcript, which reset the list to the top: a chat that
+      // scrolled itself away from what you were reading, repeatedly. The path
+      // changing is what invalidates a socket; reachability saying "not sure
+      // yet" is not.
+      const current = info.type
 
       if (previous !== null && previous !== current && info.isConnected) {
         setNonce(value => value + 1)

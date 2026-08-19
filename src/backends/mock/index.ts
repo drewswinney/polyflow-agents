@@ -92,6 +92,8 @@ function seedSessions(now: number): MockSession[] {
   return rows.map(({ reply, ...summary }) => ({
     ...summary,
     transcript: {
+      pendingApproval: null,
+      pendingClarify: null,
       sessionId: summary.id,
       title: summary.title,
       model: summary.model,
@@ -202,7 +204,15 @@ export class MockBackend implements AgentBackend {
         model: opts.model ?? 'sonnet-4.5',
         messageCount: 0,
         blockedOn: null,
-        transcript: { sessionId: id, title: opts.title ?? 'New session', model: opts.model ?? 'sonnet-4.5', entries: [], usage: null }
+        transcript: {
+          sessionId: id,
+          title: opts.title ?? 'New session',
+          model: opts.model ?? 'sonnet-4.5',
+          entries: [],
+          usage: null,
+          pendingApproval: null,
+          pendingClarify: null
+        }
       },
       ...this.sessions
     ]

@@ -223,7 +223,12 @@ export function mapGatewayEvent(event: GatewayEvent, ctx: MapContext): SessionUp
         req: {
           id: str(payload?.request_id),
           sessionId: str(event.session_id),
-          question: str(payload?.question) || str(payload?.prompt) || coerceText(payload?.text)
+          question: str(payload?.question) || str(payload?.prompt) || coerceText(payload?.text),
+          // The choices are the whole point of a clarify: without them the UI
+          // can only offer free text for a question the agent meant to be
+          // picked from.
+          choices: Array.isArray(payload?.choices) ? payload.choices.map(choice => String(choice)) : [],
+          multiSelect: payload?.multi_select === true
         }
       })
       break

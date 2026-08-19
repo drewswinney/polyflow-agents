@@ -15,7 +15,8 @@ import { View } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
 import { ConnectionProvider, useActiveConnection } from '@/state/ConnectionProvider'
-import { useAgents, useSelectedAgent } from '@/state/agents'
+import { useAgents, useSelectedAgentOrNull } from '@/state/agents'
+import { useNotificationRouting } from '@/state/notification-routing'
 import { useSessions } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
 import { Sidebar } from '@/ui/components/Sidebar'
@@ -47,7 +48,9 @@ export default function RootLayout() {
 
   const hydrate = useAgents(state => state.hydrate)
   const hydrated = useAgents(state => state.hydrated)
-  const agent = useSelectedAgent()
+  // Nullable here and only here: with no fixture agent, a fresh install has an
+  // empty registry until onboarding runs.
+  const agent = useSelectedAgentOrNull()
 
   useEffect(() => {
     void hydrate()
@@ -63,7 +66,7 @@ export default function RootLayout() {
     <SafeAreaProvider>
       <QueryClientProvider client={queryClient}>
         {/* Accent follows the selected agent, so a glance says which one you are in. */}
-        <ThemeProvider accent={agent.accent}>
+        <ThemeProvider accent={agent?.accent}>
           <ConnectionProvider agent={agent}>
             <StatusBar style="dark" />
             <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: NEUTRAL.bg } }}>
@@ -84,6 +87,7 @@ export default function RootLayout() {
             {/* Mounted beside the router, not inside a screen, so the same
                 sidebar serves every screen that shows the hamburger. */}
             <AppSidebar />
+            <NotificationRouting />
           </ConnectionProvider>
         </ThemeProvider>
       </QueryClientProvider>
@@ -96,13 +100,13 @@ export default function RootLayout() {
  * its container sits here with the providers it reads from.
  */
 function AppSidebar() {
-  const agent = useSelectedAgent()
+  const agent = useSelectedAgentOrNull()
   const { backend } = useActiveConnection()
   const open = useSidebar(state => state.open)
   const hide = useSidebar(state => state.hide)
   const pathname = usePathname()
 
-  const sessions = useSessions(agent.id, backend)
+  const sessions = useSessions(agent?.id ?? '', backend)
 
   return (
     <Sidebar
@@ -117,4 +121,17 @@ function AppSidebar() {
       onDismiss={hide}
     />
   )
+}
+
+/**
+ * Notification taps, mounted for the life of the app.
+ *
+ * A component rather than a call in `RootLayout` so it sits inside the agent
+ * providers: routing a tap can re-scope the app, and doing that above the
+ * provider would change the agent under a tree that is not listening.
+ */
+function NotificationRouting() {
+  useNotificationRouting()
+
+  return null
 }

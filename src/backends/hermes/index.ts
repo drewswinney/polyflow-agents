@@ -29,6 +29,8 @@ import {
   type McpServerStatus,
   type ModelOption,
   type NewSessionOptions,
+  type ClarifyRequest,
+  type PermissionRequest,
   type Observable,
   type PermissionOutcome,
   type SessionId,
@@ -49,11 +51,43 @@ export { HermesRest, HermesRestError, probeScheme } from './rest'
 export { mapGatewayEvent } from './event-map'
 
 /**
+ * What `session.resume` answers with.
+ *
+ * Only the fields this client acts on. `pending_approval` is the one that
+ * matters here: upstream returns it "so a reconnect can restore a prompt whose
+ * original event was emitted while the client transport was detached".
+ */
+interface ResumeResult {
+  session_id?: string
+  pending_approval?: {
+    request_id?: string
+    command?: string
+    description?: string
+    allow_permanent?: boolean
+  }
+  pending_clarify?: {
+    request_id?: string
+    question?: string
+    choices?: unknown[] | null
+    multi_select?: boolean
+  }
+}
+
+/**
  * `prompt.submit` is fire-and-forget — turn completion arrives as events, not
  * as the RPC return — so its ack timeout matches the backend's own agent-turn
  * ceiling rather than the generic default (upstream `hermes.ts`).
  */
 const PROMPT_SUBMIT_TIMEOUT_MS = 1_800_000
+
+/**
+ * How long a password login is assumed good for.
+ *
+ * Deliberately short of any real session lifetime: the cost of being wrong is
+ * one 401 that the next dial re-authenticates through, and the cost of being
+ * too eager is a rate-limit lockout.
+ */
+const LOGIN_REUSE_MS = 300_000
 
 /** Hermes reports nearly everything (§4.1). */
 export const HERMES_CAPABILITIES: Capabilities = {
@@ -101,8 +135,25 @@ export class HermesBackend implements AgentBackend {
   private readonly runtimeByStored = new Map<SessionId, string>()
   private readonly storedByRuntime = new Map<string, SessionId>()
   private readonly resuming = new Map<SessionId, Promise<string>>()
+  /**
+   * Approvals recovered from a resume snapshot, by session.
+   *
+   * Resume is the only place an approval raised while this client was away can
+   * still be found; the event that announced it is long gone.
+   */
+  private readonly pendingApprovals = new Map<SessionId, PermissionRequest>()
+  /** Questions recovered from a resume snapshot, for the same reason. */
+  private readonly pendingClarifies = new Map<SessionId, ClarifyRequest>()
   private readonly mapContext: MapContext = { now: 0, toolStartedAt: new Map(), approvalTimeoutMs: null }
   private detachGateway: Unsubscribe | null = null
+  /**
+   * When this client last exchanged a password for a session cookie.
+   *
+   * The cookie outlives a single dial, and the host rate-limits logins — so
+   * re-authenticating on every reconnect is both wasted and the thing that
+   * earns a 429. A redial inside the window reuses the session it already has.
+   */
+  private lastLoginAt = 0
 
   constructor(config: HermesBackendConfig) {
     this.config = config
@@ -132,8 +183,9 @@ export class HermesBackend implements AgentBackend {
     // Password auth has to establish the session before anything else: the
     // ticket endpoint is itself session-gated, so minting one without logging
     // in first returns 401, not a ticket.
-    if (this.config.authMode === 'password') {
+    if (this.config.authMode === 'password' && Date.now() - this.lastLoginAt > LOGIN_REUSE_MS) {
       await this.rest.login()
+      this.lastLoginAt = Date.now()
     }
 
     if (signal?.aborted) return
@@ -189,13 +241,49 @@ export class HermesBackend implements AgentBackend {
     if (inFlight) return inFlight
 
     const pending = this.gateway
-      .request<{ session_id?: string }>('session.resume', {
+      .request<ResumeResult>('session.resume', {
         session_id: stored,
         ...(this.config.profile ? { profile: this.config.profile } : {})
       })
       .then(result => {
         const runtime = result?.session_id || stored
         this.rememberRuntime(stored, runtime)
+
+        const waiting = result?.pending_approval
+
+        if (waiting?.request_id) {
+          const command = String(waiting.command ?? '')
+
+          this.pendingApprovals.set(stored, {
+            id: String(waiting.request_id),
+            sessionId: stored,
+            tool: 'shell',
+            command,
+            description: String(waiting.description ?? '') || 'A command is waiting on your answer.',
+            sudo: /^\s*sudo\b/.test(command),
+            allowPermanent: waiting.allow_permanent !== false,
+            // Deliberately no deadline. The host's timeout runs from when the
+            // prompt was raised, which may have been long before this resume —
+            // a countdown anchored to now would promise time that is gone.
+            expiresAt: null
+          })
+        } else {
+          this.pendingApprovals.delete(stored)
+        }
+
+        const asking = result?.pending_clarify
+
+        if (asking?.request_id) {
+          this.pendingClarifies.set(stored, {
+            id: String(asking.request_id),
+            sessionId: stored,
+            question: String(asking.question ?? '') || 'The agent asked a question.',
+            choices: Array.isArray(asking.choices) ? asking.choices.map(choice => String(choice)) : [],
+            multiSelect: asking.multi_select === true
+          })
+        } else {
+          this.pendingClarifies.delete(stored)
+        }
 
         return runtime
       })
@@ -332,7 +420,12 @@ export class HermesBackend implements AgentBackend {
     // pinned above a chat that was working perfectly.
     const [messages, info] = await Promise.all([
       this.rest.sessionMessages(id).catch(emptyOn404),
-      this.rest.session(id).catch(() => null)
+      this.rest.session(id).catch(() => null),
+      // Resume alongside the transcript, not for the runtime id — for the
+      // approval snapshot it carries. Idempotent and cheap on a live session,
+      // and it is the only way to learn about a prompt raised while the app was
+      // closed. A failure here must not fail the load.
+      this.runtimeIdFor(id).catch(() => null)
     ])
 
     return {
@@ -344,7 +437,9 @@ export class HermesBackend implements AgentBackend {
       entries: toTranscriptEntries(messages.messages),
       usage: info
         ? { inputTokens: info.input_tokens, outputTokens: info.output_tokens, costUsd: info.actual_cost_usd ?? undefined }
-        : null
+        : null,
+      pendingApproval: this.pendingApprovals.get(id) ?? null,
+      pendingClarify: this.pendingClarifies.get(id) ?? null
     }
   }
 

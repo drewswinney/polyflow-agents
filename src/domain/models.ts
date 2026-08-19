@@ -129,6 +129,17 @@ export interface SessionTranscript {
   model: string | null
   entries: TranscriptEntry[]
   usage: Usage | null
+  /**
+   * An approval still blocking this session, recovered on load.
+   *
+   * The live `approval.request` event fires once. A phone that was closed when
+   * it fired — the case notifications exist for — never sees it, so opening the
+   * session from a notification would show a halted agent and no way to answer.
+   * Hermes returns the outstanding prompt on resume for exactly this reason.
+   */
+  pendingApproval: PermissionRequest | null
+  /** A question still blocking this session, recovered on load. Same reason. */
+  pendingClarify: ClarifyRequest | null
 }
 
 /**
@@ -173,6 +184,10 @@ export interface ClarifyRequest {
   id: string
   sessionId: SessionId
   question: string
+  /** Offered answers. Empty when the agent wants free text. */
+  choices: string[]
+  /** Whether more than one choice may be picked. */
+  multiSelect: boolean
 }
 
 export interface Usage {

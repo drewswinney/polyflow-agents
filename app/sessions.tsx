@@ -36,7 +36,7 @@ export default function SessionsScreen() {
   const agent = useSelectedAgent()
   const agents = useAgents(state => state.agents)
   const select = useAgents(state => state.select)
-  const { backend, state, attempt } = useActiveConnection()
+  const { backend, state, attempt, error } = useActiveConnection()
   const openSidebar = useSidebar(store => store.show)
 
   const [switcherOpen, setSwitcherOpen] = useState(false)
@@ -83,7 +83,7 @@ export default function SessionsScreen() {
         contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}
         refreshControl={<RefreshControl refreshing={sessions.isFetching} onRefresh={() => void sessions.refetch()} />}
       >
-        <ConnectionBanner state={state} attempt={attempt} />
+        <ConnectionBanner state={state} attempt={attempt} error={error} />
 
         {searchActive ? (
           <SearchResults

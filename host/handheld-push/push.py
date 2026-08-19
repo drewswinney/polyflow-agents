@@ -54,7 +54,10 @@ def _send_now(*, kind: str, title: str, body: str, data: Dict[str, Any]) -> None
                 "to": device["token"],
                 "title": title,
                 "body": body,
-                "data": {**data, "kind": kind},
+                # Per device, not per message: `agentId` is the receiving app's
+                # own id for this agent, so two phones registered against
+                # different agent records get different payloads.
+                "data": {**data, "kind": kind, "agentId": device.get("agentId", "")},
                 # Approvals are the only thing here that halts the agent, so
                 # they are the only thing that may bypass a quiet phone.
                 "priority": "high" if kind == "approvals" else "default",

@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Hermes Handheld",
+    "name": "Polyflow Agents",
     "slug": "agent-handheld",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -12,7 +12,10 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.drewswinney.agenthandheld",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
       }
     },
     "android": {
@@ -23,7 +26,12 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "usesCleartextTraffic": true,
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
+      ]
     },
     "web": {
       "output": "static",
@@ -43,7 +51,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Hermes Handheld uses the microphone so you can dictate a message to your agent."
+          "microphonePermission": "Polyflow Agents uses the microphone so you can dictate a message to your agent."
         }
       ],
       [
@@ -51,10 +59,24 @@
         {
           "color": "#6d28d9"
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "6ef7424d-abd9-44e4-9601-730bdedd891d"
+      }
+    },
+    "owner": "drewswinney",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/6ef7424d-abd9-44e4-9601-730bdedd891d"
     }
   }
 }
