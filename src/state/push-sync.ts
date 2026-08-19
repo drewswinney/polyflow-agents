@@ -103,6 +103,7 @@ export function usePushRegistration(agent: Agent): PushStatus {
       setStatus({ state: 'registering' })
 
       const result = await registerDevice(config, token, {
+        agentId: agent.id,
         platform: Platform.OS,
         label: agent.displayName,
         prefs: {

@@ -112,11 +112,15 @@ async function post(endpoint: PushEndpoint, body: Record<string, unknown>): Prom
 export function registerDevice(
   endpoint: PushEndpoint,
   token: string,
-  options: { platform: string; label: string; prefs: NotificationPrefs }
+  options: { agentId: string; platform: string; label: string; prefs: NotificationPrefs }
 ): Promise<RegistrationResult> {
   return post(endpoint, {
     action: 'register',
     token,
+    // Ours, not the host's. It comes back on every push so a tap can re-scope
+    // the app before opening the session (§5.2) — the host has no idea what we
+    // call its agents, so if we do not tell it, no notification can route.
+    agentId: options.agentId,
     platform: options.platform,
     label: options.label,
     prefs: hostPrefs(options.prefs)

@@ -243,6 +243,7 @@ def _handle_control(text: str) -> Optional[bool]:
     if action == "register":
         return devices.register(
             token,
+            agent_id=str(payload.get("agentId") or ""),
             platform=str(payload.get("platform") or ""),
             label=str(payload.get("label") or ""),
             prefs=payload.get("prefs") if isinstance(payload.get("prefs"), dict) else None,

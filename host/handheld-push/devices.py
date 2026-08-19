@@ -86,7 +86,14 @@ def _save(devices: List[Dict[str, Any]]) -> None:
         raise
 
 
-def register(token: str, *, platform: str = "", label: str = "", prefs: Dict[str, Any] | None = None) -> bool:
+def register(
+    token: str,
+    *,
+    agent_id: str = "",
+    platform: str = "",
+    label: str = "",
+    prefs: Dict[str, Any] | None = None,
+) -> bool:
     """Add or refresh one device. Idempotent — Expo tokens rotate, so the app
     re-registers on every launch and must not accumulate duplicates."""
     token = (token or "").strip()
@@ -106,6 +113,10 @@ def register(token: str, *, platform: str = "", label: str = "", prefs: Dict[str
     devices.append(
         {
             "token": token,
+            # The *app's* id for this agent, not anything this host knows. It is
+            # echoed back on every push so a tap can re-scope the app before
+            # opening the session; without it a notification cannot route.
+            "agentId": agent_id or "",
             "platform": platform or "",
             "label": label or "",
             "prefs": merged,

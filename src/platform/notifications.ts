@@ -86,7 +86,12 @@ export async function getPushToken(): Promise<string | null> {
 export interface LocalNotification {
   title: string
   body: string
-  /** Routed on tap; the agent is switched first if it is not the selected one. */
+  /**
+   * Routed on tap; the agent is switched first if it is not the selected one.
+   *
+   * Deliberately the same shape the host's push payload uses, so
+   * `useNotificationRouting` has one thing to handle rather than two.
+   */
   data: { agentId: string; sessionId?: string; kind: 'approval' | 'complete' }
 }
 
