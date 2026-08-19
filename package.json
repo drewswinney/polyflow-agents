@@ -13,7 +13,6 @@
   },
   "license": "ISC",
   "author": "",
-  "type": "commonjs",
   "main": "expo-router/entry",
   "directories": {
     "doc": "docs"

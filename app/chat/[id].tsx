@@ -68,14 +68,26 @@ export default function ChatScreen() {
   useEffect(() => {
     if (atBottom.current) listRef.current?.scrollToEnd({ animated: true })
   }, [stream.entries.length])
-  // An approval that arrives while you are at the bottom should be on screen,
-  // not just appended below the fold. Keyed by id so being asked a second time
-  // scrolls again.
+  // An approval should be on screen, not appended below the fold. Keyed by id so
+  // being asked a second time scrolls again.
   const approvalId = stream.approval?.id
+  // One restored from the transcript is the reason this screen was opened at
+  // all — you tapped a notification about it — so it scrolls whether or not you
+  // were parked at the tail. A live one only follows the tail if you are
+  // already there, and the bar above the composer covers the rest.
+  const restoredApprovalId = stream.transcript?.pendingApproval?.id
 
   useEffect(() => {
-    if (approvalId && atBottom.current) listRef.current?.scrollToEnd({ animated: true })
-  }, [approvalId])
+    if (!approvalId || stream.loading) return
+    if (approvalId !== restoredApprovalId && !atBottom.current) return
+
+    // After a mount the footer has not been measured yet, so an immediate
+    // scrollToEnd lands short — which is exactly the "it does not scroll to the
+    // approval" case. One frame is enough.
+    const timer = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50)
+
+    return () => clearTimeout(timer)
+  }, [approvalId, restoredApprovalId, stream.loading])
 
   const pendingMessage = useChatInbox(inbox => inbox.pending)
   const takeMessage = useChatInbox(inbox => inbox.take)

@@ -86,6 +86,12 @@ export function useSessionStream(
         setEntries(loaded.entries)
         setUsage(loaded.usage)
         setLoadError(null)
+
+        // An approval raised while the app was closed has no live event left to
+        // deliver it — the notification is the only reason you are here, and the
+        // snapshot is the only place it still exists. Never clobber a live one:
+        // the socket is more current than the load it raced.
+        if (loaded.pendingApproval) setApproval(current => current ?? loaded.pendingApproval)
       })
       .catch((cause: unknown) => {
         if (!cancelled) setLoadError(cause instanceof Error ? cause.message : String(cause))

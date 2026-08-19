@@ -29,6 +29,7 @@ import {
   type McpServerStatus,
   type ModelOption,
   type NewSessionOptions,
+  type PermissionRequest,
   type Observable,
   type PermissionOutcome,
   type SessionId,
@@ -47,6 +48,23 @@ import { HermesRest, type HermesRestConfig, HermesRestError } from './rest'
 
 export { HermesRest, HermesRestError, probeScheme } from './rest'
 export { mapGatewayEvent } from './event-map'
+
+/**
+ * What `session.resume` answers with.
+ *
+ * Only the fields this client acts on. `pending_approval` is the one that
+ * matters here: upstream returns it "so a reconnect can restore a prompt whose
+ * original event was emitted while the client transport was detached".
+ */
+interface ResumeResult {
+  session_id?: string
+  pending_approval?: {
+    request_id?: string
+    command?: string
+    description?: string
+    allow_permanent?: boolean
+  }
+}
 
 /**
  * `prompt.submit` is fire-and-forget — turn completion arrives as events, not
@@ -101,6 +119,13 @@ export class HermesBackend implements AgentBackend {
   private readonly runtimeByStored = new Map<SessionId, string>()
   private readonly storedByRuntime = new Map<string, SessionId>()
   private readonly resuming = new Map<SessionId, Promise<string>>()
+  /**
+   * Approvals recovered from a resume snapshot, by session.
+   *
+   * Resume is the only place an approval raised while this client was away can
+   * still be found; the event that announced it is long gone.
+   */
+  private readonly pendingApprovals = new Map<SessionId, PermissionRequest>()
   private readonly mapContext: MapContext = { now: 0, toolStartedAt: new Map(), approvalTimeoutMs: null }
   private detachGateway: Unsubscribe | null = null
 
@@ -189,13 +214,35 @@ export class HermesBackend implements AgentBackend {
     if (inFlight) return inFlight
 
     const pending = this.gateway
-      .request<{ session_id?: string }>('session.resume', {
+      .request<ResumeResult>('session.resume', {
         session_id: stored,
         ...(this.config.profile ? { profile: this.config.profile } : {})
       })
       .then(result => {
         const runtime = result?.session_id || stored
         this.rememberRuntime(stored, runtime)
+
+        const waiting = result?.pending_approval
+
+        if (waiting?.request_id) {
+          const command = String(waiting.command ?? '')
+
+          this.pendingApprovals.set(stored, {
+            id: String(waiting.request_id),
+            sessionId: stored,
+            tool: 'shell',
+            command,
+            description: String(waiting.description ?? '') || 'A command is waiting on your answer.',
+            sudo: /^\s*sudo\b/.test(command),
+            allowPermanent: waiting.allow_permanent !== false,
+            // Deliberately no deadline. The host's timeout runs from when the
+            // prompt was raised, which may have been long before this resume —
+            // a countdown anchored to now would promise time that is gone.
+            expiresAt: null
+          })
+        } else {
+          this.pendingApprovals.delete(stored)
+        }
 
         return runtime
       })
@@ -332,7 +379,12 @@ export class HermesBackend implements AgentBackend {
     // pinned above a chat that was working perfectly.
     const [messages, info] = await Promise.all([
       this.rest.sessionMessages(id).catch(emptyOn404),
-      this.rest.session(id).catch(() => null)
+      this.rest.session(id).catch(() => null),
+      // Resume alongside the transcript, not for the runtime id — for the
+      // approval snapshot it carries. Idempotent and cheap on a live session,
+      // and it is the only way to learn about a prompt raised while the app was
+      // closed. A failure here must not fail the load.
+      this.runtimeIdFor(id).catch(() => null)
     ])
 
     return {
@@ -344,7 +396,8 @@ export class HermesBackend implements AgentBackend {
       entries: toTranscriptEntries(messages.messages),
       usage: info
         ? { inputTokens: info.input_tokens, outputTokens: info.output_tokens, costUsd: info.actual_cost_usd ?? undefined }
-        : null
+        : null,
+      pendingApproval: this.pendingApprovals.get(id) ?? null
     }
   }
 
