@@ -1,10 +1,10 @@
 import { LinearGradient } from 'expo-linear-gradient'
 import { useState } from 'react'
 import { Pressable, StyleSheet, TextInput, View } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import Animated from 'react-native-reanimated'
 
+import { useBottomBarPadding } from '../keyboard'
 import { useGradient, useTheme } from '../ThemeProvider'
-import { useKeyboardVisible } from '../useKeyboardVisible'
 import { Icon } from './Icon'
 import { Text } from './Text'
 
@@ -34,8 +34,9 @@ export function Composer({
 }) {
   const theme = useTheme()
   const gradient = useGradient()
-  const insets = useSafeAreaInsets()
-  const keyboardVisible = useKeyboardVisible()
+  // Tracks the keyboard rather than toggling with it, so the bar stays welded
+  // to the keyboard's top edge while you swipe it away (§7.2).
+  const bottomPadding = useBottomBarPadding(10)
   const [draft, setDraft] = useState('')
 
   const typing = draft.trim().length > 0
@@ -48,16 +49,11 @@ export function Composer({
   }
 
   return (
-    <View
+    <Animated.View
       style={[
         styles.wrap,
-        {
-          backgroundColor: theme.color.surface,
-          borderTopColor: theme.color.border,
-          // The home indicator is *under* the keyboard, so holding space for it
-          // while the keyboard is up just floats the composer above it.
-          paddingBottom: keyboardVisible ? 10 : Math.max(insets.bottom, 12) + 10
-        }
+        { backgroundColor: theme.color.surface, borderTopColor: theme.color.border },
+        bottomPadding
       ]}
     >
       {queued > 0 ? (
@@ -112,7 +108,7 @@ export function Composer({
           onPress={streaming ? onStop : submit}
         />
       </View>
-    </View>
+    </Animated.View>
   )
 }
 

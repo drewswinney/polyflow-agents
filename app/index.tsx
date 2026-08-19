@@ -1,6 +1,6 @@
 import { Redirect, router } from 'expo-router'
 import { useState } from 'react'
-import { KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native'
+import { StyleSheet, View } from 'react-native'
 
 import { useActiveConnection } from '@/state/ConnectionProvider'
 import { useAgents, useSelectedAgent, useSelectedAgentOrNull } from '@/state/agents'
@@ -14,6 +14,7 @@ import { ConnectionBanner } from '@/ui/components/ConnectionBanner'
 import { AgentGlyph } from '@/ui/components/Icon'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
+import { KeyboardInset } from '@/ui/keyboard'
 import { useTheme } from '@/ui/ThemeProvider'
 
 /**
@@ -66,11 +67,7 @@ export default function NewSessionScreen() {
         center={<AgentPill agent={agent} open={switcherOpen} onPress={() => setSwitcherOpen(true)} />}
       />
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
-      >
+      <KeyboardInset style={styles.flex}>
         <View style={styles.body}>
           <ConnectionBanner state={state} attempt={attempt} error={error} />
 
@@ -99,7 +96,7 @@ export default function NewSessionScreen() {
           onStop={() => undefined}
           // No mic: dictation records into a session, and there isn't one yet.
         />
-      </KeyboardAvoidingView>
+      </KeyboardInset>
 
       <AgentSwitcher
         agents={agents}

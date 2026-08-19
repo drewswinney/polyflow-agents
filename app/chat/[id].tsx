@@ -2,7 +2,7 @@ import { FlashList, type FlashListRef } from '@shopify/flash-list'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
-import { ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native'
 
 import type { TranscriptEntry } from '@/domain'
 import { useActiveConnection } from '@/state/ConnectionProvider'
@@ -21,6 +21,7 @@ import { StreamingTail } from '@/ui/components/StreamingTail'
 import { Text } from '@/ui/components/Text'
 import { TranscriptEntryView } from '@/ui/components/TranscriptEntryView'
 import { compactTokens, usd } from '@/ui/format'
+import { KeyboardInset } from '@/ui/keyboard'
 import { useTheme } from '@/ui/ThemeProvider'
 
 /**
@@ -141,11 +142,7 @@ export default function ChatScreen() {
         right={<IconButton name="ellipsis" accessibilityLabel="Session options" edge="right" />}
       />
 
-      <KeyboardAvoidingView
-        style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        keyboardVerticalOffset={0}
-      >
+      <KeyboardInset style={styles.flex}>
         {stream.loading ? (
           <ActivityIndicator color={theme.color.secondary} style={styles.loading} />
         ) : (
@@ -224,7 +221,7 @@ export default function ChatScreen() {
           onStop={stream.cancel}
           onVoice={backend?.capabilities.media.audioIn ? () => router.push(`/voice/${id}`) : undefined}
         />
-      </KeyboardAvoidingView>
+      </KeyboardInset>
     </View>
   )
 }
