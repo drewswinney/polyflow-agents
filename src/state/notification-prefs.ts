@@ -18,6 +18,10 @@ export interface NotificationPrefs {
   turnComplete: boolean
   /** A cron job failed. */
   cronFailures: boolean
+  /** The agent asked a question and is waiting on the answer. */
+  clarify: boolean
+  /** The agent produced something — a file, an image, a video. */
+  artifacts: boolean
   /** Mute everything except approvals between the quiet hours below. */
   quietHours: boolean
   quietFrom: number
@@ -30,6 +34,10 @@ const DEFAULTS: NotificationPrefs = {
   approvals: true,
   turnComplete: false,
   cronFailures: true,
+  // Blocking, like an approval: the turn is stopped until it is answered.
+  clarify: true,
+  // The only one that is purely informational, so the only one off by default.
+  artifacts: false,
   quietHours: false,
   quietFrom: 23,
   quietTo: 7
@@ -77,12 +85,18 @@ export const useNotificationPrefs = create<PrefsState>((set, get) => ({
  */
 export function shouldNotify(
   prefs: NotificationPrefs,
-  kind: 'approval' | 'complete' | 'cron_failure',
+  kind: 'approval' | 'clarify' | 'complete' | 'cron_failure' | 'artifact',
   now = new Date()
 ): boolean {
+  // Both of these stop the agent until answered, so both ring through quiet
+  // hours. Delaying them does not spare the interruption, it just leaves the
+  // work halted while you sleep.
   if (kind === 'approval') return prefs.approvals
+  if (kind === 'clarify') return prefs.clarify
+
   if (kind === 'complete' && !prefs.turnComplete) return false
   if (kind === 'cron_failure' && !prefs.cronFailures) return false
+  if (kind === 'artifact' && !prefs.artifacts) return false
 
   return !inQuietHours(prefs, now)
 }

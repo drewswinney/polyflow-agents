@@ -17,6 +17,7 @@ import * as SecureStore from 'expo-secure-store'
  * than merely wrong. Hence the dot.
  */
 const CREDENTIAL_PREFIX = 'agent-credential.'
+const PUSH_PREFIX = 'agent-push.'
 
 /** Agent ids are app-generated and already safe, but a key must never throw. */
 function credentialKey(agentId: string): string {
@@ -25,6 +26,49 @@ function credentialKey(agentId: string): string {
   if (!safe) throw new Error('An agent id cannot be empty.')
 
   return `${CREDENTIAL_PREFIX}${safe}`
+}
+
+function pushKey(agentId: string): string {
+  const safe = agentId.replace(/[^\w.-]/g, '_')
+
+  if (!safe) throw new Error('An agent id cannot be empty.')
+
+  return `${PUSH_PREFIX}${safe}`
+}
+
+/**
+ * Where this device registers for push, and the key it signs with.
+ *
+ * A second secret, distinct from the pairing token: it authenticates *one
+ * webhook route*, not the agent. It lives here for the same reason the
+ * credential does — and because the whole point of the notification design is
+ * that this key never travels in a payload.
+ */
+export interface PushRegistrationConfig {
+  baseUrl: string
+  secret: string
+}
+
+export async function savePushConfig(agentId: string, config: PushRegistrationConfig): Promise<void> {
+  await SecureStore.setItemAsync(pushKey(agentId), JSON.stringify(config), {
+    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY
+  })
+}
+
+export async function readPushConfig(agentId: string): Promise<PushRegistrationConfig | null> {
+  const raw = await SecureStore.getItemAsync(pushKey(agentId))
+
+  if (!raw) return null
+
+  try {
+    return JSON.parse(raw) as PushRegistrationConfig
+  } catch {
+    return null
+  }
+}
+
+export async function forgetPushConfig(agentId: string): Promise<void> {
+  await SecureStore.deleteItemAsync(pushKey(agentId))
 }
 
 export type AgentCredential =
