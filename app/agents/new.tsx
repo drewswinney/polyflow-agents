@@ -1,11 +1,12 @@
 import { LinearGradient } from 'expo-linear-gradient'
 import { router } from 'expo-router'
 import { useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import type { Agent, AgentKind } from '@/domain'
-import { saveAgentToken } from '@/platform/secure-store'
+import { HermesRest } from '@/backends/hermes'
+import type { Agent, AgentKind, AuthMode } from '@/domain'
+import { type AgentCredential, saveAgentCredential } from '@/platform/secure-store'
 import { useAgents } from '@/state/agents'
 import { Card } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
@@ -16,13 +17,16 @@ import { useGradient, useTheme } from '@/ui/ThemeProvider'
 /**
  * Add an agent (§7.14).
  *
- * Kind comes first because it determines everything after it — a Hermes agent
- * gets the full surface, anything else is reduced to model and tools (§4.1).
+ * Kind comes first because it determines everything after it. Then the host —
+ * and then the app **asks the host what it wants** rather than assuming.
  *
- * Enrolment is host + token, typed. The design leads with a QR scanner and names
- * `hermes pair`; neither exists — `hermes pairing` is list/approve/revoke/
- * clear-pending with no token issuance and no QR flow (§2.6) — so the manual
- * path is the primary one until the CLI grows the other.
+ * That probe is the important part. §5.3 assumed enrolment was a pasted bearer
+ * token; a self-hosted Hermes on a non-loopback bind almost always runs the
+ * built-in username/password provider instead, and there is no paste-a-token
+ * path at all unless a token-only provider is configured. `/api/status` and
+ * `/api/auth/providers` are both public precisely so a client can find this out
+ * before it has a credential, which also gives the design's "reachability is
+ * checked before pairing" for free.
  */
 export default function AddAgentScreen() {
   const theme = useTheme()
@@ -32,17 +36,51 @@ export default function AddAgentScreen() {
 
   const [kind, setKind] = useState<AgentKind>('hermes')
   const [host, setHost] = useState('')
-  const [token, setToken] = useState('')
   const [displayName, setDisplayName] = useState('')
-  const [revealToken, setRevealToken] = useState(false)
-  const [saving, setSaving] = useState(false)
 
-  const ready = host.trim().length > 0 && token.trim().length > 0 && displayName.trim().length > 0
+  const [probe, setProbe] = useState<Probe>({ status: 'idle' })
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [token, setToken] = useState('')
+  const [reveal, setReveal] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  const checkHost = async () => {
+    const target = host.trim()
+
+    if (!target) return
+
+    setProbe({ status: 'checking' })
+
+    try {
+      const rest = new HermesRest({ host: target })
+      const status = await rest.status()
+      const providers = await rest.authProviders().catch(() => [])
+      const passwordProvider = providers.find(provider => provider.supportsPassword)
+
+      setProbe({
+        status: 'reachable',
+        version: (status as { version?: string }).version ?? 'unknown',
+        providerName: passwordProvider?.name ?? providers[0]?.name ?? null,
+        authMode: passwordProvider ? 'password' : providers.length > 0 ? 'oauth' : 'token'
+      })
+    } catch (cause) {
+      setProbe({ status: 'unreachable', message: cause instanceof Error ? cause.message : String(cause) })
+    }
+  }
+
+  const authMode: AuthMode = probe.status === 'reachable' ? probe.authMode : 'token'
+  const needsPassword = authMode === 'password'
+
+  const credentialReady = needsPassword ? username.trim() && password.trim() : token.trim()
+  const ready = Boolean(host.trim() && displayName.trim() && credentialReady) && !saving
 
   const save = async () => {
-    if (!ready || saving) return
+    if (!ready) return
 
     setSaving(true)
+    setSaveError(null)
 
     const agent: Agent = {
       id: `agent-${Date.now().toString(36)}`,
@@ -50,14 +88,31 @@ export default function AddAgentScreen() {
       kind,
       icon: kind === 'hermes' ? 'server' : 'cloud',
       host: host.trim(),
-      authMode: 'token',
-      // Reachability is probed on connect; an offline host can still be saved.
-      connection: 'offline'
+      authMode,
+      ...(needsPassword ? { username: username.trim() } : {}),
+      ...(probe.status === 'reachable' && probe.providerName ? { authProvider: probe.providerName } : {}),
+      // Reachability was checked above, but an offline host can still be saved:
+      // the connection attempt on selection is what sets this for real.
+      connection: probe.status === 'reachable' ? 'idle' : 'offline'
     }
 
-    await saveAgentToken(agent.id, token.trim())
-    await add(agent)
-    router.back()
+    const credential: AgentCredential = needsPassword
+      ? {
+          kind: 'password',
+          provider: (probe.status === 'reachable' && probe.providerName) || 'basic',
+          username: username.trim(),
+          password: password.trim()
+        }
+      : { kind: 'token', token: token.trim() }
+
+    try {
+      await saveAgentCredential(agent.id, credential)
+      await add(agent)
+      router.back()
+    } catch (cause) {
+      setSaveError(cause instanceof Error ? cause.message : String(cause))
+      setSaving(false)
+    }
   }
 
   return (
@@ -82,29 +137,90 @@ export default function AddAgentScreen() {
           onPress={() => setKind('other')}
         />
 
-        <Field label="Host and port" value={host} onChange={setHost} placeholder="hermes.tailnet.ts.net:9119" mono />
         <Field
-          label="Pairing token"
-          value={token}
-          onChange={setToken}
-          placeholder="paste the token from the host"
-          secure={!revealToken}
+          label="Host and port"
+          value={host}
+          onChange={value => {
+            setHost(value)
+            setProbe({ status: 'idle' })
+          }}
+          placeholder="10.0.0.68:9119"
           mono
-          trailing={
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={revealToken ? 'Hide token' : 'Show token'}
-              onPress={() => setRevealToken(value => !value)}
-            >
-              <Icon name={revealToken ? 'eye-slash' : 'eye'} size={14} color={theme.color.gray400} />
-            </Pressable>
-          }
         />
-        <Field label="Display name" value={displayName} onChange={setDisplayName} placeholder="garage pi" />
+
+        <Pressable
+          accessibilityRole="button"
+          disabled={!host.trim() || probe.status === 'checking'}
+          onPress={() => void checkHost()}
+          style={[styles.outlineButton, { borderColor: theme.color.border, borderRadius: theme.radius.control }]}
+        >
+          {probe.status === 'checking' ? (
+            <ActivityIndicator color={theme.color.secondary} />
+          ) : (
+            <Text variant="rowLabelStrong" color={theme.color.primary}>
+              Check this host
+            </Text>
+          )}
+        </Pressable>
+
+        {probe.status === 'reachable' ? (
+          <Card style={styles.probeCard}>
+            <View style={styles.probeHead}>
+              <Icon name="circle-check" size={14} color={theme.color.success700} />
+              <Text variant="rowLabelStrong">Reachable</Text>
+            </View>
+            <Text variant="monoSmall">{`hermes ${probe.version} · ${describeAuth(probe.authMode)}`}</Text>
+          </Card>
+        ) : null}
+
+        {probe.status === 'unreachable' ? (
+          <Card style={styles.probeCard}>
+            <View style={styles.probeHead}>
+              <Icon name="circle-exclamation" size={14} color={theme.color.warning700} />
+              <Text variant="rowLabelStrong">Could not reach it</Text>
+            </View>
+            <Text variant="secondary">{probe.message}</Text>
+            <Text variant="secondary">
+              You can still save it — the agent will show as offline until it answers.
+            </Text>
+          </Card>
+        ) : null}
+
+        {needsPassword ? (
+          <>
+            <Field label="Username" value={username} onChange={setUsername} placeholder="drew" mono />
+            <Field
+              label="Password"
+              value={password}
+              onChange={setPassword}
+              placeholder="the dashboard password"
+              secure={!reveal}
+              mono
+              trailing={<RevealToggle revealed={reveal} onToggle={() => setReveal(value => !value)} />}
+            />
+          </>
+        ) : (
+          <Field
+            label="Access token"
+            value={token}
+            onChange={setToken}
+            placeholder="paste the token from the host"
+            secure={!reveal}
+            mono
+            trailing={<RevealToggle revealed={reveal} onToggle={() => setReveal(value => !value)} />}
+          />
+        )}
+
+        <Field label="Display name" value={displayName} onChange={setDisplayName} placeholder="home hermes" />
+
+        {saveError ? (
+          <Text variant="secondary" color={theme.color.error700}>
+            {saveError}
+          </Text>
+        ) : null}
 
         <Text variant="secondary">
-          Approve this device on the host with `hermes pairing approve`. Reachability is checked when you connect —
-          an offline host can still be saved.
+          Credentials go to this phone's keychain and are sent only to this host.
         </Text>
 
         <Pressable accessibilityRole="button" disabled={!ready} onPress={() => void save()}>
@@ -121,6 +237,39 @@ export default function AddAgentScreen() {
         </Pressable>
       </ScrollView>
     </View>
+  )
+}
+
+type Probe =
+  | { status: 'idle' }
+  | { status: 'checking' }
+  | { status: 'reachable'; version: string; providerName: string | null; authMode: AuthMode }
+  | { status: 'unreachable'; message: string }
+
+function describeAuth(mode: AuthMode): string {
+  switch (mode) {
+    case 'password':
+      return 'username + password'
+    case 'oauth':
+      return 'oauth sign-in'
+    case 'token':
+    default:
+      return 'bearer token'
+  }
+}
+
+function RevealToggle({ revealed, onToggle }: { revealed: boolean; onToggle: () => void }) {
+  const theme = useTheme()
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={revealed ? 'Hide' : 'Show'}
+      onPress={onToggle}
+      hitSlop={8}
+    >
+      <Icon name={revealed ? 'eye-slash' : 'eye'} size={14} color={theme.color.gray400} />
+    </Pressable>
   )
 }
 
@@ -209,5 +358,8 @@ const styles = StyleSheet.create({
   field: { gap: 6 },
   input: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 12, borderWidth: 1 },
   inputText: { flex: 1, fontSize: 14 },
+  outlineButton: { height: 44, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth },
+  probeCard: { padding: 14, gap: 6 },
+  probeHead: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   primary: { height: 52, alignItems: 'center', justifyContent: 'center', marginTop: 4 }
 })

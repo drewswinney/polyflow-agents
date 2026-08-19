@@ -361,16 +361,60 @@ Hermes offers three shapes; we support two:
    minted via `POST /api/auth/ws-ticket`, TTL **30 seconds**, consumed on upgrade.
 3. *(Not used)* the process-lifetime internal credential — server-spawned children only.
 
+### 5.3.1 What the host actually does
+
+Reading the server corrected shape 1. **Bearer tokens are not a general auth
+mode.** `hermes_cli/dashboard_auth/token_auth.py` only accepts a bearer token on
+routes explicitly registered with `register_token_route()`, and the only caller
+that registers one today is the `drain` plugin. Every `/api/*` route the app
+needs is gated on a **session**, not a token, so "paste a token" — which §7.8
+made the whole enrolment story — authenticates nothing on a stock install.
+
+What a self-hosted, non-loopback Hermes really runs is the built-in
+username/password provider (`HERMES_DASHBOARD_BASIC_AUTH_USERNAME` /
+`_PASSWORD`). `--insecure` cannot bypass it: it is a documented no-op since the
+June 2026 hardening. So the real flow is:
+
+```
+POST /auth/password-login  { provider, username, password }   → sets session cookies
+GET  /api/…                                                    → cookie, or Bearer <access token>
+POST /api/auth/ws-ticket                                       → { ticket, ttl_seconds: 30 }
+WSS  /api/ws?ticket=…                                          → single-use, consumed on upgrade
+```
+
+Three details that matter:
+
+- The access token is set as a **cookie** and never returned in the body, so the
+  client sends `credentials: 'include'` and lets the platform cookie store hold
+  it, rather than keeping a token in app memory.
+- **The ticket path is not OAuth-specific.** Any session-authenticated client
+  needs it, because a WebSocket upgrade cannot carry an `Authorization` header.
+  Password auth uses exactly the same mint-then-dial contract, and the 30-second
+  TTL binds just as hard.
+- `/api/auth/providers` and `/auth/password-login` are both public
+  (`_GATE_PUBLIC_PREFIXES`), which is what lets the app **ask the host what it
+  wants** before it has any credential. Add-an-agent probes `/api/status` and
+  that endpoint, so enrolment adapts to the host instead of assuming, and the
+  design's "reachability is checked before pairing" comes free.
+
+RFC 8252 native-app login (system browser + loopback + PKCE) exists at
+`/auth/native/authorize`, but the password provider declines it — that path is
+for OAuth providers such as Nous Portal. It is the natural third auth mode if a
+portal-backed agent ever needs supporting.
+
 The 30-second TTL has a hard design consequence: **mint the ticket immediately
 before opening the socket, never cache it, and re-mint on every reconnect.**
 A phone that wakes from background after an hour has a stale everything; the
 reconnect path must be mint-then-dial, in that order. `resolveGatewayWsUrl()` in
 `@hermes/shared` already implements exactly this — another argument for vendoring.
 
-Device enrolment uses `hermes pairing`: the user runs `hermes pairing approve` on
-the host, and `hermes pairing revoke` gives a real "lost my phone" story. Note
-that there is **no QR flow and no token-issuance command** (§2.6) — enrolment is
-host + token, typed (§7.8).
+`hermes pairing` is **not** device enrolment for this app — it manages DM pairing
+codes for messaging-platform users (Discord, Telegram), which is a different
+concept that happens to share the word. There is no QR flow and no
+token-issuance command (§2.6), and no per-device revocation for a phone client:
+revoking access means changing the dashboard password, which logs every device
+out. A per-device credential is a real gap, and the right shape for it is the
+token-route seam the `drain` plugin already uses.
 
 ### 5.4 Reconnect
 

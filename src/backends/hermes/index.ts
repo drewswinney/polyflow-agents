@@ -75,7 +75,7 @@ const OUTCOME_TO_CHOICE: Record<PermissionOutcome, string> = {
 }
 
 export interface HermesBackendConfig extends HermesRestConfig {
-  authMode: 'token' | 'oauth'
+  authMode: 'token' | 'oauth' | 'password'
 }
 
 export class HermesBackend implements AgentBackend {
@@ -115,6 +115,15 @@ export class HermesBackend implements AgentBackend {
 
     this.state.set('connecting')
 
+    // Password auth has to establish the session before anything else: the
+    // ticket endpoint is itself session-gated, so minting one without logging
+    // in first returns 401, not a ticket.
+    if (this.config.authMode === 'password') {
+      await this.rest.login()
+    }
+
+    if (signal?.aborted) return
+
     const wsUrl = await this.resolveWsUrl()
 
     if (signal?.aborted) return
@@ -144,28 +153,30 @@ export class HermesBackend implements AgentBackend {
    * everything (§5.3).
    */
   private resolveWsUrl(): Promise<string> {
-    const base = buildHermesWebSocketUrl({
-      path: '/api/ws',
-      host: this.config.host,
-      protocol: this.rest.baseUrl.startsWith('https') ? 'https:' : 'http:',
-      params: this.config.profile ? { profile: this.config.profile } : {},
-      authParam: this.config.authMode === 'token' ? ['token', this.config.token] : undefined
-    })
+    const token = this.config.token
+    const dial = (authParam?: readonly [string, string]) =>
+      buildHermesWebSocketUrl({
+        path: '/api/ws',
+        host: this.config.host,
+        protocol: this.rest.baseUrl.startsWith('https') ? 'https:' : 'http:',
+        params: this.config.profile ? { profile: this.config.profile } : {},
+        authParam
+      })
+
+    const base = dial(this.config.authMode === 'token' && token ? ['token', token] : undefined)
 
     return resolveGatewayWsUrl(
       {
+        // Session auth — OAuth *or* password — cannot put a credential on a
+        // WebSocket upgrade, so it dials with a single-use ticket instead.
+        // Minted here, immediately before the dial, because the TTL is 30
+        // seconds and a phone waking from background has a stale everything.
         getGatewayWsUrl: async () => {
-          if (this.config.authMode !== 'oauth') return base
+          if (this.config.authMode === 'token') return base
 
           const { ticket } = await this.rest.wsTicket()
 
-          return buildHermesWebSocketUrl({
-            path: '/api/ws',
-            host: this.config.host,
-            protocol: this.rest.baseUrl.startsWith('https') ? 'https:' : 'http:',
-            params: this.config.profile ? { profile: this.config.profile } : {},
-            authParam: ['ticket', ticket]
-          })
+          return dial(['ticket', ticket])
         }
       },
       { authMode: this.config.authMode, profile: this.config.profile ?? null, wsUrl: base }

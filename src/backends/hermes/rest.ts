@@ -34,12 +34,21 @@ import type {
 export interface HermesRestConfig {
   /** `host:port`, no scheme. */
   host: string
-  token: string
+  /** Bearer token, for a host running a token-only auth provider. */
+  token?: string
+  /** Username/password credentials, for the built-in `basic` provider. */
+  password?: { provider: string; username: string; password: string }
   /** Hermes profile to scope profile-aware endpoints to; null → primary. */
   profile?: string | null
   /** Defaults to https for anything that is not a loopback host. */
   secure?: boolean
   fetchImpl?: typeof fetch
+}
+
+export interface AuthProviderInfo {
+  name: string
+  displayName: string
+  supportsPassword: boolean
 }
 
 export class HermesRestError extends Error {
@@ -105,9 +114,13 @@ export class HermesRest {
         method: init.method ?? 'GET',
         headers: {
           Accept: 'application/json',
-          Authorization: `Bearer ${this.config.token}`,
+          // Only sent when a bearer token exists. Password auth mints a session
+          // cookie instead, which React Native's fetch carries automatically
+          // from the platform cookie store.
+          ...(this.config.token ? { Authorization: `Bearer ${this.config.token}` } : {}),
           ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' })
         },
+        credentials: 'include',
         body: init.body === undefined ? undefined : JSON.stringify(init.body),
         signal: controller.signal
       })
@@ -249,10 +262,61 @@ export class HermesRest {
   }
 
   /**
-   * Single-use WebSocket ticket for OAuth-gated gateways. TTL is 30 seconds, so
-   * this is minted immediately before dialling and never cached (§5.3).
+   * Single-use WebSocket ticket for any session-gated gateway — OAuth *or*
+   * password. TTL is 30 seconds, so this is minted immediately before dialling
+   * and never cached (§5.3).
+   *
+   * The reason it exists is worth remembering: a WebSocket upgrade cannot carry
+   * an `Authorization` header, so a session-authenticated client has no way to
+   * present its credential except as a query param.
    */
-  wsTicket(): Promise<{ ticket: string }> {
-    return this.request<{ ticket: string }>('/api/auth/ws-ticket', { method: 'POST', timeoutMs: 10_000 })
+  wsTicket(): Promise<{ ticket: string; ttl_seconds: number }> {
+    return this.request<{ ticket: string; ttl_seconds: number }>('/api/auth/ws-ticket', {
+      method: 'POST',
+      timeoutMs: 10_000
+    })
+  }
+
+  // --- Auth ---------------------------------------------------------------
+
+  /**
+   * Which auth providers the host offers. Public — no credential needed — so
+   * this is how the app discovers what to ask the user for before it has one.
+   */
+  async authProviders(): Promise<AuthProviderInfo[]> {
+    const result = await this.request<{ providers?: Array<{ name: string; display_name: string; supports_password?: boolean }> }>(
+      '/api/auth/providers',
+      { timeoutMs: 10_000 }
+    )
+
+    return (result.providers ?? []).map(provider => ({
+      name: provider.name,
+      displayName: provider.display_name,
+      supportsPassword: provider.supports_password === true
+    }))
+  }
+
+  /**
+   * Exchange username/password for a session.
+   *
+   * The server sets its session cookies on this response and returns only
+   * `{ok, next}` — the access token is never in the body. That is why the rest
+   * of this client sends `credentials: 'include'` rather than holding a token:
+   * the credential lives in the platform cookie store, not in app memory.
+   */
+  async login(): Promise<void> {
+    const credentials = this.config.password
+
+    if (!credentials) throw new Error('No password credentials configured for this agent.')
+
+    await this.request<{ ok: boolean; next?: string }>('/auth/password-login', {
+      method: 'POST',
+      body: {
+        provider: credentials.provider,
+        username: credentials.username,
+        password: credentials.password
+      },
+      timeoutMs: 20_000
+    })
   }
 }

@@ -15,8 +15,17 @@ export type AgentKind = 'hermes' | 'other'
 /** Coarse reachability, as drawn on the agent pill (design §Global chrome). */
 export type AgentConnection = 'connected' | 'idle' | 'offline'
 
-/** How the app authenticates against the host (§5.3). */
-export type AuthMode = 'token' | 'oauth'
+/**
+ * How the app authenticates against the host (§5.3).
+ *
+ * `password` is the one §5.3 did not anticipate and the one a self-hosted
+ * Hermes actually uses. A non-loopback bind requires an auth provider, and the
+ * built-in provider is username/password: the app posts credentials to
+ * `/auth/password-login`, the server mints a session, and the WebSocket is then
+ * dialled with a short-lived ticket. There is no paste-a-bearer-token path
+ * unless a token-only provider is configured.
+ */
+export type AuthMode = 'token' | 'oauth' | 'password'
 
 /**
  * The single user-facing noun (§5.2). The harness is a *property* of an agent,
@@ -31,6 +40,10 @@ export interface Agent {
   /** `host:port`, e.g. `hermes.tailnet.ts.net:9119`. */
   host: string
   authMode: AuthMode
+  /** Set for `password` auth. The secret itself lives in the keychain. */
+  username?: string
+  /** Which auth provider on the host to authenticate against, e.g. `basic`. */
+  authProvider?: string
   /** Hermes multi-profile support; undefined → primary profile. */
   profile?: string
   /** Optional per-agent accent override; falls back to the base palette. */

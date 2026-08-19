@@ -14,7 +14,7 @@ import { AppState, type AppStateStatus } from 'react-native'
 
 import { activateBackend, MOCK_HOST, releaseBackend } from '@/backends/registry'
 import type { Agent, AgentBackend, ConnectionState } from '@/domain'
-import { readAgentToken } from '@/platform/secure-store'
+import { type AgentCredential, readAgentCredential } from '@/platform/secure-store'
 
 export interface Connection {
   backend: AgentBackend | null
@@ -55,18 +55,19 @@ export function useConnection(agent: Agent): Connection {
 
       // The mock needs no credential; a real host without one is a pairing
       // problem, surfaced rather than retried forever.
-      const token = agent.host === MOCK_HOST ? 'mock' : await readAgentToken(agent.id)
+      const credential: AgentCredential | null =
+        agent.host === MOCK_HOST ? { kind: 'token', token: 'mock' } : await readAgentCredential(agent.id)
 
       if (cancelled) return
 
-      if (!token) {
+      if (!credential) {
         setState('error')
-        setError('No pairing token stored for this agent.')
+        setError('No credentials stored for this agent. Add it again to re-pair.')
 
         return
       }
 
-      const next = activateBackend(agent, token)
+      const next = activateBackend(agent, credential)
 
       if (cancelled) return
 
