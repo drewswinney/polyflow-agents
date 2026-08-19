@@ -44,12 +44,31 @@ export function useConnection(agent: Agent | null): Connection {
   const [nonce, setNonce] = useState(0)
   const wasBackgrounded = useRef(false)
 
+  /**
+   * What a redial actually depends on.
+   *
+   * Not the agent object: its identity changes whenever *anything* on the
+   * record is written, including the connection status this very effect
+   * causes to be written. Depending on the object therefore means every
+   * connect triggers a disconnect and another connect, forever. Only these
+   * fields change where or how the socket is dialled.
+   */
+  const dialKey = agent
+    ? [agent.id, agent.host, agent.authMode, String(agent.secure ?? ''), agent.profile ?? ''].join('|')
+    : ''
+
+  // Read inside the effect so a status write does not re-run it.
+  const agentRef = useRef(agent)
+  agentRef.current = agent
+
   useEffect(() => {
     let cancelled = false
     const controller = new AbortController()
 
     async function open() {
       setError(null)
+
+      const agent = agentRef.current
 
       // Nothing to dial before onboarding has run. Idle, not error: an empty
       // registry is a first run, not a failure.
@@ -137,7 +156,7 @@ export function useConnection(agent: Agent | null): Connection {
       controller.abort()
       void pending.then(unsubscribe => unsubscribe?.())
     }
-  }, [agent, nonce, patchAgent])
+  }, [dialKey, nonce, patchAgent])
 
   // Switching agents re-scopes the whole app; the previous socket goes with it.
   useEffect(() => releaseBackend, [])

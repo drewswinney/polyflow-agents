@@ -31,9 +31,14 @@ export function ConnectionProvider({ agent, children }: { agent: Agent | null; c
   // that writes it.
   const setConnection = useAgents(state => state.setConnection)
 
+  // Keyed on the id, not the agent object: writing the status replaces that
+  // row, so depending on the object means depending on something this effect
+  // itself changes.
+  const agentId = agent?.id
+
   useEffect(() => {
-    if (agent) setConnection(agent.id, describeConnection(connection.state))
-  }, [agent, connection.state, setConnection])
+    if (agentId) setConnection(agentId, describeConnection(connection.state))
+  }, [agentId, connection.state, setConnection])
 
   return <ConnectionContext.Provider value={connection}>{children}</ConnectionContext.Provider>
 }

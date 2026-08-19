@@ -90,11 +90,23 @@ export const useAgents = create<AgentsState>((set, get) => ({
   },
 
   setConnection(id, connection, latencyMs) {
-    set(state => ({
-      agents: state.agents.map(agent =>
-        agent.id === id ? { ...agent, connection, ...(latencyMs === undefined ? {} : { latencyMs }) } : agent
-      )
-    }))
+    set(state => {
+      const current = state.agents.find(agent => agent.id === id)
+
+      // Bail before touching state when nothing actually changed. Rebuilding
+      // the row unconditionally gives every subscriber a new object identity,
+      // and a subscriber that writes back on identity — as the connection
+      // provider does — turns that into an infinite render loop.
+      if (!current || (current.connection === connection && (latencyMs === undefined || current.latencyMs === latencyMs))) {
+        return state
+      }
+
+      return {
+        agents: state.agents.map(agent =>
+          agent.id === id ? { ...agent, connection, ...(latencyMs === undefined ? {} : { latencyMs }) } : agent
+        )
+      }
+    })
   }
 }))
 
