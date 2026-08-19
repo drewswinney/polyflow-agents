@@ -7,6 +7,7 @@ import { ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, View } f
 import type { TranscriptEntry } from '@/domain'
 import { useActiveConnection } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
+import { useSidebar } from '@/state/sidebar'
 import { useSessionStream } from '@/state/session-stream'
 import { useIsStreaming } from '@/state/stream-tail'
 import { useChatInbox } from '@/state/chat-inbox'
@@ -28,14 +29,14 @@ import { useTheme } from '@/ui/ThemeProvider'
  * tail as its footer. Tokens land in the tail's own store, so a delta repaints
  * one bubble rather than the list (§7.3).
  *
- * No agent pill here: sub-screens are reached by a back chevron and the agent is
- * established by how you got here (design §Global chrome).
+ * No agent pill here: the agent is established by how you got into the session.
  */
 export default function ChatScreen() {
   const theme = useTheme()
   const agent = useSelectedAgent()
   const { id } = useLocalSearchParams<{ id: string }>()
   const { backend, state, attempt } = useActiveConnection()
+  const openSidebar = useSidebar(store => store.show)
   const listRef = useRef<FlashListRef<TranscriptEntry>>(null)
 
   const stream = useSessionStream(backend, id, state)
@@ -98,7 +99,8 @@ export default function ChatScreen() {
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
       <ScreenHeader
         title={stream.transcript?.title ?? 'Session'}
-        onBack={() => router.back()}
+        onMenu={openSidebar}
+        titleVariant="sub"
         subtitle={
           state === 'open' ? (
             meta ? <Text variant="monoSmall">{meta}</Text> : null

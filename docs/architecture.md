@@ -479,8 +479,9 @@ sizes, spacing and touch targets. This section covers **behaviour and API
 backing**; it deliberately does not duplicate the tokens.
 
 Home is **New session** (§7.18). Navigation is a **slide-out sidebar** (§7.17),
-opened from the hamburger at the top-left of every top-level screen. Everything
-else is a sub-screen reached by a back chevron.
+opened from the hamburger at the top-left of home, Sessions, Settings and chat —
+the four screens you move *between* rather than *into*. Everything else is a
+sub-screen reached by a back chevron.
 
 | # | Screen | Kind | Backed by |
 |---|---|---|---|
@@ -530,6 +531,13 @@ The core screen and the one that earns the app.
   (`process.kill`) lives in the composer while streaming, *not* in the overflow menu
 - Overflow menu: rename session, switch model, view raw events
 - Usage/cost readout from `session.usage`
+
+Chat carries the **hamburger**, not a back chevron: it is where home lands you
+after the first message (§7.18), so it is a place you navigate away from through
+the sidebar rather than back out of. The stack is untouched — the Android back
+button and the iOS edge-swipe still pop it — only the chevron is gone. Its title
+keeps the smaller type: the session's own name is not a screen name and should
+not be set like one.
 
 ### 7.3 Streaming performance
 

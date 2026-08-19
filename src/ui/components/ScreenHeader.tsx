@@ -39,6 +39,7 @@ export function ScreenHeader({
   center,
   onBack,
   onMenu,
+  titleVariant,
   right,
   insetTop = true
 }: {
@@ -52,6 +53,14 @@ export function ScreenHeader({
    * you can go back from is one you did not reach from the sidebar.
    */
   onMenu?: () => void
+  /**
+   * Type size for the title. Defaults to the display size on a screen you
+   * cannot go back from and the smaller one where you can — which is right
+   * until a screen has both a hamburger *and* content for a title, as chat
+   * does: the session's own name is not a screen name and should not be set
+   * like one.
+   */
+  titleVariant?: 'screen' | 'sub'
   right?: ReactNode
   /**
    * Whether to reserve room for the status bar.
@@ -105,7 +114,7 @@ export function ScreenHeader({
         {centred ? <View style={styles.side}>{leftControl}</View> : leftControl}
 
         <Text
-          variant={onBack ? 'subTitle' : 'screenTitle'}
+          variant={(titleVariant ?? (onBack ? 'sub' : 'screen')) === 'sub' ? 'subTitle' : 'screenTitle'}
           numberOfLines={1}
           style={[styles.title, centred ? styles.titleCentred : null]}
         >
