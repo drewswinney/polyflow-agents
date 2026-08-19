@@ -72,8 +72,14 @@ export function useConnection(agent: Agent): Connection {
       }
 
       // An agent added while the host was unreachable has no scheme on record,
-      // and guessing one is how you get a socket that never opens and a UI that
-      // says "connecting" forever. Probe once, remember the answer.
+      // and guessing one is how you get a socket that never opens. Probe once,
+      // remember the answer.
+      //
+      // **Never fatal.** The probe is an optimisation, not a gate: it gives up
+      // after 5s per scheme where the real connect gets 15s, so letting it veto
+      // the attempt means a slow hop refuses a connection that would have
+      // worked. On failure the agent is used exactly as it was and the connect
+      // below reports what actually went wrong.
       let resolved = agent
 
       if (agent.secure === undefined && agent.host !== MOCK_HOST) {
@@ -84,14 +90,8 @@ export function useConnection(agent: Agent): Connection {
 
           resolved = { ...agent, secure }
           patchAgent(agent.id, { secure })
-        } catch (cause) {
-          if (!cancelled) {
-            setState('error')
-            setError(cause instanceof Error ? cause.message : String(cause))
-            setAttempt(count => count + 1)
-          }
-
-          return
+        } catch {
+          if (cancelled) return
         }
       }
 
