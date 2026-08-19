@@ -2,7 +2,7 @@ import { FlashList, type FlashListRef } from '@shopify/flash-list'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
-import { ActivityIndicator, Platform, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, Keyboard, Platform, StyleSheet, View } from 'react-native'
 
 import type { TranscriptEntry } from '@/domain'
 import { useActiveConnection } from '@/state/ConnectionProvider'
@@ -68,6 +68,24 @@ export default function ChatScreen() {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
     atBottom.current = contentSize.height - (contentOffset.y + layoutMeasurement.height) < 80
     setScrolledAway(current => (current === !atBottom.current ? current : !atBottom.current))
+  }, [])
+
+  // The keyboard coming up shrinks the list by its height, which slides the
+  // newest message up behind it. Following it keeps the last thing said in view
+  // — animated, so it rises alongside the keyboard rather than after it. The
+  // second pass corrects for the frame still shrinking under the first.
+  useEffect(() => {
+    const follow = () => {
+      if (atBottom.current) listRef.current?.scrollToEnd({ animated: true })
+    }
+
+    const willShow = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', follow)
+    const didShow = Keyboard.addListener('keyboardDidShow', follow)
+
+    return () => {
+      willShow.remove()
+      didShow.remove()
+    }
   }, [])
 
   // An approval should be on screen, not appended below the fold. Keyed by id so
