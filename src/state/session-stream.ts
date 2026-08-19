@@ -77,6 +77,18 @@ export function useSessionStream(
   const tail = useMemo(() => createStreamTail(), [sessionId])
   const wasStreaming = useRef(false)
 
+  /**
+   * The session whose transcript is already on screen.
+   *
+   * A reload is routine — every reconnect refetches, because the delta stream
+   * is not resumable (§5.4) — and it must not blank what is already rendered.
+   * Chat swaps the whole list for a spinner while `loading` is true, so a
+   * reconnect used to tear the transcript down and rebuild it at the bottom,
+   * losing the read position for a refetch that usually returns the same rows.
+   * Only the first load of a session is worth showing as loading.
+   */
+  const shownSession = useRef<SessionId | null>(null)
+
   useEffect(() => () => tail.dispose(), [tail])
 
   // --- Transcript load ----------------------------------------------------
@@ -86,14 +98,15 @@ export function useSessionStream(
     if (!backend) return
 
     let cancelled = false
-    setLoading(true)
 
+    if (shownSession.current !== sessionId) setLoading(true)
 
     backend
       .loadSession(sessionId)
       .then(loaded => {
         if (cancelled) return
 
+        shownSession.current = sessionId
         setTranscript(loaded)
         // Keep the existing array when the content is the same. A reload is
         // routine — every reconnect refetches, because the delta stream is not

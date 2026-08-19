@@ -57,6 +57,18 @@ export function useConnection(agent: Agent | null): Connection {
   const failures = useRef(0)
 
   /**
+   * The live socket state, and whether this hook is mid-dial.
+   *
+   * Both are read by the triggers below, which must not re-subscribe every time
+   * the state they are watching changes — hence refs beside the state rather
+   * than the state itself.
+   */
+  const stateRef = useRef<ConnectionState>('idle')
+  const dialing = useRef(false)
+
+  stateRef.current = state
+
+  /**
    * What a redial actually depends on.
    *
    * Not the agent object: its identity changes whenever *anything* on the
@@ -79,6 +91,7 @@ export function useConnection(agent: Agent | null): Connection {
 
     async function open() {
       setError(null)
+      dialing.current = true
 
       const agent = agentRef.current
 
@@ -167,6 +180,7 @@ export function useConnection(agent: Agent | null): Connection {
       } catch (cause) {
         if (!cancelled) {
           failures.current += 1
+
           // The gateway client can be left mid-dial, and a banner that says
           // "connecting" forever is worse than one that says what went wrong:
           // it looks like progress and hides the reason.
@@ -179,7 +193,9 @@ export function useConnection(agent: Agent | null): Connection {
       return unsubscribe
     }
 
-    const pending = open()
+    const pending = open().finally(() => {
+      dialing.current = false
+    })
 
     return () => {
       cancelled = true
@@ -196,13 +212,21 @@ export function useConnection(agent: Agent | null): Connection {
     setNonce(value => value + 1)
   }
 
-  // Foreground → verify the socket. Neither OS keeps a WebSocket alive in
-  // background indefinitely, so a closed socket on resume is expected, not an error.
+  // Foreground → check the socket, rather than replace it on principle.
+  //
+  // This used to redial on every return to the app. Neither OS keeps a
+  // WebSocket alive in background indefinitely — but plenty of trips out of the
+  // app are seconds long and the socket is untouched when you come back, and a
+  // redial is not free: it releases the backend, and a new backend makes every
+  // open chat refetch its transcript and lose where you were reading. A socket
+  // that did not survive says so — see the watcher below, which redials on the
+  // close itself instead of on the timing of your return.
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (next: AppStateStatus) => {
       if (next === 'active' && wasBackgrounded.current) {
         wasBackgrounded.current = false
-        setNonce(value => value + 1)
+
+        if (stateRef.current !== 'open') setNonce(value => value + 1)
       } else if (next !== 'active') {
         wasBackgrounded.current = true
       }
@@ -210,6 +234,31 @@ export function useConnection(agent: Agent | null): Connection {
 
     return () => subscription.remove()
   }, [])
+
+  /**
+   * A socket that drops while the app is open gets redialled on its own.
+   *
+   * This is what makes the foreground check above safe to skip: the recovery
+   * no longer hangs off returning to the app, so it also covers the socket that
+   * dies with the app in front of you, which nothing used to redial at all.
+   *
+   * Only from `closed` — a socket that was up and went away. A failed dial ends
+   * in `error`, and redialling on that is a loop with a network outage as its
+   * exit condition. The delay and the `dialing` guard keep this off our own
+   * teardown, which closes the previous socket on the way to opening the next.
+   */
+  useEffect(() => {
+    if (state !== 'closed' || dialing.current) return
+
+    const timer = setTimeout(() => {
+      if (dialing.current || stateRef.current !== 'closed') return
+      if (AppState.currentState !== 'active') return
+
+      setNonce(value => value + 1)
+    }, 1_200)
+
+    return () => clearTimeout(timer)
+  }, [state])
 
   // A cell ↔ wifi ↔ tailnet transition invalidates the socket's path even when
   // the socket itself has not noticed yet; force a redial.
