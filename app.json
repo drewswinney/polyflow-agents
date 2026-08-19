@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "Hermes Handheld",
+    "name": "Polyflow Agents",
     "slug": "agent-handheld",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -51,7 +51,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Hermes Handheld uses the microphone so you can dictate a message to your agent."
+          "microphonePermission": "Polyflow Agents uses the microphone so you can dictate a message to your agent."
         }
       ],
       [
