@@ -124,7 +124,8 @@ export default function AddAgentScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
-      <ScreenHeader title="Add an agent" onBack={() => router.back()} />
+      {/* Presented modally, so the hosting card already provides the top inset. */}
+      <ScreenHeader title="Add an agent" onBack={() => router.back()} insetTop={false} />
 
       <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
         <Text variant="secondary">

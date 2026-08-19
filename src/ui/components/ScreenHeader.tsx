@@ -38,13 +38,22 @@ export function ScreenHeader({
   subtitle,
   center,
   onBack,
-  right
+  right,
+  insetTop = true
 }: {
   title: string
   subtitle?: ReactNode
   center?: ReactNode
   onBack?: () => void
   right?: ReactNode
+  /**
+   * Whether to reserve room for the status bar.
+   *
+   * False inside a modal. A modally presented screen is already inset by the
+   * card that hosts it, but the safe-area context still reports the *window's*
+   * top inset — so applying it there pads twice and the header floats.
+   */
+  insetTop?: boolean
 }) {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
@@ -58,7 +67,7 @@ export function ScreenHeader({
         {
           // Both pads sit on the wrap, not inside a row, so the header actually
           // grows rather than shuffling its contents within a fixed height.
-          paddingTop: insets.top + theme.space.headerTop,
+          paddingTop: (insetTop ? insets.top : 0) + theme.space.headerTop,
           paddingBottom: theme.space.headerBottom,
           borderBottomColor: theme.color.border
         }

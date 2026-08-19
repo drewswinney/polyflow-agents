@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useGradient, useTheme } from '../ThemeProvider'
+import { useKeyboardVisible } from '../useKeyboardVisible'
 import { Icon } from './Icon'
 import { Text } from './Text'
 
@@ -34,6 +35,7 @@ export function Composer({
   const theme = useTheme()
   const gradient = useGradient()
   const insets = useSafeAreaInsets()
+  const keyboardVisible = useKeyboardVisible()
   const [draft, setDraft] = useState('')
 
   const typing = draft.trim().length > 0
@@ -52,7 +54,9 @@ export function Composer({
         {
           backgroundColor: theme.color.surface,
           borderTopColor: theme.color.border,
-          paddingBottom: Math.max(insets.bottom, 12) + 10
+          // The home indicator is *under* the keyboard, so holding space for it
+          // while the keyboard is up just floats the composer above it.
+          paddingBottom: keyboardVisible ? 10 : Math.max(insets.bottom, 12) + 10
         }
       ]}
     >
