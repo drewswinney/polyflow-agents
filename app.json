@@ -66,6 +66,12 @@
         "projectId": "6ef7424d-abd9-44e4-9601-730bdedd891d"
       }
     },
-    "owner": "drewswinney"
+    "owner": "drewswinney",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/6ef7424d-abd9-44e4-9601-730bdedd891d"
+    }
   }
 }
