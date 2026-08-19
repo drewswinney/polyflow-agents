@@ -42,6 +42,10 @@ export default function ChatScreen() {
 
   const stream = useSessionStream(backend, id, state)
   const streaming = useIsStreaming(stream.tail)
+  // The composer offers Stop for the whole turn, not just while tokens land: a
+  // tool can run for minutes with nothing streaming, and that is precisely when
+  // someone reaches for cancel.
+  const running = streaming || stream.turnActive
 
   /**
    * Whether the transcript is parked at the bottom.
@@ -207,7 +211,7 @@ export default function ChatScreen() {
         ) : null}
 
         <Composer
-          streaming={streaming}
+          streaming={running}
           offline={state !== 'open'}
           queued={stream.outbox.length}
           onSend={stream.send}

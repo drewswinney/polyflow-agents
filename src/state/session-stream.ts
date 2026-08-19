@@ -41,6 +41,8 @@ export interface SessionStream {
   clarify: ClarifyRequest | null
   /** Messages typed while disconnected; they send on reconnect. */
   outbox: string[]
+  /** True from the first token until the turn ends, tool runs included. */
+  turnActive: boolean
   send: (text: string) => void
   cancel: () => void
   respondToApproval: (outcome: PermissionOutcome) => void
@@ -61,6 +63,15 @@ export function useSessionStream(
   const [approval, setApproval] = useState<PermissionRequest | null>(null)
   const [clarify, setClarify] = useState<ClarifyRequest | null>(null)
   const [outbox, setOutbox] = useState<string[]>([])
+  /**
+   * Whether a turn is still running, including while a tool executes and no
+   * tokens are arriving.
+   *
+   * Separate from the tail's own `streaming` flag because sealing the tail at a
+   * tool boundary clears that one — and the composer uses it to offer Stop. A
+   * long tool run is exactly when cancelling matters most.
+   */
+  const [turnActive, setTurnActive] = useState(false)
   const [reloadNonce, setReloadNonce] = useState(0)
 
   const tail = useMemo(() => createStreamTail(), [sessionId])
@@ -158,15 +169,25 @@ function sameEntries(current: TranscriptEntry[], next: TranscriptEntry[]): boole
       switch (update.kind) {
         case 'agent_message_chunk':
           wasStreaming.current = true
+          setTurnActive(true)
           tail.appendText(update.text)
           break
 
         case 'agent_thought_chunk':
           wasStreaming.current = true
+          setTurnActive(true)
           tail.appendThinking(update.text)
           break
 
         case 'tool_call':
+          // Seal first. Whatever the agent said before reaching for a tool is
+          // finished prose: sealing renders it as markdown instead of leaving
+          // it as the plain-text tail, and puts it *above* the card rather than
+          // below, since the tail is the list's footer. Without this, every
+          // turn containing a tool showed unrendered markdown in the wrong
+          // order until the turn ended.
+          sealTail()
+          setTurnActive(true)
           setEntries(current => upsertTool(current, update.call))
           break
 
@@ -188,10 +209,12 @@ function sameEntries(current: TranscriptEntry[], next: TranscriptEntry[]): boole
 
         case 'turn_complete':
           sealTail()
+          setTurnActive(false)
           break
 
         case 'error':
           sealTail()
+          setTurnActive(false)
           setEntries(current => [
             ...current,
             {
@@ -280,6 +303,7 @@ function sameEntries(current: TranscriptEntry[], next: TranscriptEntry[]): boole
 
   const cancel = useCallback(() => {
     void backend?.cancel(sessionId)
+    setTurnActive(false)
     sealTail()
   }, [backend, sessionId, sealTail])
 
@@ -314,6 +338,7 @@ function sameEntries(current: TranscriptEntry[], next: TranscriptEntry[]): boole
     loadError,
     usage,
     approval,
+    turnActive,
     clarify,
     outbox,
     send,
