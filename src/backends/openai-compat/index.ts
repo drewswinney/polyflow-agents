@@ -24,7 +24,7 @@ export const OPENAI_COMPAT_CAPABILITIES: Capabilities = {
   settings: { schemaDriven: false, model: true, providers: false },
   extras: { cron: false, skills: false, mcp: false, profiles: false },
   approvals: { requests: false, policy: false },
-  activity: { spend: false, events: true },
+  logs: { events: true },
   media: { images: true, audioIn: false, audioOut: false }
 }
 
@@ -113,10 +113,6 @@ export class OpenAiCompatBackend implements AgentBackend {
   // the screen and never calls them. Throwing is the honest answer if it does:
   // a fabricated empty list would read on screen as "this agent has no skills"
   // rather than "this agent cannot say".
-
-  async getUsage(): Promise<never> {
-    throw new NotImplemented('usage')
-  }
 
   async listEvents(): Promise<never> {
     throw new NotImplemented('events')

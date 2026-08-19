@@ -39,7 +39,7 @@ export default function LogsScreen() {
 
   const history = useQuery({
     queryKey: ['agent', agent.id, 'events', 'full'],
-    enabled: Boolean(backend) && (backend?.capabilities.activity.events ?? false),
+    enabled: Boolean(backend) && (backend?.capabilities.logs.events ?? false),
     queryFn: () => backend!.listEvents(200)
   })
 

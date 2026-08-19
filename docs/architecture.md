@@ -153,7 +153,6 @@ main reason the design and this document disagree anywhere.
 | Design element | Reality | Resolution |
 |---|---|---|
 | Voice mode: `realtime · 180ms round trip`, barge-in | Audio is three request/response REST endpoints — `/api/audio/transcribe`, `/api/audio/speak`, `/api/audio/elevenlabs/voices`. No duplex channel exists | **Descoped to push-to-talk** (§7.9) |
-| Activity: CPU / memory / disk tiles | No `/api/monitoring`, `/metrics`, `/system` or `/host` endpoint. `hermes monitoring` is OTLP export to an operator endpoint, explicitly "content-free by construction" | **Tiles dropped**; ship what is backed (§7.5) |
 | Approval countdown, `expires 4:52` | `expires_at` appears only on OAuth types (`OAuthProviderStatus`, `OAuthPollResponse`). Approval requests carry no TTL | **No countdown** until the API grows one (§7.6) |
 | QR pairing, `hermes pair` | `hermes pairing` is `list / approve / revoke / clear-pending`. No `pair` subcommand, no token issuance, no QR flow | **Manual host + token only** (§7.8) |
 
@@ -262,8 +261,8 @@ mid-turn the app must not guess whether a tool completed (§5.4, §7.16).
 
 Not every harness has cron jobs, skills or MCP servers. The backend declares what
 it supports and the UI omits what isn't there. The design draws this explicitly —
-a non-Hermes agent's Settings lists what it *doesn't* report as chips, and
-Activity explains the absence in a card rather than rendering blank tiles.
+a non-Hermes agent's Settings lists what it *doesn't* report as chips rather
+than rendering blank rows.
 
 ```ts
 interface Capabilities {
@@ -271,7 +270,7 @@ interface Capabilities {
   settings: { schemaDriven: boolean; model: boolean; providers: boolean }
   extras:   { cron: boolean; skills: boolean; mcp: boolean; profiles: boolean }
   approvals:{ requests: boolean; policy: boolean }
-  activity: { spend: boolean; events: boolean }
+  logs:     { events: boolean }
   media:    { images: boolean; audioIn: boolean; audioOut: boolean }
 }
 ```
@@ -479,8 +478,8 @@ Identical information architecture on both platforms; only the chrome differs.
 sizes, spacing and touch targets. This section covers **behaviour and API
 backing**; it deliberately does not duplicate the tokens.
 
-Three tabs: **Sessions · Activity · Settings**. Everything else is a sub-screen
-reached by a back chevron.
+Two tabs: **Sessions · Settings**. Everything else is a sub-screen reached by a
+back chevron.
 
 | # | Screen | Kind | Backed by |
 |---|---|---|---|
@@ -488,7 +487,6 @@ reached by a back chevron.
 | 7.2 | Chat | sub | `/api/ws`, `prompt.submit`, `process.kill` |
 | 7.3 | *(streaming performance)* | — | — |
 | 7.4 | Settings | tab | `/api/config/schema`, `/api/model/*` |
-| 7.5 | Activity | tab | `/api/analytics/usage`, `/api/logs` |
 | 7.6 | Approval sheet | modal | `approval.request` → `approval.respond` |
 | 7.7 | Search | in-place | `/api/sessions/search` |
 | 7.8 | Pairing / onboarding | sub | `hermes pairing approve` (manual) |
@@ -555,16 +553,15 @@ non-Hermes agent shows only Model and Tools, plus a card naming what it doesn't
 report and a destructive "Remove this agent" row. Destructive actions require
 explicit confirmation.
 
-### 7.5 Activity
+### 7.5 Activity — removed
 
-Spend today against cap (`/api/analytics/usage`), uptime and round-trip latency
-(measured client-side), a dependency-down alert row, and an **event stream** of
-`tool.result` / `approval.granted` / `cron.fired` / `session.resumed` rows.
-
-The design's 2×2 grid also shows CPU, memory and disk. **Those three are cut** —
-no endpoint backs them (§2.6). Applying the design's own rule, the absence is
-stated once rather than rendered as blank tiles. If host metrics become
-worthwhile later, they need a companion service on the VM, not a Hermes change.
+The designed Activity tab is **cut**. Its 2×2 grid wanted CPU, memory and disk,
+none of which any endpoint backs (§2.6), leaving spend-today and turns-today as
+the only tiles with anything behind them — not a tab's worth of screen. Its
+event stream duplicated **Logs & events** (§7.15), which is reached from Settings
+and shows the same rows with payload detail. With the tab gone, `/api/analytics
+/usage` is no longer called and `capabilities.activity` collapses to
+`capabilities.logs.events`.
 
 ### 7.6 Approval sheet
 
@@ -838,7 +835,7 @@ Before the app can connect to `10.0.0.68`:
 | **M2** | Sessions list + read-only transcript + search | REST layer, normalisation, agent scoping | **done** |
 | **M3** | Live chat: streaming, tool cards, approvals, cancel, reconnect | The core product | **done** |
 | **M4** | Settings from `/api/config/schema` + capability gating | G2, and the seam holding up | **done** — the settings form is generated from the server's own schema |
-| **M5** | Activity, logs, agent switcher, add-agent | G6 | **done** — spend/turns, the live event stream, logs with payload detail, tools & integrations, switcher, add-agent |
+| **M5** | Logs, agent switcher, add-agent | G6 | **done** — the live event stream with payload detail, tools & integrations, switcher, add-agent (Activity itself was later cut, §7.5) |
 | **M6** | Android parity pass + EAS pipeline for both | G5 | both platforms bundle; `eas.json` carries development / preview / production profiles |
 | **M7** | Push relay + notification actions | G1 on a phone, properly | **blocked on host work** — the app half ships as local notifications; the relay's contract is specified in [`push-relay.md`](push-relay.md) |
 

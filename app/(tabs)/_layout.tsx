@@ -3,7 +3,7 @@ import { Tabs } from 'expo-router'
 
 import { useTheme } from '@/ui/ThemeProvider'
 
-/** Three tabs — Sessions · Activity · Settings. Everything else is a sub-screen. */
+/** Two tabs — Sessions · Settings. Everything else is a sub-screen. */
 export default function TabsLayout() {
   const theme = useTheme()
 
@@ -23,13 +23,6 @@ export default function TabsLayout() {
         options={{
           title: 'Sessions',
           tabBarIcon: ({ color }) => <FontAwesome6 name="comments" size={18} color={color} solid />
-        }}
-      />
-      <Tabs.Screen
-        name="activity"
-        options={{
-          title: 'Activity',
-          tabBarIcon: ({ color }) => <FontAwesome6 name="wave-square" size={18} color={color} solid />
         }}
       />
       <Tabs.Screen
