@@ -102,7 +102,7 @@ export class HermesBackend implements AgentBackend {
   private readonly runtimeByStored = new Map<SessionId, string>()
   private readonly storedByRuntime = new Map<string, SessionId>()
   private readonly resuming = new Map<SessionId, Promise<string>>()
-  private readonly mapContext: MapContext = { now: 0, toolStartedAt: new Map() }
+  private readonly mapContext: MapContext = { now: 0, toolStartedAt: new Map(), approvalTimeoutMs: null }
   private detachGateway: Unsubscribe | null = null
 
   constructor(config: HermesBackendConfig) {
@@ -153,6 +153,10 @@ export class HermesBackend implements AgentBackend {
     }
 
     await this.gateway.connect(wsUrl)
+
+    // Not awaited: a slow or unavailable config read must not hold up the
+    // socket. The countdown is absent until it lands, never wrong.
+    void this.loadApprovalTimeout()
   }
 
   disconnect(): void {
@@ -244,6 +248,26 @@ export class HermesBackend implements AgentBackend {
       },
       { authMode: this.config.authMode, profile: this.config.profile ?? null, wsUrl: base }
     )
+  }
+
+  /**
+   * Read `approvals.timeout` once per connection so an approval can carry a
+   * real deadline (§7.6).
+   *
+   * Best-effort by design: a host that does not report it leaves the countdown
+   * absent rather than inventing one from the documented default, since the
+   * whole point of the number is that it is the host's, not ours.
+   */
+  private async loadApprovalTimeout(): Promise<void> {
+    try {
+      const record = (await this.rest.configRecord()) as Record<string, unknown>
+      const nested = (record.approvals as { timeout?: unknown } | undefined)?.timeout
+      const seconds = Number(record['approvals.timeout'] ?? nested)
+
+      this.mapContext.approvalTimeoutMs = Number.isFinite(seconds) && seconds > 0 ? seconds * 1000 : null
+    } catch {
+      this.mapContext.approvalTimeoutMs = null
+    }
   }
 
   private dispatch(event: GatewayEvent): void {

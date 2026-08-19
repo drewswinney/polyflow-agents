@@ -589,7 +589,9 @@ export class MockBackend implements AgentBackend {
           'This permanently removes 110 snapshots on hermes. Nothing else references them, and the data they hold cannot be recovered afterwards.',
         sudo: true,
         allowPermanent: true,
-        expiresAt: null
+        // Hermes's own default, so the mock exercises the countdown and the
+        // expiry the real host enforces rather than only the null path.
+        expiresAt: Date.now() + 300_000
       }
     })
   }
