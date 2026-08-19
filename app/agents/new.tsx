@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { HermesRest } from '@/backends/hermes'
+import { HermesRest, probeScheme } from '@/backends/hermes'
 import type { Agent, AgentKind, AuthMode } from '@/domain'
 import { type AgentCredential, saveAgentCredential } from '@/platform/secure-store'
 import { useAgents } from '@/state/agents'
@@ -54,13 +54,18 @@ export default function AddAgentScreen() {
     setProbe({ status: 'checking' })
 
     try {
-      const rest = new HermesRest({ host: target })
+      // Ask before assuming: a tailnet address is neither loopback nor public,
+      // and `hermes serve` speaks plain HTTP unless something terminates TLS
+      // in front of it.
+      const secure = await probeScheme(target)
+      const rest = new HermesRest({ host: target, secure })
       const status = await rest.status()
       const providers = await rest.authProviders().catch(() => [])
       const passwordProvider = providers.find(provider => provider.supportsPassword)
 
       setProbe({
         status: 'reachable',
+        secure,
         version: (status as { version?: string }).version ?? 'unknown',
         providerName: passwordProvider?.name ?? providers[0]?.name ?? null,
         authMode: passwordProvider ? 'password' : providers.length > 0 ? 'oauth' : 'token'
@@ -91,6 +96,7 @@ export default function AddAgentScreen() {
       authMode,
       ...(needsPassword ? { username: username.trim() } : {}),
       ...(probe.status === 'reachable' && probe.providerName ? { authProvider: probe.providerName } : {}),
+      ...(probe.status === 'reachable' ? { secure: probe.secure } : {}),
       // Reachability was checked above, but an offline host can still be saved:
       // the connection attempt on selection is what sets this for real.
       connection: probe.status === 'reachable' ? 'idle' : 'offline'
@@ -169,7 +175,15 @@ export default function AddAgentScreen() {
               <Icon name="circle-check" size={14} color={theme.color.success700} />
               <Text variant="rowLabelStrong">Reachable</Text>
             </View>
-            <Text variant="monoSmall">{`hermes ${probe.version} · ${describeAuth(probe.authMode)}`}</Text>
+            <Text variant="monoSmall">
+              {`hermes ${probe.version} · ${probe.secure ? 'https' : 'http'} · ${describeAuth(probe.authMode)}`}
+            </Text>
+            {!probe.secure ? (
+              <Text variant="secondary">
+                This host speaks plain HTTP, so your password crosses the network unencrypted. Fine inside a tailnet;
+                not fine on open Wi-Fi.
+              </Text>
+            ) : null}
           </Card>
         ) : null}
 
@@ -243,7 +257,7 @@ export default function AddAgentScreen() {
 type Probe =
   | { status: 'idle' }
   | { status: 'checking' }
-  | { status: 'reachable'; version: string; providerName: string | null; authMode: AuthMode }
+  | { status: 'reachable'; secure: boolean; version: string; providerName: string | null; authMode: AuthMode }
   | { status: 'unreachable'; message: string }
 
 function describeAuth(mode: AuthMode): string {

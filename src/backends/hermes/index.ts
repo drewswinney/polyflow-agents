@@ -46,7 +46,7 @@ import { mapGatewayEvent, type MapContext, toEventRecord } from './event-map'
 import { toSearchHit, toSessionSummary, toTranscriptEntries } from './normalize'
 import { HermesRest, type HermesRestConfig } from './rest'
 
-export { HermesRest, HermesRestError } from './rest'
+export { HermesRest, HermesRestError, probeScheme } from './rest'
 export { mapGatewayEvent } from './event-map'
 
 /**

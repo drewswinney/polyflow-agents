@@ -69,6 +69,42 @@ function isLoopback(host: string): boolean {
   return LOOPBACK.test(host)
 }
 
+/**
+ * Find out whether a host speaks TLS, by asking it.
+ *
+ * There is no rule about the *address* that gets this right. `hermes serve`
+ * speaks plain HTTP; a tailnet address (100.64.0.0/10) is neither loopback nor
+ * public; and any of them could be behind a TLS terminator. So the add-agent
+ * flow probes both schemes against `/api/health` — which is public — and
+ * remembers the answer on the agent.
+ *
+ * HTTPS is tried first: guessing wrong in that direction fails safely, whereas
+ * defaulting to plaintext against a TLS host would send a password in the clear
+ * before anything noticed.
+ */
+export async function probeScheme(host: string, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  for (const secure of [true, false]) {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 5_000)
+
+    try {
+      const response = await fetchImpl(`${secure ? 'https' : 'http'}://${host}/api/health`, {
+        signal: controller.signal
+      })
+
+      // Any HTTP answer proves the scheme, including a 4xx — the endpoint being
+      // reachable is the signal, not what it says.
+      if (response.status > 0) return secure
+    } catch {
+      // Wrong scheme, or nothing there. Try the other one before giving up.
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  throw new Error(`Nothing answered on ${host} over https or http.`)
+}
+
 const DEFAULT_TIMEOUT_MS = 30_000
 
 /** Audio endpoints scale with payload size, between three and ten minutes. */

@@ -38,6 +38,7 @@ export function createBackend(agent: Agent, credential: AgentCredential): AgentB
     host: agent.host,
     profile: agent.profile ?? null,
     authMode: agent.authMode,
+    ...(agent.secure === undefined ? {} : { secure: agent.secure }),
     ...(credential.kind === 'token'
       ? { token: credential.token }
       : {

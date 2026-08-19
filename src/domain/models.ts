@@ -44,6 +44,13 @@ export interface Agent {
   username?: string
   /** Which auth provider on the host to authenticate against, e.g. `basic`. */
   authProvider?: string
+  /**
+   * Whether the host speaks TLS. Resolved by probing at add time rather than
+   * inferred from the address: `hermes serve` speaks plain HTTP, and a tailnet
+   * address is neither loopback nor public, so no rule about the address can
+   * answer this correctly.
+   */
+  secure?: boolean
   /** Hermes multi-profile support; undefined → primary profile. */
   profile?: string
   /** Optional per-agent accent override; falls back to the base palette. */
