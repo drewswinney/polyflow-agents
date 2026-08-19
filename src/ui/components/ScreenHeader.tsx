@@ -38,6 +38,7 @@ export function ScreenHeader({
   subtitle,
   center,
   onBack,
+  onMenu,
   right,
   insetTop = true
 }: {
@@ -45,6 +46,12 @@ export function ScreenHeader({
   subtitle?: ReactNode
   center?: ReactNode
   onBack?: () => void
+  /**
+   * Opens the sidebar. Top-level screens pass this where a sub-screen passes
+   * `onBack` — the slot is the same, because the two never both apply: a screen
+   * you can go back from is one you did not reach from the sidebar.
+   */
+  onMenu?: () => void
   right?: ReactNode
   /**
    * Whether to reserve room for the status bar.
@@ -57,6 +64,19 @@ export function ScreenHeader({
 }) {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+
+  // Top-level screens read as a nav bar — menu, centred title, action. Screens
+  // reached by a chevron keep the design's left-aligned title, which is what
+  // lets a subtitle hang under it.
+  const centred = !onBack && Boolean(onMenu)
+
+  const leftControl = onBack ? (
+    // The design draws a 34px slot; the shortfall against the 44px minimum is
+    // made up in hitSlop rather than by moving the chevron.
+    <IconButton name="chevron-left" accessibilityLabel="Back" slot={BACK_SLOT} edge="left" onPress={onBack} />
+  ) : onMenu ? (
+    <IconButton name="bars" accessibilityLabel="Open navigation" slot={BACK_SLOT} edge="left" onPress={onMenu} />
+  ) : null
 
   return (
     <BlurView
@@ -78,22 +98,34 @@ export function ScreenHeader({
       {/* Everything on this row shares one vertical centre — that is the whole
           point of it being its own row. */}
       <View style={styles.titleRow}>
-        {onBack ? (
-          // The design draws a 34px slot; the shortfall against the 44px
-          // minimum is made up in hitSlop rather than by moving the chevron.
-          <IconButton name="chevron-left" accessibilityLabel="Back" slot={BACK_SLOT} edge="left" onPress={onBack} />
-        ) : null}
+        {/* A centred title needs equal-width side slots — centred on the screen,
+            not on whatever space the two controls happen to leave. A left-aligned
+            one must not have them: the title sits directly against the chevron,
+            and `TITLE_INDENT` is derived from exactly that. */}
+        {centred ? <View style={styles.side}>{leftControl}</View> : leftControl}
 
-        <Text variant={onBack ? 'subTitle' : 'screenTitle'} numberOfLines={1} style={styles.title}>
+        <Text
+          variant={onBack ? 'subTitle' : 'screenTitle'}
+          numberOfLines={1}
+          style={[styles.title, centred ? styles.titleCentred : null]}
+        >
           {title}
         </Text>
 
-        {right}
+        {centred ? <View style={[styles.side, styles.sideRight]}>{right}</View> : right}
       </View>
 
       {subtitle ? (
-        // Indented to sit under the title rather than under the chevron.
-        <View style={[styles.subtitleRow, onBack ? { paddingLeft: TITLE_INDENT } : null]}>{subtitle}</View>
+        // Under a centred title it centres too; beside a chevron it is indented
+        // to sit under the title rather than under the chevron.
+        <View
+          style={[
+            styles.subtitleRow,
+            centred ? styles.subtitleCentred : onBack ? { paddingLeft: TITLE_INDENT } : null
+          ]}
+        >
+          {subtitle}
+        </View>
       ) : null}
     </BlurView>
   )
@@ -115,5 +147,11 @@ const styles = StyleSheet.create({
     minHeight: 44
   },
   title: { flex: 1, minWidth: 0 },
-  subtitleRow: { paddingHorizontal: SCREEN_PAD, paddingTop: 2 }
+  titleCentred: { textAlign: 'center' },
+  // 44 = the action's touch slot, so both sides reserve the same width whether
+  // or not a screen has an action.
+  side: { width: 44, alignItems: 'flex-start', justifyContent: 'center' },
+  sideRight: { alignItems: 'flex-end' },
+  subtitleRow: { paddingHorizontal: SCREEN_PAD, paddingTop: 2 },
+  subtitleCentred: { alignItems: 'center' }
 })

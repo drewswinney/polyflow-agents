@@ -478,15 +478,16 @@ Identical information architecture on both platforms; only the chrome differs.
 sizes, spacing and touch targets. This section covers **behaviour and API
 backing**; it deliberately does not duplicate the tokens.
 
-Two tabs: **Sessions · Settings**. Everything else is a sub-screen reached by a
+Navigation is a **slide-out sidebar** (§7.17), opened from the hamburger at the
+top-left of every top-level screen. Everything else is a sub-screen reached by a
 back chevron.
 
 | # | Screen | Kind | Backed by |
 |---|---|---|---|
-| 7.1 | Sessions | tab | `/api/sessions` |
+| 7.1 | Sessions | top-level | `/api/sessions` |
 | 7.2 | Chat | sub | `/api/ws`, `prompt.submit`, `process.kill` |
 | 7.3 | *(streaming performance)* | — | — |
-| 7.4 | Settings | tab | `/api/config/schema`, `/api/model/*` |
+| 7.4 | Settings | top-level | `/api/config/schema`, `/api/model/*` |
 | 7.6 | Approval sheet | modal | `approval.request` → `approval.respond` |
 | 7.7 | Search | in-place | `/api/sessions/search` |
 | 7.8 | Pairing / onboarding | sub | `hermes pairing approve` (manual) |
@@ -498,6 +499,7 @@ back chevron.
 | 7.14 | Add an agent | sub | local + reachability probe |
 | 7.15 | Logs & events | sub | `/api/logs` |
 | 7.16 | Connection lost | state | — |
+| 7.17 | Sidebar | overlay | `/api/sessions` |
 
 ### 7.1 Sessions
 
@@ -646,6 +648,23 @@ name and status token, one expandable to pretty-printed JSON. Backed by
 Warning banner with retry countdown, a dashed **stream-cut marker** in the
 transcript, in-flight tool cards showing `unknown`, and a composer that queues the
 draft ("1 message queued — sends on reconnect"). See §5.4.
+
+### 7.17 Sidebar
+
+The app's primary navigation, in place of the bottom tab bar it replaced. Slides
+in from the left over a scrim, opened by the hamburger in each top-level header
+and dismissed by the scrim or the Android back button.
+
+It carries the two things reached for constantly — **New session** and the eight
+most recent sessions — plus rows for **Sessions** and **Settings**. It
+deliberately does not try to be the sessions list: recency grouping, the blocked
+strip and search all stay on the Sessions screen (§7.1, §7.7), one row away. A
+drawer that reimplements the list ends up a worse list.
+
+Mounted once beside the router rather than inside a screen, so one instance
+serves every screen, and navigating to a top-level destination uses `navigate`
+rather than `push` — the drawer returns to a screen already on the stack instead
+of stacking a second copy of it.
 
 ---
 
