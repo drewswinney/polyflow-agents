@@ -1,11 +1,12 @@
-import { router } from 'expo-router'
+import { Redirect, router } from 'expo-router'
 import { useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { missingCapabilityLabels } from '@/domain'
+import { forgetAgentCredential, forgetPushConfig } from '@/platform/secure-store'
 import { useActiveConnection } from '@/state/ConnectionProvider'
-import { useAgents, useSelectedAgent } from '@/state/agents'
+import { useAgents, useSelectedAgent, useSelectedAgentOrNull } from '@/state/agents'
 import { useSidebar } from '@/state/sidebar'
 import { AgentPill } from '@/ui/components/AgentPill'
 import { AgentSwitcher } from '@/ui/components/AgentSwitcher'
@@ -29,12 +30,44 @@ import { useTheme } from '@/ui/ThemeProvider'
 export default function SettingsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  // Nullable *and* not: removing the agent this screen is about empties the
+  // registry under it, and the render that follows must not read a row that is
+  // no longer there. The redirect below is the guard; `agent` is what every
+  // line past it uses.
+  const maybeAgent = useSelectedAgentOrNull()
   const agent = useSelectedAgent()
   const agents = useAgents(state => state.agents)
   const select = useAgents(state => state.select)
+  const removeAgent = useAgents(state => state.remove)
   const { backend, state, reconnect } = useActiveConnection()
   const openSidebar = useSidebar(store => store.show)
   const [switcherOpen, setSwitcherOpen] = useState(false)
+
+  // Home is the app's one gate on an empty registry: it sends you to the
+  // introduction, and that is where removing the last agent should land.
+  if (!maybeAgent) return <Redirect href="/" />
+
+  const forgetAgent = async () => {
+    const id = agent.id
+
+    // Secrets first. The registry row is what makes them findable, so dropping
+    // it before them is what strands a credential in the keychain.
+    await forgetAgentCredential(id)
+    await forgetPushConfig(id)
+    await removeAgent(id)
+
+    router.replace('/')
+  }
+
+  const confirmForget = () =>
+    Alert.alert(
+      `Remove ${agent.displayName}?`,
+      'This phone forgets its address and its credential. Nothing on the host changes — sessions there keep running, and pairing again picks them back up.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => void forgetAgent() }
+      ]
+    )
 
   const capabilities = backend?.capabilities
   const missing = capabilities ? missingCapabilityLabels(capabilities) : []
@@ -128,6 +161,22 @@ export default function SettingsScreen() {
             <SettingsRow label="Notifications" icon="bell" onPress={() => router.push('/notifications')} />
             <Divider />
             <SettingsRow label="Logs & events" icon="list" onPress={() => router.push('/logs')} />
+          </Card>
+        </View>
+
+        <View style={styles.group}>
+          <Text variant="sectionHeader" style={styles.groupLabel}>
+            Pairing
+          </Text>
+          <Card>
+            <Pressable accessibilityRole="button" onPress={confirmForget} style={styles.row}>
+              <View style={[styles.rowTile, { backgroundColor: theme.color.error50 }]}>
+                <Icon name="trash" size={13} color={theme.color.error700} />
+              </View>
+              <Text variant="rowLabel" color={theme.color.error700} style={styles.rowLabel}>
+                {`Remove ${agent.displayName}`}
+              </Text>
+            </Pressable>
           </Card>
         </View>
 

@@ -45,6 +45,7 @@ export function Sidebar({
   sessions,
   loading,
   activePath,
+  paired,
   onOpenSession,
   onNavigate,
   onDismiss
@@ -54,6 +55,16 @@ export function Sidebar({
   loading: boolean
   /** Drives the selected row's tint; the route the drawer is sitting over. */
   activePath: string
+  /**
+   * Whether an agent is paired at all.
+   *
+   * Every destination here is scoped to one — a session belongs to an agent,
+   * settings are an agent's settings — so with the registry empty they lead
+   * nowhere. They go quiet rather than disappearing: the drawer's shape is how
+   * you know what the app does, and a removal should read as "nothing to point
+   * these at yet", not as features that vanished.
+   */
+  paired: boolean
   onOpenSession: (id: string) => void
   onNavigate: (path: SidebarPath) => void
   onDismiss: () => void
@@ -120,6 +131,7 @@ export function Sidebar({
             icon="plus"
             label="New session"
             accent
+            disabled={!paired}
             selected={activePath === '/'}
             onPress={() => {
               onDismiss()
@@ -129,6 +141,7 @@ export function Sidebar({
           <NavRow
             icon="comments"
             label="Sessions"
+            disabled={!paired}
             selected={activePath === '/sessions'}
             onPress={() => {
               onDismiss()
@@ -137,6 +150,12 @@ export function Sidebar({
           />
         </View>
 
+        {!paired ? (
+          <Text variant="secondary" style={styles.unpaired}>
+            No agent paired. Add one to use any of this.
+          </Text>
+        ) : null}
+
         <Divider />
 
         <ScrollView contentContainerStyle={styles.recents}>
@@ -144,9 +163,9 @@ export function Sidebar({
             Recent
           </Text>
 
-          {recents.length === 0 ? (
+          {!paired || recents.length === 0 ? (
             <Text variant="secondary" style={styles.recentsLabel}>
-              {loading ? 'Loading…' : 'No sessions yet.'}
+              {!paired ? '—' : loading ? 'Loading…' : 'No sessions yet.'}
             </Text>
           ) : (
             recents.map(session => (
@@ -168,6 +187,7 @@ export function Sidebar({
           <NavRow
             icon="sliders"
             label="Settings"
+            disabled={!paired}
             selected={activePath === '/settings'}
             onPress={() => {
               onDismiss()
@@ -186,28 +206,37 @@ function NavRow({
   label,
   selected,
   accent,
+  disabled,
   onPress
 }: {
   icon: string
   label: string
   selected?: boolean
   accent?: boolean
+  disabled?: boolean
   onPress: () => void
 }) {
   const theme = useTheme()
 
-  const tint = accent ? theme.color.secondary : selected ? theme.color.secondaryDeep : theme.color.gray800
+  const tint = disabled
+    ? theme.color.gray400
+    : accent
+      ? theme.color.secondary
+      : selected
+        ? theme.color.secondaryDeep
+        : theme.color.gray800
 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityState={{ selected: Boolean(selected) }}
+      accessibilityState={{ selected: Boolean(selected), disabled: Boolean(disabled) }}
+      disabled={disabled}
       onPress={onPress}
       style={({ pressed }) => [
         styles.navRow,
         {
           borderRadius: theme.radius.row,
-          backgroundColor: selected
+          backgroundColor: selected && !disabled
             ? theme.color.secondaryTint
             : pressed
               ? theme.color.bgSubtle
@@ -273,6 +302,7 @@ const styles = StyleSheet.create({
   navIcon: { width: 20, alignItems: 'center' },
   navLabel: { flex: 1, minWidth: 0 },
   recents: { paddingHorizontal: 8, paddingVertical: 10, gap: 1 },
+  unpaired: { paddingHorizontal: 20, paddingTop: 10 },
   recentsLabel: { paddingHorizontal: 10, paddingBottom: 6 },
   recentRow: { minHeight: 40, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10 },
   recentTitle: { flex: 1, minWidth: 0 }

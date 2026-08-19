@@ -1,7 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient'
 import { router } from 'expo-router'
-import { useState } from 'react'
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
+import { useCallback, useRef, useState } from 'react'
+import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { HermesRest, probeScheme } from '@/backends/hermes'
@@ -13,6 +13,7 @@ import { Icon } from '@/ui/components/Icon'
 import { IconButton } from '@/ui/components/IconButton'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
+import { KeyboardInset } from '@/ui/keyboard'
 import { useGradient, useTheme } from '@/ui/ThemeProvider'
 
 /**
@@ -34,6 +35,27 @@ export default function AddAgentScreen() {
   const gradient = useGradient()
   const insets = useSafeAreaInsets()
   const add = useAgents(state => state.add)
+  const scroller = useRef<ScrollView>(null)
+
+  /**
+   * Whether a card is already holding this screen off the top of the window.
+   *
+   * Only an iOS modal presentation does. Android draws its modal full-bleed,
+   * and on first run this can be the screen at the root of the stack with
+   * nothing behind it at all — in both of those the status bar is ours to
+   * clear, and `insetTop={false}` put the title underneath it.
+   */
+  const canGoBack = router.canGoBack()
+  const hostedInCard = Platform.OS === 'ios' && canGoBack
+
+  /**
+   * Brings a field that has just taken focus to the top of what is left of the
+   * screen. The keyboard covers the lower half of a form this long, and the
+   * fields that matter — the password, the display name — are all in it.
+   */
+  const revealField = useCallback((y: number) => {
+    scroller.current?.scrollTo({ y: Math.max(y - 12, 0), animated: true })
+  }, [])
 
   const [kind, setKind] = useState<AgentKind>('hermes')
   const [host, setHost] = useState('')
@@ -127,134 +149,164 @@ export default function AddAgentScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
-      {/* Presented modally, so the hosting card already provides the top inset. */}
-      <ScreenHeader title="Add an agent" onBack={() => router.back()} insetTop={false} />
+      <ScreenHeader
+        title="Add an agent"
+        // Nothing to go back to on first run, and a chevron that does nothing is
+        // worse than no chevron.
+        onBack={canGoBack ? () => router.back() : undefined}
+        insetTop={!hostedInCard}
+      />
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
-        <Text variant="secondary">
-          Agents stay separate. Sessions, settings, and history never mix between them.
-        </Text>
-
-        <KindCard
-          selected={kind === 'hermes'}
-          title="Another Hermes"
-          detail="Full support — voice, skills, cron, MCP, approvals"
-          onPress={() => setKind('hermes')}
-        />
-        <KindCard
-          selected={kind === 'other'}
-          title="Something else"
-          detail="Any agent that speaks OpenAI-compatible streaming"
-          onPress={() => setKind('other')}
-        />
-
-        <Field
-          label="Host and port"
-          value={host}
-          onChange={value => {
-            setHost(value)
-            setProbe({ status: 'idle' })
-          }}
-          placeholder="10.0.0.68:9119"
-          mono
-        />
-
-        <Pressable
-          accessibilityRole="button"
-          disabled={!host.trim() || probe.status === 'checking'}
-          onPress={() => void checkHost()}
-          style={[styles.outlineButton, { borderColor: theme.color.border, borderRadius: theme.radius.control }]}
+      {/* The form is taller than the screen with the keyboard up, so the whole
+          of it — not just the part above the fold — has to stay reachable. */}
+      <KeyboardInset style={styles.flex}>
+        <ScrollView
+          ref={scroller}
+          contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         >
-          {probe.status === 'checking' ? (
-            <ActivityIndicator color={theme.color.secondary} />
-          ) : (
-            <Text variant="rowLabelStrong" color={theme.color.primary}>
-              Check this host
-            </Text>
-          )}
-        </Pressable>
+          <Text variant="secondary">
+            Agents stay separate. Sessions, settings, and history never mix between them.
+          </Text>
 
-        {probe.status === 'reachable' ? (
-          <Card style={styles.probeCard}>
-            <View style={styles.probeHead}>
-              <Icon name="circle-check" size={14} color={theme.color.success700} />
-              <Text variant="rowLabelStrong">Reachable</Text>
-            </View>
-            <Text variant="monoSmall">
-              {`hermes ${probe.version} · ${probe.secure ? 'https' : 'http'} · ${describeAuth(probe.authMode)}`}
-            </Text>
-            {!probe.secure ? (
-              <Text variant="secondary">
-                This host speaks plain HTTP, so your password crosses the network unencrypted. Fine inside a tailnet;
-                not fine on open Wi-Fi.
+          <KindCard
+            selected={kind === 'hermes'}
+            title="Another Hermes"
+            detail="Full support — voice, skills, cron, MCP, approvals"
+            onPress={() => setKind('hermes')}
+          />
+          <KindCard
+            selected={kind === 'other'}
+            title="Something else"
+            detail="Any agent that speaks OpenAI-compatible streaming"
+            onPress={() => setKind('other')}
+          />
+
+          <Field
+            label="Host and port"
+            value={host}
+            onChange={value => {
+              setHost(value)
+              setProbe({ status: 'idle' })
+            }}
+            placeholder="10.0.0.68:9119"
+            mono
+            onReveal={revealField}
+          />
+
+          <Pressable
+            accessibilityRole="button"
+            disabled={!host.trim() || probe.status === 'checking'}
+            onPress={() => void checkHost()}
+            style={[styles.outlineButton, { borderColor: theme.color.border, borderRadius: theme.radius.control }]}
+          >
+            {probe.status === 'checking' ? (
+              <ActivityIndicator color={theme.color.secondary} />
+            ) : (
+              <Text variant="rowLabelStrong" color={theme.color.primary}>
+                Check this host
               </Text>
-            ) : null}
-          </Card>
-        ) : null}
+            )}
+          </Pressable>
 
-        {probe.status === 'unreachable' ? (
-          <Card style={styles.probeCard}>
-            <View style={styles.probeHead}>
-              <Icon name="circle-exclamation" size={14} color={theme.color.warning700} />
-              <Text variant="rowLabelStrong">Could not reach it</Text>
-            </View>
-            <Text variant="secondary">{probe.message}</Text>
-            <Text variant="secondary">
-              You can still save it — the agent will show as offline until it answers.
-            </Text>
-          </Card>
-        ) : null}
+          {probe.status === 'reachable' ? (
+            <Card style={styles.probeCard}>
+              <View style={styles.probeHead}>
+                <Icon name="circle-check" size={14} color={theme.color.success700} />
+                <Text variant="rowLabelStrong">Reachable</Text>
+              </View>
+              <Text variant="monoSmall">
+                {`hermes ${probe.version} · ${probe.secure ? 'https' : 'http'} · ${describeAuth(probe.authMode)}`}
+              </Text>
+              {!probe.secure ? (
+                <Text variant="secondary">
+                  This host speaks plain HTTP, so your password crosses the network unencrypted. Fine inside a tailnet;
+                  not fine on open Wi-Fi.
+                </Text>
+              ) : null}
+            </Card>
+          ) : null}
 
-        {needsPassword ? (
-          <>
-            <Field label="Username" value={username} onChange={setUsername} placeholder="drew" mono />
+          {probe.status === 'unreachable' ? (
+            <Card style={styles.probeCard}>
+              <View style={styles.probeHead}>
+                <Icon name="circle-exclamation" size={14} color={theme.color.warning700} />
+                <Text variant="rowLabelStrong">Could not reach it</Text>
+              </View>
+              <Text variant="secondary">{probe.message}</Text>
+              <Text variant="secondary">
+                You can still save it — the agent will show as offline until it answers.
+              </Text>
+            </Card>
+          ) : null}
+
+          {needsPassword ? (
+            <>
+              <Field
+                label="Username"
+                value={username}
+                onChange={setUsername}
+                placeholder="drew"
+                mono
+                onReveal={revealField}
+              />
+              <Field
+                label="Password"
+                value={password}
+                onChange={setPassword}
+                placeholder="the dashboard password"
+                secure={!reveal}
+                mono
+                trailing={<RevealToggle revealed={reveal} onToggle={() => setReveal(value => !value)} />}
+                onReveal={revealField}
+              />
+            </>
+          ) : (
             <Field
-              label="Password"
-              value={password}
-              onChange={setPassword}
-              placeholder="the dashboard password"
+              label="Access token"
+              value={token}
+              onChange={setToken}
+              placeholder="paste the token from the host"
               secure={!reveal}
               mono
               trailing={<RevealToggle revealed={reveal} onToggle={() => setReveal(value => !value)} />}
+              onReveal={revealField}
             />
-          </>
-        ) : (
+          )}
+
           <Field
-            label="Access token"
-            value={token}
-            onChange={setToken}
-            placeholder="paste the token from the host"
-            secure={!reveal}
-            mono
-            trailing={<RevealToggle revealed={reveal} onToggle={() => setReveal(value => !value)} />}
+            label="Display name"
+            value={displayName}
+            onChange={setDisplayName}
+            placeholder="home hermes"
+            onReveal={revealField}
           />
-        )}
 
-        <Field label="Display name" value={displayName} onChange={setDisplayName} placeholder="home hermes" />
-
-        {saveError ? (
-          <Text variant="secondary" color={theme.color.error700}>
-            {saveError}
-          </Text>
-        ) : null}
-
-        <Text variant="secondary">
-          Credentials go to this phone's keychain and are sent only to this host.
-        </Text>
-
-        <Pressable accessibilityRole="button" disabled={!ready} onPress={() => void save()}>
-          <LinearGradient
-            colors={ready ? gradient.colors : [theme.color.bgSubtle, theme.color.bgSubtle]}
-            start={gradient.start}
-            end={gradient.end}
-            style={[styles.primary, { borderRadius: theme.radius.control }]}
-          >
-            <Text variant="rowLabelStrong" color={ready ? '#ffffff' : theme.color.gray400}>
-              Pair and connect
+          {saveError ? (
+            <Text variant="secondary" color={theme.color.error700}>
+              {saveError}
             </Text>
-          </LinearGradient>
-        </Pressable>
-      </ScrollView>
+          ) : null}
+
+          <Text variant="secondary">
+            Credentials go to this phone&apos;s keychain and are sent only to this host.
+          </Text>
+
+          <Pressable accessibilityRole="button" disabled={!ready} onPress={() => void save()}>
+            <LinearGradient
+              colors={ready ? gradient.colors : [theme.color.bgSubtle, theme.color.bgSubtle]}
+              start={gradient.start}
+              end={gradient.end}
+              style={[styles.primary, { borderRadius: theme.radius.control }]}
+            >
+              <Text variant="rowLabelStrong" color={ready ? '#ffffff' : theme.color.gray400}>
+                Pair and connect
+              </Text>
+            </LinearGradient>
+          </Pressable>
+        </ScrollView>
+      </KeyboardInset>
     </View>
   )
 }
@@ -329,7 +381,8 @@ function Field({
   placeholder,
   secure,
   mono,
-  trailing
+  trailing,
+  onReveal
 }: {
   label: string
   value: string
@@ -338,11 +391,16 @@ function Field({
   secure?: boolean
   mono?: boolean
   trailing?: React.ReactNode
+  /** Called with this field's offset in the form when it takes focus. */
+  onReveal?: (y: number) => void
 }) {
   const theme = useTheme()
+  // Its own offset inside the scrolling body, which is what the screen needs to
+  // scroll it into the space the keyboard leaves.
+  const offset = useRef(0)
 
   return (
-    <View style={styles.field}>
+    <View style={styles.field} onLayout={event => (offset.current = event.nativeEvent.layout.y)}>
       <Text variant="sectionHeader">{label}</Text>
       <View
         style={[
@@ -358,6 +416,7 @@ function Field({
           secureTextEntry={secure}
           autoCapitalize="none"
           autoCorrect={false}
+          onFocus={() => onReveal?.(offset.current)}
           style={[
             styles.inputText,
             { color: theme.color.gray800, fontFamily: mono ? theme.font.mono : theme.font.body }
@@ -371,6 +430,7 @@ function Field({
 
 const styles = StyleSheet.create({
   screen: { flex: 1 },
+  flex: { flex: 1 },
   body: { paddingHorizontal: 16, paddingTop: 14, gap: 13 },
   kindCard: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 14 },
   kindText: { flex: 1, minWidth: 0, gap: 2 },
