@@ -64,6 +64,13 @@ function AgentText({ text, role }: { text: string; role: 'agent' | 'system' }) {
 }
 
 /**
+ * Font size of the thinking link, which the brain glyph matches so the two read
+ * as one line rather than an icon with a caption. Tracks the `secondary` text
+ * variant — change them together.
+ */
+const THINKING_TEXT_SIZE = 13
+
+/**
  * Thinking is a link, not a control.
  *
  * It is an aside about the turn, not something to act on, and a filled pill gave
@@ -87,10 +94,11 @@ function ThinkingLink({ text, durationMs }: { text: string; durationMs?: number 
         hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
         style={({ pressed }) => [styles.thinkingLink, { opacity: pressed ? 0.6 : 1 }]}
       >
-        <Text variant="secondary" color={theme.color.primary}>
+        <Icon name="brain" size={THINKING_TEXT_SIZE} color={theme.color.secondary} />
+        <Text variant="secondary" color={theme.color.secondary}>
           {label}
         </Text>
-        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={9} color={theme.color.primary} />
+        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={9} color={theme.color.secondary} />
       </Pressable>
 
       {open ? (
