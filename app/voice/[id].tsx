@@ -12,7 +12,7 @@ import { Pressable, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useActiveConnection } from '@/state/ConnectionProvider'
-import { useVoiceInbox } from '@/state/voice-inbox'
+import { useChatInbox } from '@/state/chat-inbox'
 import { Icon } from '@/ui/components/Icon'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
@@ -36,7 +36,7 @@ export default function VoiceScreen() {
   const insets = useSafeAreaInsets()
   const { id } = useLocalSearchParams<{ id: string }>()
   const { backend } = useActiveConnection()
-  const submit = useVoiceInbox(state => state.submit)
+  const submit = useChatInbox(state => state.submit)
 
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY)
   const recorderState = useAudioRecorderState(recorder, 100)

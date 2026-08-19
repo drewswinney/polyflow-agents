@@ -7,15 +7,18 @@ import { Outfit_500Medium } from '@expo-google-fonts/outfit'
 import { SpaceMono_400Regular, SpaceMono_700Bold } from '@expo-google-fonts/space-mono'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useFonts } from 'expo-font'
-import { Stack } from 'expo-router'
+import { router, Stack, usePathname } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
 import { useEffect } from 'react'
 import { View } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
-import { ConnectionProvider } from '@/state/ConnectionProvider'
+import { ConnectionProvider, useActiveConnection } from '@/state/ConnectionProvider'
 import { useAgents, useSelectedAgent } from '@/state/agents'
+import { useSessions } from '@/state/queries'
+import { useSidebar } from '@/state/sidebar'
+import { Sidebar } from '@/ui/components/Sidebar'
 import { ThemeProvider } from '@/ui/ThemeProvider'
 import { NEUTRAL } from '@/ui/theme'
 
@@ -64,7 +67,9 @@ export default function RootLayout() {
           <ConnectionProvider agent={agent}>
             <StatusBar style="dark" />
             <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: NEUTRAL.bg } }}>
-              <Stack.Screen name="(tabs)" />
+              <Stack.Screen name="index" />
+              <Stack.Screen name="sessions" />
+              <Stack.Screen name="settings" />
               <Stack.Screen name="chat/[id]" />
               <Stack.Screen name="logs" />
               <Stack.Screen name="tools" />
@@ -75,9 +80,41 @@ export default function RootLayout() {
               <Stack.Screen name="voice/[id]" />
               <Stack.Screen name="agents/new" options={{ presentation: 'modal' }} />
             </Stack>
+
+            {/* Mounted beside the router, not inside a screen, so the same
+                sidebar serves every screen that shows the hamburger. */}
+            <AppSidebar />
           </ConnectionProvider>
         </ThemeProvider>
       </QueryClientProvider>
     </SafeAreaProvider>
+  )
+}
+
+/**
+ * The sidebar's wiring. Screens own their own state; this one is app-wide, so
+ * its container sits here with the providers it reads from.
+ */
+function AppSidebar() {
+  const agent = useSelectedAgent()
+  const { backend } = useActiveConnection()
+  const open = useSidebar(state => state.open)
+  const hide = useSidebar(state => state.hide)
+  const pathname = usePathname()
+
+  const sessions = useSessions(agent.id, backend)
+
+  return (
+    <Sidebar
+      visible={open}
+      sessions={sessions.data ?? []}
+      loading={sessions.isLoading}
+      activePath={pathname}
+      onOpenSession={id => router.push(`/chat/${id}`)}
+      // `navigate` returns to a top-level destination already on the stack
+      // instead of stacking a second copy of it behind the drawer.
+      onNavigate={path => router.navigate(path)}
+      onDismiss={hide}
+    />
   )
 }

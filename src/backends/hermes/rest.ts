@@ -13,7 +13,6 @@
  */
 
 import type {
-  AnalyticsResponse,
   AudioSpeakResponse,
   AudioTranscriptionResponse,
   ConfigSchemaResponse,
@@ -305,10 +304,6 @@ export class HermesRest {
       body: { text },
       timeoutMs: audioTimeoutMs(text.length * 35)
     })
-  }
-
-  analytics(days = 7): Promise<AnalyticsResponse> {
-    return this.request<AnalyticsResponse>(`/api/analytics/usage?days=${days}`)
   }
 
   logs(limit = 200): Promise<LogsResponse> {

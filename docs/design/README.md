@@ -86,6 +86,8 @@ Sub-screens reached by a back chevron (chat, logs, tools, model, notifications, 
 
 **Tab bar:** 3 tabs — Sessions (`comments`), Activity (`wave-square`), Settings (`sliders`). 18px icon + 10.5px/500 label, active `#6d28d9`, inactive `#a3adbd`, 48px min height each.
 
+> **Superseded in implementation.** Activity was cut (no endpoint backs its tiles) and the tab bar was replaced by a slide-out sidebar opened from a hamburger at the top-left of each top-level header. Kept here as the design handoff's record; see `docs/architecture.md` §7.5 and §7.17.
+
 ### 1. Sessions (top-level)
 
 Header: title "Sessions" + centered agent pill + search icon (right).

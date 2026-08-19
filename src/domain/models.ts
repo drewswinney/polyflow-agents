@@ -199,7 +199,7 @@ export interface NewSessionOptions {
   cwd?: string
 }
 
-/** A logged event row, as shown on Activity and Logs (§7.5, §7.15). */
+/** A logged event row, as shown on Logs & events (§7.15). */
 export interface EventRecord {
   id: string
   at: number
@@ -210,24 +210,6 @@ export interface EventRecord {
   sessionId?: SessionId
   /** Full payload, pretty-printed on expansion. */
   payload?: unknown
-}
-
-/**
- * What Activity can actually show (§7.5).
- *
- * CPU, memory and disk are deliberately absent: no endpoint backs them, and
- * `hermes monitoring` is OTLP export that is content-free by construction
- * (§2.6). A field here means some backend can really answer it.
- */
-export interface UsageSummary {
-  /** Spend for today in USD, or null when the backend never quotes a price. */
-  spendTodayUsd: number | null
-  /** Configured cap, when there is one. */
-  spendCapUsd: number | null
-  turnsToday: number
-  tokensToday: number
-  /** Measured client-side, not reported by the host. */
-  latencyMs: number | null
 }
 
 /**
