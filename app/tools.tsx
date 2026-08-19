@@ -4,7 +4,7 @@ import { ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { ApprovalPolicy, McpServerStatus, SkillSummary } from '@/domain'
-import { useActiveConnection } from '@/state/ConnectionProvider'
+import { useBackend } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { Card, Divider } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
@@ -29,7 +29,7 @@ export default function ToolsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const agent = useSelectedAgent()
-  const { backend } = useActiveConnection()
+  const backend = useBackend()
   const queryClient = useQueryClient()
 
   const capabilities = backend?.capabilities

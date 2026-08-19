@@ -136,17 +136,6 @@ export function useSessionStream(
     }
   }, [backend, sessionId, reloadNonce])
 
-  /**
- * Whether a reload produced the same transcript.
- *
- * Compares ids, not contents: entries are immutable once settled, so the id
- * sequence is what changes when something is genuinely new.
- */
-function sameEntries(current: TranscriptEntry[], next: TranscriptEntry[]): boolean {
-  if (current.length !== next.length) return false
-
-  return current.every((entry, index) => entry.id === next[index]?.id)
-}
 
 /** Seal the streaming tail into a settled entry. */
   const sealTail = useCallback(() => {
@@ -356,6 +345,41 @@ function sameEntries(current: TranscriptEntry[], next: TranscriptEntry[]): boole
     respondToClarify,
     reload
   }
+}
+
+/**
+ * Whether a reload produced the transcript that is already on screen.
+ *
+ * Compares what an entry *says*, not the id it says it under. Ids are not
+ * shared vocabulary: an entry sealed here from the live stream is keyed
+ * `agent-<timestamp>`, and the same sentence coming back from the host is keyed
+ * by its stored id. Comparing ids therefore reported "changed" on every reload
+ * after a turn — for a transcript whose text was identical — and the list, told
+ * every row was new, re-keyed and rebuilt all of them. That is the jump on
+ * coming back into the app.
+ *
+ * When this returns true the caller keeps the array it already had, ids and
+ * all, so nothing below it re-keys. The ids stay local, which nothing minds:
+ * they key rows, and tool cards are matched by `call.id` rather than by them.
+ */
+function sameEntries(current: TranscriptEntry[], next: TranscriptEntry[]): boolean {
+  if (current.length !== next.length) return false
+
+  return current.every((entry, index) => saysTheSame(entry, next[index]))
+}
+
+function saysTheSame(a: TranscriptEntry | undefined, b: TranscriptEntry | undefined): boolean {
+  if (!a || !b || a.kind !== b.kind) return false
+
+  if (a.kind === 'message' && b.kind === 'message') return a.role === b.role && a.text === b.text
+  if (a.kind === 'thinking' && b.kind === 'thinking') return a.text === b.text
+  if (a.kind === 'tool' && b.kind === 'tool') {
+    return a.call.id === b.call.id && a.call.status === b.call.status && a.call.output === b.call.output
+  }
+
+  // A stream cut is local — the host has no such row — so two of them at the
+  // same index is as close to equal as this gets.
+  return a.kind === b.kind
 }
 
 function upsertTool(entries: TranscriptEntry[], call: ToolCall): TranscriptEntry[] {

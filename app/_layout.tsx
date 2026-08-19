@@ -14,7 +14,7 @@ import { useEffect } from 'react'
 import { View } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
-import { ConnectionProvider, useActiveConnection } from '@/state/ConnectionProvider'
+import { ConnectionProvider, useBackend } from '@/state/ConnectionProvider'
 import { useAgents, useSelectedAgentOrNull } from '@/state/agents'
 import { useNotificationRouting } from '@/state/notification-routing'
 import { useSessions } from '@/state/queries'
@@ -102,7 +102,7 @@ export default function RootLayout() {
  */
 function AppSidebar() {
   const agent = useSelectedAgentOrNull()
-  const { backend } = useActiveConnection()
+  const backend = useBackend()
   const open = useSidebar(state => state.open)
   const hide = useSidebar(state => state.hide)
   const pathname = usePathname()

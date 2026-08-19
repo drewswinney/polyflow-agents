@@ -5,7 +5,7 @@ import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { ConfigField } from '@/domain'
-import { useActiveConnection } from '@/state/ConnectionProvider'
+import { useBackend } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { Card, Divider } from '@/ui/components/Card'
 import { Segmented } from '@/ui/components/Segmented'
@@ -31,7 +31,7 @@ export default function ConfigScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const agent = useSelectedAgent()
-  const { backend } = useActiveConnection()
+  const backend = useBackend()
   const queryClient = useQueryClient()
 
   const fieldsKey = ['agent', agent.id, 'config'] as const

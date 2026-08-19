@@ -5,7 +5,7 @@ import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
 import { ActivityIndicator, Keyboard, Platform, StyleSheet, View } from 'react-native'
 
 import type { TranscriptEntry } from '@/domain'
-import { useActiveConnection } from '@/state/ConnectionProvider'
+import { useBackend, useConnectionState } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { useSidebar } from '@/state/sidebar'
 import { useSessionStream } from '@/state/session-stream'
@@ -36,7 +36,8 @@ export default function ChatScreen() {
   const theme = useTheme()
   const agent = useSelectedAgent()
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { backend, state } = useActiveConnection()
+  const backend = useBackend()
+  const state = useConnectionState()
   const openSidebar = useSidebar(store => store.show)
   const listRef = useRef<FlashListRef<TranscriptEntry>>(null)
 
@@ -61,6 +62,18 @@ export default function ChatScreen() {
    * this drives the pending-approval bar, and nothing else may pay per frame.
    */
   const [scrolledAway, setScrolledAway] = useState(false)
+
+  /**
+   * Whether the transcript has found its position yet.
+   *
+   * A list of markdown, tool cards and thinking blocks has no knowable height
+   * until it is measured, and measuring happens over several frames after the
+   * rows mount — each one nudging everything below it. Watching that settle is
+   * the jumping on opening a chat. It is hidden rather than fixed, because
+   * there is nothing to fix: the passes are how the heights become known. The
+   * list is laid out, scrolled to the end and only then shown.
+   */
+  const [placed, setPlaced] = useState(false)
 
   /**
    * Where the incoming turn starts, and whether the view is still holding it.
@@ -148,7 +161,7 @@ export default function ChatScreen() {
   const restoredApprovalId = stream.transcript?.pendingApproval?.id ?? stream.transcript?.pendingClarify?.id
 
   useEffect(() => {
-    if (!approvalId || stream.loading) return
+    if (!approvalId || stream.loading || !placed) return
     if (approvalId !== restoredApprovalId && !atBottom.current) return
 
     // The turn is halted on an answer from you, so it outranks reading position.
@@ -159,7 +172,7 @@ export default function ChatScreen() {
     const timer = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50)
 
     return () => clearTimeout(timer)
-  }, [approvalId, restoredApprovalId, stream.loading])
+  }, [approvalId, restoredApprovalId, stream.loading, placed])
 
   const pendingMessage = useChatInbox(inbox => inbox.pending)
   const takeMessage = useChatInbox(inbox => inbox.take)
@@ -217,67 +230,77 @@ export default function ChatScreen() {
         {stream.loading ? (
           <ActivityIndicator color={theme.color.secondary} style={styles.loading} />
         ) : (
-          <FlashList
-            ref={listRef}
-            data={stream.entries}
-            keyExtractor={entry => entry.id}
-            renderItem={renderItem}
-            contentContainerStyle={styles.list}
-            // Only when there is something to say. An always-mounted header
-            // that grows and shrinks with the connection is a height change at
-            // the top of the list, which every scroll position below it then
-            // has to absorb — that is the flicker.
-            ListHeaderComponent={
-              stream.loadError ? (
-                <View style={styles.header}>
-                  <Text variant="secondary" color={theme.color.error700}>
-                    {stream.loadError}
-                  </Text>
+          <View style={[styles.flex, placed ? null : styles.unplaced]}>
+            <FlashList
+              ref={listRef}
+              data={stream.entries}
+              keyExtractor={entry => entry.id}
+              renderItem={renderItem}
+              contentContainerStyle={styles.list}
+              // Only when there is something to say. An always-mounted header
+              // that grows and shrinks with the connection is a height change at
+              // the top of the list, which every scroll position below it then
+              // has to absorb — that is the flicker.
+              ListHeaderComponent={
+                stream.loadError ? (
+                  <View style={styles.header}>
+                    <Text variant="secondary" color={theme.color.error700}>
+                      {stream.loadError}
+                    </Text>
+                  </View>
+                ) : undefined
+              }
+              ListFooterComponent={
+                <View style={styles.entry}>
+                  <StreamingTail tail={stream.tail} />
+
+                  {/* In the transcript, not over it: the turn is halted, but only
+                      this session's, so nothing else needs to be blocked (§7.6). */}
+                  {stream.approval ? (
+                    <View style={styles.approval}>
+                      <ApprovalCard
+                        request={stream.approval}
+                        hostName={agent.host}
+                        onRespond={stream.respondToApproval}
+                      />
+                    </View>
+                  ) : null}
+
+                  {/* A question halts the turn exactly as an approval does, so it
+                      belongs in the same place, in the same shape. */}
+                  {stream.clarify ? (
+                    <View style={styles.approval}>
+                      <ClarifyCard request={stream.clarify} onRespond={stream.respondToClarify} />
+                    </View>
+                  ) : null}
                 </View>
-              ) : undefined
-            }
-            ListFooterComponent={
-              <View style={styles.entry}>
-                <StreamingTail tail={stream.tail} />
-
-                {/* In the transcript, not over it: the turn is halted, but only
-                    this session's, so nothing else needs to be blocked (§7.6). */}
-                {stream.approval ? (
-                  <View style={styles.approval}>
-                    <ApprovalCard
-                      request={stream.approval}
-                      hostName={agent.host}
-                      onRespond={stream.respondToApproval}
-                    />
-                  </View>
-                ) : null}
-
-                {/* A question halts the turn exactly as an approval does, so it
-                    belongs in the same place, in the same shape. */}
-                {stream.clarify ? (
-                  <View style={styles.approval}>
-                    <ClarifyCard request={stream.clarify} onRespond={stream.respondToClarify} />
-                  </View>
-                ) : null}
-              </View>
-            }
-            onScroll={onScroll}
-            scrollEventThrottle={16}
-            // Opens already at the last message rather than rendering from the
-            // top and animating down to it. Deliberately *without*
-            // `autoscrollToBottomThreshold`: following the bottom is the thing
-            // the anchor above replaces, and the two would fight every frame.
-            maintainVisibleContentPosition={{ startRenderingFromBottom: true }}
-            onContentSizeChange={onContentSizeChange}
-            onScrollBeginDrag={releaseAnchor}
-            // Dragging the transcript down takes the keyboard with it, the way
-            // it does in Messages. Android has no interactive mode, so the
-            // keyboard leaves on the drag instead of tracking the finger.
-            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-            // With the keyboard up, the first tap on an approval button should
-            // answer it, not just close the keyboard.
-            keyboardShouldPersistTaps="handled"
-          />
+              }
+              onScroll={onScroll}
+              scrollEventThrottle={16}
+              // Opens already at the last message rather than rendering from the
+              // top and animating down to it. Deliberately *without*
+              // `autoscrollToBottomThreshold`: following the bottom is the thing
+              // the anchor above replaces, and the two would fight every frame.
+              maintainVisibleContentPosition={{ startRenderingFromBottom: true }}
+              onContentSizeChange={onContentSizeChange}
+              onScrollBeginDrag={releaseAnchor}
+              // Dragging the transcript down takes the keyboard with it, the way
+              // it does in Messages. Android has no interactive mode, so the
+              // keyboard leaves on the drag instead of tracking the finger.
+              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+              // With the keyboard up, the first tap on an approval button should
+              // answer it, not just close the keyboard.
+                keyboardShouldPersistTaps="handled"
+              // Fired once the first rows are actually laid out. Only then is
+              // there an end to scroll to: `startRenderingFromBottom` puts the
+              // last *entry* on screen, and the footer holding the streaming
+              // tail and any approval card lives below it.
+              onLoad={() => {
+                listRef.current?.scrollToEnd({ animated: false })
+                requestAnimationFrame(() => setPlaced(true))
+              }}
+            />
+          </View>
         )}
 
         {(stream.approval || stream.clarify) && scrolledAway ? (
@@ -301,6 +324,8 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   flex: { flex: 1 },
   loading: { marginTop: 32 },
+  // Laid out and measured, just not watched while it happens.
+  unplaced: { opacity: 0 },
   list: { paddingHorizontal: 16, paddingVertical: 16 },
   header: { gap: 10, paddingBottom: 6 },
   entry: { paddingVertical: 7 },

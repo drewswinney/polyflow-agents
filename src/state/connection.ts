@@ -9,7 +9,7 @@
  */
 
 import NetInfo from '@react-native-community/netinfo'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState, type AppStateStatus } from 'react-native'
 
 import { probeScheme } from '@/backends/hermes'
@@ -207,10 +207,12 @@ export function useConnection(agent: Agent | null): Connection {
   // Switching agents re-scopes the whole app; the previous socket goes with it.
   useEffect(() => releaseBackend, [])
 
-  const reconnect = () => {
+  // Stable across renders: it is handed out through a context whose whole point
+  // is that its identity does not change when the socket's state does.
+  const reconnect = useCallback(() => {
     failures.current = 0
     setNonce(value => value + 1)
-  }
+  }, [])
 
   // Foreground → check the socket, rather than replace it on principle.
   //
