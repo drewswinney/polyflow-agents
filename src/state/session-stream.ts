@@ -77,6 +77,11 @@ export function useSessionStream(
     let cancelled = false
     setLoading(true)
 
+    // Development only. A transcript that reloads is a list that resets, so
+    // when the chat jumps this says whether a reload caused it and what
+    // changed to ask for one.
+    if (__DEV__) console.log(`[transcript] loading ${sessionId} (nonce=${reloadNonce}, backend=${backend ? 'yes' : 'no'})`)
+
     backend
       .loadSession(sessionId)
       .then(loaded => {

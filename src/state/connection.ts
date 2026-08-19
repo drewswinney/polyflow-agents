@@ -57,6 +57,16 @@ export function useConnection(agent: Agent | null): Connection {
   const failures = useRef(0)
 
   /**
+   * Why the last redial was asked for.
+   *
+   * Development only. A redial loop is invisible from the host — every dial
+   * looks like a legitimate client connecting — and invisible in the UI, which
+   * only shows the result. Naming the trigger is the difference between fixing
+   * the cause and guarding the symptom.
+   */
+  const trigger = useRef<string>('mount')
+
+  /**
    * What a redial actually depends on.
    *
    * Not the agent object: its identity changes whenever *anything* on the
@@ -95,6 +105,12 @@ export function useConnection(agent: Agent | null): Connection {
       }
 
       lastDialAt.current = Date.now()
+
+      if (__DEV__) {
+        console.log(
+          `[dial] trigger=${trigger.current} key=${dialKey} nonce=${nonce} failures=${failures.current} waited=${wait}ms`
+        )
+      }
 
       // Nothing to dial before onboarding has run. Idle, not error: an empty
       // registry is a first run, not a failure.
@@ -163,10 +179,14 @@ export function useConnection(agent: Agent | null): Connection {
         if (!cancelled) {
           failures.current = 0
           setAttempt(0)
+
+          if (__DEV__) console.log('[dial] connected')
         }
       } catch (cause) {
         if (!cancelled) {
           failures.current += 1
+
+          if (__DEV__) console.log(`[dial] failed (${failures.current}):`, cause)
           // The gateway client can be left mid-dial, and a banner that says
           // "connecting" forever is worse than one that says what went wrong:
           // it looks like progress and hides the reason.
@@ -193,6 +213,7 @@ export function useConnection(agent: Agent | null): Connection {
 
   const reconnect = () => {
     failures.current = 0
+    trigger.current = 'reconnect button'
     setNonce(value => value + 1)
   }
 
@@ -202,6 +223,7 @@ export function useConnection(agent: Agent | null): Connection {
     const subscription = AppState.addEventListener('change', (next: AppStateStatus) => {
       if (next === 'active' && wasBackgrounded.current) {
         wasBackgrounded.current = false
+        trigger.current = 'foreground'
         setNonce(value => value + 1)
       } else if (next !== 'active') {
         wasBackgrounded.current = true
@@ -227,6 +249,7 @@ export function useConnection(agent: Agent | null): Connection {
       const current = info.type
 
       if (previous !== null && previous !== current && info.isConnected) {
+        trigger.current = `network ${previous}→${current}`
         setNonce(value => value + 1)
       }
 
