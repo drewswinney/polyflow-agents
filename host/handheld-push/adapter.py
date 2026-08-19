@@ -292,8 +292,15 @@ def register(ctx: Any) -> None:
             cron_deliver_env_var="HANDHELD_HOME_CHANNEL",
             standalone_sender_fn=_standalone_send,
         )
+    except ImportError:
+        # Expected in a process that never imports the gateway — `hermes serve`
+        # runs turns and fires hooks but has no platform registry.
+        logger.debug("[handheld-push] no platform registry in this process")
     except Exception:
-        logger.info("[handheld-push] platform face not registered in this process", exc_info=True)
+        # Not expected, and not something to shrug off: without the platform
+        # face there is no cron delivery and no way for a device to register, so
+        # notifications would half-work with nothing saying why.
+        logger.warning("[handheld-push] platform registration FAILED", exc_info=True)
 
 
 async def _standalone_send(*_args: Any, **kwargs: Any) -> Dict[str, Any]:
