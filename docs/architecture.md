@@ -351,6 +351,26 @@ Three rules follow, and all three are drawn in the design:
 Secrets go in `expo-secure-store` (Keychain / Android Keystore), never in
 AsyncStorage or Zustand-persisted state.
 
+### 5.2b Cleartext to a self-hosted host
+
+`hermes serve` speaks **plain HTTP** (§2.5), and both platforms block cleartext by
+default — iOS through App Transport Security, Android since API 28. The failure
+is silent and asymmetric in a way that is worth writing down, because it reads as
+"the host is down" when the host is fine: the `https` half of `probeScheme()`
+leaves the phone and lands as a TLS handshake on a plaintext port (uvicorn logs
+`Invalid HTTP request received`), while the `http` half never leaves the device
+at all, so the server log shows contact but no request.
+
+So the app declares `NSAllowsArbitraryLoads` and `usesCleartextTraffic`. That is
+a real reduction in transport security and is accepted for one reason: the agent
+is reached over a **WireGuard tunnel** (Tailscale) or an authenticated tunnel,
+and the alternative — terminating TLS on the host — is host work (§11) that
+Hermes does not do for you. If the host ever serves HTTPS, both exceptions
+should be narrowed or dropped.
+
+The same applies to the notification webhook endpoint (`docs/push-relay.md` §5),
+which is plaintext on its own port.
+
 ### 5.3 Auth flow
 
 Hermes offers three shapes; we support two:
