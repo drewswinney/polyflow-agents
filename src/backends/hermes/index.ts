@@ -87,6 +87,21 @@ export class HermesBackend implements AgentBackend {
   private readonly state = createObservable<ConnectionState>('idle')
   private readonly sinks = new Map<SessionId, Set<(u: SessionUpdate) => void>>()
   private readonly eventSinks = new Set<(record: EventRecord) => void>()
+  /**
+   * Stored session id → live runtime id, and back.
+   *
+   * These are two different identifiers for the same conversation and Hermes
+   * does not accept one where it wants the other. `/api/sessions` lists
+   * *stored* ids (`20260818_195944_3b37eb`); every gateway RPC and every event
+   * uses the *runtime* id (`93ed1b33`), which only exists once a session has
+   * been resumed and changes each time it is. Prompting with a stored id
+   * returns `4001 session not found`, and — worse, because it is silent —
+   * subscribing with one matches no events at all, so a turn would stream to
+   * nobody.
+   */
+  private readonly runtimeByStored = new Map<SessionId, string>()
+  private readonly storedByRuntime = new Map<string, SessionId>()
+  private readonly resuming = new Map<SessionId, Promise<string>>()
   private readonly mapContext: MapContext = { now: 0, toolStartedAt: new Map() }
   private detachGateway: Unsubscribe | null = null
 
@@ -145,6 +160,54 @@ export class HermesBackend implements AgentBackend {
     this.detachGateway = null
     this.gateway.close()
     this.state.set('closed')
+
+    // Runtime ids belong to the connection that minted them. Keeping them
+    // across a reconnect would send prompts to sessions that no longer exist.
+    this.runtimeByStored.clear()
+    this.storedByRuntime.clear()
+    this.resuming.clear()
+  }
+
+  /**
+   * The runtime id for a stored session, resuming it if necessary.
+   *
+   * Resume is idempotent and cheap on an already-live session, so this is safe
+   * to call before every prompt. In-flight resumes are shared rather than
+   * duplicated: opening a chat fires the transcript load and the subscription
+   * at once, and two resumes for one session would mint two runtimes.
+   */
+  private async runtimeIdFor(stored: SessionId): Promise<string> {
+    const known = this.runtimeByStored.get(stored)
+
+    if (known) return known
+
+    const inFlight = this.resuming.get(stored)
+
+    if (inFlight) return inFlight
+
+    const pending = this.gateway
+      .request<{ session_id?: string }>('session.resume', {
+        session_id: stored,
+        ...(this.config.profile ? { profile: this.config.profile } : {})
+      })
+      .then(result => {
+        const runtime = result?.session_id || stored
+        this.rememberRuntime(stored, runtime)
+
+        return runtime
+      })
+      .finally(() => {
+        this.resuming.delete(stored)
+      })
+
+    this.resuming.set(stored, pending)
+
+    return pending
+  }
+
+  private rememberRuntime(stored: SessionId, runtime: string): void {
+    this.runtimeByStored.set(stored, runtime)
+    this.storedByRuntime.set(runtime, stored)
   }
 
   /**
@@ -194,10 +257,13 @@ export class HermesBackend implements AgentBackend {
       for (const sink of this.eventSinks) sink(record)
     }
 
-    const sessionId = event.session_id
+    const runtimeId = event.session_id
 
-    if (!sessionId) return
+    if (!runtimeId) return
 
+    // Events are keyed by runtime id; the UI subscribes by stored id. Fall back
+    // to the raw id so a session the app only knows by one name still matches.
+    const sessionId = this.storedByRuntime.get(runtimeId) ?? runtimeId
     const sinks = this.sinks.get(sessionId)
 
     if (!sinks?.size) return
@@ -222,7 +288,13 @@ export class HermesBackend implements AgentBackend {
       ...(this.config.profile ? { profile: this.config.profile } : {})
     })
 
-    return created.stored_session_id ?? created.session_id
+    const stored = created.stored_session_id ?? created.session_id
+
+    // Create hands back both ids, so this session never needs a resume to be
+    // promptable — seed the mapping while we have it.
+    this.rememberRuntime(stored, created.session_id)
+
+    return stored
   }
 
   async loadSession(id: SessionId): Promise<SessionTranscript> {
@@ -272,11 +344,19 @@ export class HermesBackend implements AgentBackend {
 
     if (!text) return
 
-    await this.gateway.request('prompt.submit', { session_id: id, text }, PROMPT_SUBMIT_TIMEOUT_MS)
+    const runtimeId = await this.runtimeIdFor(id)
+
+    await this.gateway.request('prompt.submit', { session_id: runtimeId, text }, PROMPT_SUBMIT_TIMEOUT_MS)
   }
 
   async cancel(id: SessionId): Promise<void> {
-    await this.gateway.request('session.interrupt', { session_id: id })
+    const runtimeId = this.runtimeByStored.get(id)
+
+    // Nothing to interrupt if it was never resumed — and resuming here just to
+    // cancel would start the very session the user is trying to stop.
+    if (!runtimeId) return
+
+    await this.gateway.request('session.interrupt', { session_id: runtimeId })
   }
 
   async respondToPermission(reqId: string, outcome: PermissionOutcome, sessionId?: SessionId): Promise<void> {
@@ -294,6 +374,10 @@ export class HermesBackend implements AgentBackend {
   // --- Live stream --------------------------------------------------------
 
   subscribe(id: SessionId, sink: (u: SessionUpdate) => void): Unsubscribe {
+    // Resolve the runtime id now rather than at first prompt, so a turn started
+    // from elsewhere — a cron job, the desktop app — streams into this view too.
+    void this.runtimeIdFor(id).catch(() => undefined)
+
     let sinks = this.sinks.get(id)
 
     if (!sinks) {
