@@ -83,7 +83,12 @@ export function useSessionStream(
         if (cancelled) return
 
         setTranscript(loaded)
-        setEntries(loaded.entries)
+        // Keep the existing array when the content is the same. A reload is
+        // routine — every reconnect refetches, because the delta stream is not
+        // resumable (§5.4) — and handing the list a new array of identical rows
+        // makes it re-key and jump to the top, throwing away wherever you were
+        // reading for no gain.
+        setEntries(current => (sameEntries(current, loaded.entries) ? current : loaded.entries))
         setUsage(loaded.usage)
         setLoadError(null)
 
@@ -106,7 +111,19 @@ export function useSessionStream(
     }
   }, [backend, sessionId, reloadNonce])
 
-  /** Seal the streaming tail into a settled entry. */
+  /**
+ * Whether a reload produced the same transcript.
+ *
+ * Compares ids, not contents: entries are immutable once settled, so the id
+ * sequence is what changes when something is genuinely new.
+ */
+function sameEntries(current: TranscriptEntry[], next: TranscriptEntry[]): boolean {
+  if (current.length !== next.length) return false
+
+  return current.every((entry, index) => entry.id === next[index]?.id)
+}
+
+/** Seal the streaming tail into a settled entry. */
   const sealTail = useCallback(() => {
     const settled = tail.finish()
 

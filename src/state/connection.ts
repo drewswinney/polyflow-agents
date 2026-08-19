@@ -184,7 +184,14 @@ export function useConnection(agent: Agent | null): Connection {
     let previous: string | null = null
 
     return NetInfo.addEventListener(info => {
-      const current = `${info.type}:${info.isInternetReachable}`
+      // Transport only. `isInternetReachable` is tri-state and flaps — null
+      // while probing, then true, then null again — and it was part of this
+      // key, so every flap redialled. Each redial replaced the backend, which
+      // reloaded the transcript, which reset the list to the top: a chat that
+      // scrolled itself away from what you were reading, repeatedly. The path
+      // changing is what invalidates a socket; reachability saying "not sure
+      // yet" is not.
+      const current = info.type
 
       if (previous !== null && previous !== current && info.isConnected) {
         setNonce(value => value + 1)
