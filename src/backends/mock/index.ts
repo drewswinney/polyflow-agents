@@ -93,6 +93,7 @@ function seedSessions(now: number): MockSession[] {
     ...summary,
     transcript: {
       pendingApproval: null,
+      pendingClarify: null,
       sessionId: summary.id,
       title: summary.title,
       model: summary.model,
@@ -209,7 +210,8 @@ export class MockBackend implements AgentBackend {
           model: opts.model ?? 'sonnet-4.5',
           entries: [],
           usage: null,
-          pendingApproval: null
+          pendingApproval: null,
+          pendingClarify: null
         }
       },
       ...this.sessions

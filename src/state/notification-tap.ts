@@ -48,7 +48,7 @@ export function useNotificationTap(backend: AgentBackend | null, agent: Agent | 
 }
 
 type Described = {
-  kind: 'approval' | 'complete' | 'cron_failure'
+  kind: 'approval' | 'clarify' | 'complete' | 'cron_failure'
   data: 'approval' | 'complete'
   title: string
   body: string
@@ -61,6 +61,15 @@ function describe(record: EventRecord, agent: Agent): Described | null {
       data: 'approval',
       title: `${agent.displayName} needs approval`,
       body: record.detail || 'A command is waiting on your answer.'
+    }
+  }
+
+  if (record.name === 'clarify.request') {
+    return {
+      kind: 'clarify',
+      data: 'approval',
+      title: `${agent.displayName} has a question`,
+      body: record.detail || 'The agent is waiting on your answer.'
     }
   }
 

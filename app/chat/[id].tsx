@@ -12,6 +12,7 @@ import { useSessionStream } from '@/state/session-stream'
 import { useIsStreaming } from '@/state/stream-tail'
 import { useChatInbox } from '@/state/chat-inbox'
 import { ApprovalCard, ApprovalNudge } from '@/ui/components/ApprovalCard'
+import { ClarifyCard } from '@/ui/components/ClarifyCard'
 import { Composer } from '@/ui/components/Composer'
 import { ConnectionBanner } from '@/ui/components/ConnectionBanner'
 import { IconButton } from '@/ui/components/IconButton'
@@ -70,12 +71,12 @@ export default function ChatScreen() {
   }, [stream.entries.length])
   // An approval should be on screen, not appended below the fold. Keyed by id so
   // being asked a second time scrolls again.
-  const approvalId = stream.approval?.id
+  const approvalId = stream.approval?.id ?? stream.clarify?.id
   // One restored from the transcript is the reason this screen was opened at
   // all — you tapped a notification about it — so it scrolls whether or not you
   // were parked at the tail. A live one only follows the tail if you are
   // already there, and the bar above the composer covers the rest.
-  const restoredApprovalId = stream.transcript?.pendingApproval?.id
+  const restoredApprovalId = stream.transcript?.pendingApproval?.id ?? stream.transcript?.pendingClarify?.id
 
   useEffect(() => {
     if (!approvalId || stream.loading) return
@@ -134,7 +135,7 @@ export default function ChatScreen() {
             meta ? <Text variant="monoSmall">{meta}</Text> : null
           ) : (
             <Text variant="monoSmall" color={theme.color.warning700}>
-              {stream.approval ? 'blocked on you' : 'reconnecting…'}
+              {stream.approval || stream.clarify ? 'blocked on you' : 'reconnecting…'}
             </Text>
           )
         }
@@ -180,6 +181,14 @@ export default function ChatScreen() {
                     />
                   </View>
                 ) : null}
+
+                {/* A question halts the turn exactly as an approval does, so it
+                    belongs in the same place, in the same shape. */}
+                {stream.clarify ? (
+                  <View style={styles.approval}>
+                    <ClarifyCard request={stream.clarify} onRespond={stream.respondToClarify} />
+                  </View>
+                ) : null}
               </View>
             }
             onScroll={onScroll}
@@ -193,7 +202,7 @@ export default function ChatScreen() {
           />
         )}
 
-        {stream.approval && scrolledAway ? (
+        {(stream.approval || stream.clarify) && scrolledAway ? (
           <ApprovalNudge onPress={() => listRef.current?.scrollToEnd({ animated: true })} />
         ) : null}
 

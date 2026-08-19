@@ -29,6 +29,7 @@ import {
   type McpServerStatus,
   type ModelOption,
   type NewSessionOptions,
+  type ClarifyRequest,
   type PermissionRequest,
   type Observable,
   type PermissionOutcome,
@@ -63,6 +64,12 @@ interface ResumeResult {
     command?: string
     description?: string
     allow_permanent?: boolean
+  }
+  pending_clarify?: {
+    request_id?: string
+    question?: string
+    choices?: unknown[] | null
+    multi_select?: boolean
   }
 }
 
@@ -126,6 +133,8 @@ export class HermesBackend implements AgentBackend {
    * still be found; the event that announced it is long gone.
    */
   private readonly pendingApprovals = new Map<SessionId, PermissionRequest>()
+  /** Questions recovered from a resume snapshot, for the same reason. */
+  private readonly pendingClarifies = new Map<SessionId, ClarifyRequest>()
   private readonly mapContext: MapContext = { now: 0, toolStartedAt: new Map(), approvalTimeoutMs: null }
   private detachGateway: Unsubscribe | null = null
 
@@ -242,6 +251,20 @@ export class HermesBackend implements AgentBackend {
           })
         } else {
           this.pendingApprovals.delete(stored)
+        }
+
+        const asking = result?.pending_clarify
+
+        if (asking?.request_id) {
+          this.pendingClarifies.set(stored, {
+            id: String(asking.request_id),
+            sessionId: stored,
+            question: String(asking.question ?? '') || 'The agent asked a question.',
+            choices: Array.isArray(asking.choices) ? asking.choices.map(choice => String(choice)) : [],
+            multiSelect: asking.multi_select === true
+          })
+        } else {
+          this.pendingClarifies.delete(stored)
         }
 
         return runtime
@@ -397,7 +420,8 @@ export class HermesBackend implements AgentBackend {
       usage: info
         ? { inputTokens: info.input_tokens, outputTokens: info.output_tokens, costUsd: info.actual_cost_usd ?? undefined }
         : null,
-      pendingApproval: this.pendingApprovals.get(id) ?? null
+      pendingApproval: this.pendingApprovals.get(id) ?? null,
+      pendingClarify: this.pendingClarifies.get(id) ?? null
     }
   }
 

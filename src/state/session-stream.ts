@@ -92,6 +92,7 @@ export function useSessionStream(
         // snapshot is the only place it still exists. Never clobber a live one:
         // the socket is more current than the load it raced.
         if (loaded.pendingApproval) setApproval(current => current ?? loaded.pendingApproval)
+        if (loaded.pendingClarify) setClarify(current => current ?? loaded.pendingClarify)
       })
       .catch((cause: unknown) => {
         if (!cancelled) setLoadError(cause instanceof Error ? cause.message : String(cause))
