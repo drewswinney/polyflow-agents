@@ -10,6 +10,7 @@ import { type AgentCredential, saveAgentCredential } from '@/platform/secure-sto
 import { useAgents } from '@/state/agents'
 import { Card } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
+import { IconButton } from '@/ui/components/IconButton'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { useGradient, useTheme } from '@/ui/ThemeProvider'
@@ -276,14 +277,14 @@ function RevealToggle({ revealed, onToggle }: { revealed: boolean; onToggle: () 
   const theme = useTheme()
 
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={revealed ? 'Hide' : 'Show'}
+    <IconButton
+      name={revealed ? 'eye-slash' : 'eye'}
+      accessibilityLabel={revealed ? 'Hide the secret' : 'Show the secret'}
+      size={14}
+      slot={36}
+      color={theme.color.gray400}
       onPress={onToggle}
-      hitSlop={8}
-    >
-      <Icon name={revealed ? 'eye-slash' : 'eye'} size={14} color={theme.color.gray400} />
-    </Pressable>
+    />
   )
 }
 

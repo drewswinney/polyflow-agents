@@ -12,7 +12,7 @@ import { AgentSwitcher } from '@/ui/components/AgentSwitcher'
 import { Card, Divider } from '@/ui/components/Card'
 import { ConnectionBanner } from '@/ui/components/ConnectionBanner'
 import { EventRow } from '@/ui/components/EventRow'
-import { Icon } from '@/ui/components/Icon'
+import { IconButton } from '@/ui/components/IconButton'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { StatTile } from '@/ui/components/StatTile'
 import { Text } from '@/ui/components/Text'
@@ -64,16 +64,16 @@ export default function ActivityScreen() {
         title="Activity"
         center={<AgentPill agent={agent} open={switcherOpen} onPress={() => setSwitcherOpen(true)} />}
         right={
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Refresh"
+          <IconButton
+            name="arrows-rotate"
+            accessibilityLabel="Refresh activity"
+            edge="right"
+            disabled={usage.isFetching || history.isFetching}
             onPress={() => {
               void usage.refetch()
               void history.refetch()
             }}
-          >
-            <Icon name="arrows-rotate" />
-          </Pressable>
+          />
         }
       />
 

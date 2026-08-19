@@ -89,7 +89,13 @@ export function Composer({
               accessibilityRole="button"
               accessibilityLabel="Talk to the agent"
               onPress={onVoice}
-              style={[styles.mic, { backgroundColor: theme.color.secondaryTint }]}
+              // The circle is 36px by the design; the remaining 8px in each
+              // direction is made up invisibly so the target still clears 44.
+              hitSlop={4}
+              style={({ pressed }) => [
+                styles.mic,
+                { backgroundColor: theme.color.secondaryTint, opacity: pressed ? 0.6 : 1 }
+              ]}
             >
               <Icon name="microphone" size={14} color={theme.color.secondary} />
             </Pressable>

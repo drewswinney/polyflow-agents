@@ -1,7 +1,7 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useRef } from 'react'
-import { ActivityIndicator, KeyboardAvoidingView, Platform, Pressable, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native'
 
 import type { TranscriptEntry } from '@/domain'
 import { useActiveConnection } from '@/state/ConnectionProvider'
@@ -12,7 +12,7 @@ import { useVoiceInbox } from '@/state/voice-inbox'
 import { ApprovalSheet } from '@/ui/components/ApprovalSheet'
 import { Composer } from '@/ui/components/Composer'
 import { ConnectionBanner } from '@/ui/components/ConnectionBanner'
-import { Icon } from '@/ui/components/Icon'
+import { IconButton } from '@/ui/components/IconButton'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { StreamingTail } from '@/ui/components/StreamingTail'
 import { Text } from '@/ui/components/Text'
@@ -84,11 +84,7 @@ export default function ChatScreen() {
             </Text>
           )
         }
-        right={
-          <Pressable accessibilityRole="button" accessibilityLabel="Session options">
-            <Icon name="ellipsis" />
-          </Pressable>
-        }
+        right={<IconButton name="ellipsis" accessibilityLabel="Session options" edge="right" />}
       />
 
       <KeyboardAvoidingView

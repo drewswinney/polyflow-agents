@@ -14,6 +14,7 @@ import { BlockedStrip } from '@/ui/components/BlockedStrip'
 import { Card, Divider } from '@/ui/components/Card'
 import { ConnectionBanner } from '@/ui/components/ConnectionBanner'
 import { AgentGlyph, Icon } from '@/ui/components/Icon'
+import { IconButton } from '@/ui/components/IconButton'
 import { SessionRow } from '@/ui/components/SessionRow'
 import { Text } from '@/ui/components/Text'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
@@ -72,9 +73,12 @@ export default function SessionsScreen() {
           title="Sessions"
           center={<AgentPill agent={agent} open={switcherOpen} onPress={() => setSwitcherOpen(true)} />}
           right={
-            <Pressable accessibilityRole="button" accessibilityLabel="Search" onPress={() => setSearchActive(true)}>
-              <Icon name="magnifying-glass" />
-            </Pressable>
+            <IconButton
+              name="magnifying-glass"
+              accessibilityLabel="Search sessions"
+              edge="right"
+              onPress={() => setSearchActive(true)}
+            />
           }
         />
       )}
@@ -218,9 +222,14 @@ function SearchHeader({
             style={[styles.searchInput, { color: theme.color.gray800, fontFamily: theme.font.body }]}
           />
           {query ? (
-            <Pressable accessibilityRole="button" accessibilityLabel="Clear" onPress={() => onChange('')}>
-              <Icon name="xmark" size={13} color={theme.color.gray400} />
-            </Pressable>
+            <IconButton
+              name="xmark"
+              accessibilityLabel="Clear search"
+              size={13}
+              slot={36}
+              color={theme.color.gray400}
+              onPress={() => onChange('')}
+            />
           ) : null}
         </View>
 

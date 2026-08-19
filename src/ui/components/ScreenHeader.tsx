@@ -1,10 +1,10 @@
 import { BlurView } from 'expo-blur'
 import type { ReactNode } from 'react'
-import { Pressable, StyleSheet, View } from 'react-native'
+import { StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useTheme } from '../ThemeProvider'
-import { Icon } from './Icon'
+import { IconButton } from './IconButton'
 import { Text } from './Text'
 
 /**
@@ -53,11 +53,9 @@ export function ScreenHeader({
       ]}
     >
       <View style={styles.row}>
-        {onBack ? (
-          <Pressable accessibilityRole="button" accessibilityLabel="Back" onPress={onBack} style={styles.backSlot}>
-            <Icon name="chevron-left" size={17} />
-          </Pressable>
-        ) : null}
+        {/* The design draws a 34px slot; the shortfall against the 44px
+            minimum is made up in hitSlop rather than by moving the chevron. */}
+        {onBack ? <IconButton name="chevron-left" accessibilityLabel="Back" slot={34} edge="left" onPress={onBack} /> : null}
 
         <View style={styles.titleBlock}>
           <Text variant={onBack ? 'subTitle' : 'screenTitle'} numberOfLines={1}>
@@ -96,7 +94,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     gap: 6
   },
-  backSlot: { width: 34, height: 34, marginLeft: -9, alignItems: 'center', justifyContent: 'center' },
   titleBlock: { flex: 1, minWidth: 0 },
   rightSlot: { minWidth: 44, alignItems: 'flex-end', justifyContent: 'center' },
   center: { position: 'absolute', left: 0, right: 0, alignItems: 'center' }
