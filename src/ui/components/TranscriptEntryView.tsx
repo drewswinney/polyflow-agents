@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, View } from 'react-native'
 import type { TranscriptEntry } from '@/domain'
 
 import { clockTime } from '../format'
+import { Markdown } from '../markdown/Markdown'
 import { useGradient, useTheme } from '../ThemeProvider'
 import { Icon } from './Icon'
 import { Text } from './Text'
@@ -49,11 +50,17 @@ function UserBubble({ text }: { text: string }) {
 function AgentText({ text, role }: { text: string; role: 'agent' | 'system' }) {
   const theme = useTheme()
 
-  return (
-    <Text variant="body" color={role === 'system' ? theme.color.error700 : theme.color.gray800}>
-      {text}
-    </Text>
-  )
+  // System rows are the app's own error copy, never model output — there is no
+  // markdown in them to render, and rendering it would style an error like prose.
+  if (role === 'system') {
+    return (
+      <Text variant="body" color={theme.color.error700}>
+        {text}
+      </Text>
+    )
+  }
+
+  return <Markdown source={text} />
 }
 
 /** Thinking blocks are collapsed by default — a phone has no room for them open. */
