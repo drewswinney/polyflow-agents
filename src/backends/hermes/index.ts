@@ -80,6 +80,15 @@ interface ResumeResult {
  */
 const PROMPT_SUBMIT_TIMEOUT_MS = 1_800_000
 
+/**
+ * How long a password login is assumed good for.
+ *
+ * Deliberately short of any real session lifetime: the cost of being wrong is
+ * one 401 that the next dial re-authenticates through, and the cost of being
+ * too eager is a rate-limit lockout.
+ */
+const LOGIN_REUSE_MS = 300_000
+
 /** Hermes reports nearly everything (§4.1). */
 export const HERMES_CAPABILITIES: Capabilities = {
   sessions: { search: true, rename: true, pin: true },
@@ -137,6 +146,14 @@ export class HermesBackend implements AgentBackend {
   private readonly pendingClarifies = new Map<SessionId, ClarifyRequest>()
   private readonly mapContext: MapContext = { now: 0, toolStartedAt: new Map(), approvalTimeoutMs: null }
   private detachGateway: Unsubscribe | null = null
+  /**
+   * When this client last exchanged a password for a session cookie.
+   *
+   * The cookie outlives a single dial, and the host rate-limits logins — so
+   * re-authenticating on every reconnect is both wasted and the thing that
+   * earns a 429. A redial inside the window reuses the session it already has.
+   */
+  private lastLoginAt = 0
 
   constructor(config: HermesBackendConfig) {
     this.config = config
@@ -166,8 +183,9 @@ export class HermesBackend implements AgentBackend {
     // Password auth has to establish the session before anything else: the
     // ticket endpoint is itself session-gated, so minting one without logging
     // in first returns 401, not a ticket.
-    if (this.config.authMode === 'password') {
+    if (this.config.authMode === 'password' && Date.now() - this.lastLoginAt > LOGIN_REUSE_MS) {
       await this.rest.login()
+      this.lastLoginAt = Date.now()
     }
 
     if (signal?.aborted) return

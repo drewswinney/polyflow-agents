@@ -45,6 +45,18 @@ export function useConnection(agent: Agent | null): Connection {
   const wasBackgrounded = useRef(false)
 
   /**
+   * A floor under how often this can dial, and a widening gap after failures.
+   *
+   * Every connect authenticates, and the host rate-limits logins — so a trigger
+   * that fires repeatedly does not merely reconnect repeatedly, it gets the app
+   * locked out with a 429 and turns a transient fault into a stuck one. Refs,
+   * not state: this must not itself cause a render, and it must survive the
+   * effect re-running.
+   */
+  const lastDialAt = useRef(0)
+  const failures = useRef(0)
+
+  /**
    * What a redial actually depends on.
    *
    * Not the agent object: its identity changes whenever *anything* on the
@@ -69,6 +81,20 @@ export function useConnection(agent: Agent | null): Connection {
       setError(null)
 
       const agent = agentRef.current
+
+      // 1s floor between automatic dials, doubling per consecutive failure up
+      // to 30s. An explicit Reconnect resets the count, because a person asking
+      // is new information — the app guessing again is not.
+      const cooldown = failures.current === 0 ? 1_000 : Math.min(30_000, 1_000 * 2 ** failures.current)
+      const wait = Math.max(0, cooldown - (Date.now() - lastDialAt.current))
+
+      if (wait > 0) {
+        await new Promise(resolve => setTimeout(resolve, wait))
+
+        if (cancelled) return
+      }
+
+      lastDialAt.current = Date.now()
 
       // Nothing to dial before onboarding has run. Idle, not error: an empty
       // registry is a first run, not a failure.
@@ -134,9 +160,13 @@ export function useConnection(agent: Agent | null): Connection {
       try {
         await next.connect(controller.signal)
 
-        if (!cancelled) setAttempt(0)
+        if (!cancelled) {
+          failures.current = 0
+          setAttempt(0)
+        }
       } catch (cause) {
         if (!cancelled) {
+          failures.current += 1
           // The gateway client can be left mid-dial, and a banner that says
           // "connecting" forever is worse than one that says what went wrong:
           // it looks like progress and hides the reason.
@@ -161,7 +191,10 @@ export function useConnection(agent: Agent | null): Connection {
   // Switching agents re-scopes the whole app; the previous socket goes with it.
   useEffect(() => releaseBackend, [])
 
-  const reconnect = () => setNonce(value => value + 1)
+  const reconnect = () => {
+    failures.current = 0
+    setNonce(value => value + 1)
+  }
 
   // Foreground → verify the socket. Neither OS keeps a WebSocket alive in
   // background indefinitely, so a closed socket on resume is expected, not an error.
