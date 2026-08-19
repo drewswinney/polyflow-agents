@@ -36,18 +36,34 @@ actually matters — the agent is halted on an approval and stays halted.
 Verified against the pinned upstream tree (`hermes:~/.hermes/hermes-agent`, ref
 `c86197e`), not assumed. Three findings, in descending order of importance.
 
-### 2.1 The app is already a gateway platform
+### 2.1 The app's approvals take the gateway surface, in `hermes serve`'s process
 
-`Platform.API_SERVER = "api_server"` (`gateway/config.py`) is implemented by
-`gateway/platforms/api_server.py` — the same file that emits the
-`"approval.request"` event this app consumes over `/api/ws`. The phone's sessions
-therefore run *inside* the gateway, alongside Telegram's and Discord's.
+**Corrected.** An earlier revision of this document said the app talks to
+`gateway/platforms/api_server.py` (`Platform.API_SERVER`) and that its sessions
+run inside the messaging gateway. That is the wrong file and the wrong process.
+The real path is:
 
-This is what kills the sidecar. The old design assumed a notifier would need its
-own socket because nothing inside Hermes could see a phone-started session. It
-can: an approval raised in one of our sessions goes through
-`_await_gateway_decision(..., surface: str = "gateway")` in `tools/approval.py`,
-in-process, where a plugin hook is already firing.
+```
+app ──/api/ws──► hermes serve ──► hermes_cli/web_server.py ──► in-process tui_gateway
+```
+
+`tui_gateway/server.py` serves the JSON-RPC the app speaks — `prompt.submit`,
+`session.resume`, `config.set`. `gateway/platforms/api_server.py` is the
+*messaging* gateway's own API platform: a different surface this app does not
+use.
+
+**The conclusion survives the correction**, for a different reason than stated.
+Before running a turn, `tui_gateway` calls `_enable_gateway_prompts()`, which
+sets `HERMES_GATEWAY_SESSION=1`, `HERMES_EXEC_ASK=1` and `HERMES_INTERACTIVE=1`
+— exactly the env `tools/approval.py` reads to choose
+`surface="gateway" if (is_gateway or is_ask) else "cli"`. So an approval raised
+in one of our sessions is a **gateway-surface** approval, `pre_approval_request`
+fires for it, and plugins are discovered in that process (approval.py's
+`get_plugin_manager()` calls `discover_plugins()` before resolving a transport).
+
+What the sidecar was for — a second socket, because nothing inside Hermes could
+observe a phone-started session — is still unnecessary. The hooks fire where the
+turn runs.
 
 ### 2.2 Two plugin systems, both file-drop, neither needing a core patch
 
@@ -87,9 +103,13 @@ Reimplementing that in a sidecar is the kind of work that looks small and is not
 
 ## 3. The design
 
-**One plugin with two faces.** Hooks for the events that fire in-process; a
-registered platform for the delivery path that cron uses. Both live in the same
-plugin directory and share one Expo push client.
+**One plugin with two faces, loaded by two processes.** Hooks for the events that
+fire wherever the turn runs — for this app, `hermes serve` — and a registered
+platform for the delivery path cron uses, which lives in the *messaging gateway*
+process. One plugin directory, discovered independently by each process, each
+registering what is relevant there. They share source and an Expo push client;
+they do not share memory, so anything stateful (the device registry) has to live
+on disk rather than in a module global.
 
 ```
 ~/.hermes/plugins/handheld-push/
@@ -157,13 +177,27 @@ Nothing here is built yet; the app currently has no push-token code at all.
 5. **New preference rows.** `notification-prefs.ts` covers approvals, turn
    complete and cron failures with quiet hours. Clarify and artifacts are new.
 
-The registration endpoint is the plugin's, not a separate service's. Shape kept
-from the previous design because the app is written to it:
+**Device registration has no channel yet.** The previous design assumed the
+plugin would expose `POST /devices`, which assumed the plugin can serve HTTP —
+still unverified (§6 resolved *answering*, not registration). The obvious
+shortcut does not work either: `config.set` on the app's own gateway is a
+curated if/elif over known keys and ends in `return _err(rid, 4002, f"unknown
+config key: {key}")`, so the app cannot write `plugins.handheld_push.devices`
+through it.
 
-```
-POST   /devices                 { agentId, expoPushToken, platform }
-DELETE /devices/{expoPushToken}
-```
+Options, in the order they should be tried:
+
+1. **A loopback listener owned by the plugin.** Small, and the host is already
+   reached over Tailscale or a tunnel, so no new exposure — but it is the
+   sidecar's port question returning at reduced scale.
+2. **A route on Hermes's webhook gateway** (`/api/webhooks`, per-route HMAC),
+   if a plugin can register one.
+3. **Out-of-band for now**: the deploy script writes the token into the plugin's
+   config. Fine for one or two known devices, wrong the moment tokens rotate —
+   and Expo push tokens rotate.
+
+This is the last unanswered question in the design, and it is smaller than the
+one §6 closed.
 
 ## 6. Answering from the lock screen — `register_approval_transport`
 
@@ -274,8 +308,10 @@ and the answer getting back to the plugin.
 
 Listed so the next person does not mistake this document for a finished spec:
 
-- How the app's approval sheet answers a transport-presented request in shape A
+- **Device registration (§5)** — the one open question in the design.
+- How the app's approval card answers a transport-presented request in shape A
   (§6.2) — the plugin owns that channel, and nothing about it is designed yet.
+- Whether a plugin can serve HTTP at all, which both of the above turn on.
 - Which process a hook fires in for **cron-driven** turns specifically. Kanban
   workers are documented as separate `hermes -p <profile> chat -q` subprocesses;
   cron may be similar, which is exactly why `standalone_sender_fn` exists.
