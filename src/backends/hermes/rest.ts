@@ -65,9 +65,6 @@ export class HermesRestError extends Error {
 
 const LOOPBACK = /^(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/
 
-function isLoopback(host: string): boolean {
-  return LOOPBACK.test(host)
-}
 
 /**
  * Find out whether a host speaks TLS, by asking it.
@@ -122,7 +119,14 @@ export class HermesRest {
   }
 
   get baseUrl(): string {
-    const scheme = (this.config.secure ?? !isLoopback(this.config.host)) ? 'https' : 'http'
+    // Unknown means unknown, and the fallback has to pick *something* — so it
+    // picks what `hermes serve` actually speaks: plain HTTP (§2.5). Inferring
+    // TLS from "not loopback" was wrong for the case this app exists for, a
+    // tailnet address, and failed invisibly: the TLS handshake lands on a
+    // plaintext port, the server logs an invalid request, and the client only
+    // ever sees a socket that will not open. `connection.ts` probes and
+    // persists the real answer, so this is the pre-probe default, not policy.
+    const scheme = (this.config.secure ?? false) ? 'https' : 'http'
 
     return `${scheme}://${this.config.host}`
   }

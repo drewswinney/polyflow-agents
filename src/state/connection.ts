@@ -12,9 +12,12 @@ import NetInfo from '@react-native-community/netinfo'
 import { useEffect, useRef, useState } from 'react'
 import { AppState, type AppStateStatus } from 'react-native'
 
+import { probeScheme } from '@/backends/hermes'
 import { activateBackend, MOCK_HOST, releaseBackend } from '@/backends/registry'
 import type { Agent, AgentBackend, ConnectionState } from '@/domain'
 import { type AgentCredential, readAgentCredential } from '@/platform/secure-store'
+
+import { useAgents } from './agents'
 
 export interface Connection {
   backend: AgentBackend | null
@@ -33,6 +36,7 @@ export interface Connection {
  * into a chat rather than being torn down and re-dialled per screen.
  */
 export function useConnection(agent: Agent): Connection {
+  const patchAgent = useAgents(state => state.patch)
   const [backend, setBackend] = useState<AgentBackend | null>(null)
   const [state, setState] = useState<ConnectionState>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -67,7 +71,31 @@ export function useConnection(agent: Agent): Connection {
         return
       }
 
-      const next = activateBackend(agent, credential)
+      // An agent added while the host was unreachable has no scheme on record,
+      // and guessing one is how you get a socket that never opens and a UI that
+      // says "connecting" forever. Probe once, remember the answer.
+      let resolved = agent
+
+      if (agent.secure === undefined && agent.host !== MOCK_HOST) {
+        try {
+          const secure = await probeScheme(agent.host)
+
+          if (cancelled) return
+
+          resolved = { ...agent, secure }
+          patchAgent(agent.id, { secure })
+        } catch (cause) {
+          if (!cancelled) {
+            setState('error')
+            setError(cause instanceof Error ? cause.message : String(cause))
+            setAttempt(count => count + 1)
+          }
+
+          return
+        }
+      }
+
+      const next = activateBackend(resolved, credential)
 
       if (cancelled) return
 
@@ -82,6 +110,10 @@ export function useConnection(agent: Agent): Connection {
         if (!cancelled) setAttempt(0)
       } catch (cause) {
         if (!cancelled) {
+          // The gateway client can be left mid-dial, and a banner that says
+          // "connecting" forever is worse than one that says what went wrong:
+          // it looks like progress and hides the reason.
+          setState('error')
           setError(cause instanceof Error ? cause.message : String(cause))
           setAttempt(count => count + 1)
         }
@@ -97,7 +129,7 @@ export function useConnection(agent: Agent): Connection {
       controller.abort()
       void pending.then(unsubscribe => unsubscribe?.())
     }
-  }, [agent, nonce])
+  }, [agent, nonce, patchAgent])
 
   // Switching agents re-scopes the whole app; the previous socket goes with it.
   useEffect(() => releaseBackend, [])
