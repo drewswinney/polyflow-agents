@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { missingCapabilityLabels } from '@/domain'
 import { forgetAgentCredential, forgetPushConfig } from '@/platform/secure-store'
-import { useActiveConnection } from '@/state/ConnectionProvider'
+import { useBackend, useConnectionState, useReconnect } from '@/state/ConnectionProvider'
 import { useAgents, useSelectedAgent, useSelectedAgentOrNull } from '@/state/agents'
 import { useSidebar } from '@/state/sidebar'
 import { AgentPill } from '@/ui/components/AgentPill'
@@ -39,7 +39,9 @@ export default function SettingsScreen() {
   const agents = useAgents(state => state.agents)
   const select = useAgents(state => state.select)
   const removeAgent = useAgents(state => state.remove)
-  const { backend, state, reconnect } = useActiveConnection()
+  const backend = useBackend()
+  const state = useConnectionState()
+  const reconnect = useReconnect()
   const openSidebar = useSidebar(store => store.show)
   const [switcherOpen, setSwitcherOpen] = useState(false)
 

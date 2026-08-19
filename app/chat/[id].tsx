@@ -5,7 +5,7 @@ import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
 import { ActivityIndicator, Keyboard, Platform, StyleSheet, View } from 'react-native'
 
 import type { TranscriptEntry } from '@/domain'
-import { useActiveConnection } from '@/state/ConnectionProvider'
+import { useBackend, useConnectionState } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { useSidebar } from '@/state/sidebar'
 import { useSessionStream } from '@/state/session-stream'
@@ -36,7 +36,8 @@ export default function ChatScreen() {
   const theme = useTheme()
   const agent = useSelectedAgent()
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { backend, state } = useActiveConnection()
+  const backend = useBackend()
+  const state = useConnectionState()
   const openSidebar = useSidebar(store => store.show)
   const listRef = useRef<FlashListRef<TranscriptEntry>>(null)
 

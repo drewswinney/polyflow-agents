@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react'
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { useActiveConnection } from '@/state/ConnectionProvider'
+import { useBackend } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { type EventFilter, matchesFilter, useEventLog } from '@/state/event-log'
 import { Card, Divider } from '@/ui/components/Card'
@@ -32,7 +32,7 @@ export default function LogsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const agent = useSelectedAgent()
-  const { backend } = useActiveConnection()
+  const backend = useBackend()
   const [filter, setFilter] = useState<EventFilter>('all')
 
   const liveEvents = useEventLog(store => store.records)

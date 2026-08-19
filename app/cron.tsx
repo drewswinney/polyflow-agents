@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { CronJobSummary } from '@/domain'
-import { useActiveConnection } from '@/state/ConnectionProvider'
+import { useBackend } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { Card, Divider } from '@/ui/components/Card'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
@@ -25,7 +25,7 @@ export default function CronScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const agent = useSelectedAgent()
-  const { backend } = useActiveConnection()
+  const backend = useBackend()
   const queryClient = useQueryClient()
 
   const jobsKey = ['agent', agent.id, 'cron'] as const

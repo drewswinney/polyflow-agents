@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, T
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { SessionSummary } from '@/domain'
-import { useActiveConnection } from '@/state/ConnectionProvider'
+import { useBackend } from '@/state/ConnectionProvider'
 import { useAgents, useSelectedAgent } from '@/state/agents'
 import { useSessions, useSessionSearch } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
@@ -35,7 +35,7 @@ export default function SessionsScreen() {
   const agent = useSelectedAgent()
   const agents = useAgents(state => state.agents)
   const select = useAgents(state => state.select)
-  const { backend } = useActiveConnection()
+  const backend = useBackend()
   const openSidebar = useSidebar(store => store.show)
 
   const [switcherOpen, setSwitcherOpen] = useState(false)

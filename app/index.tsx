@@ -2,7 +2,7 @@ import { Redirect, router } from 'expo-router'
 import { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 
-import { useActiveConnection } from '@/state/ConnectionProvider'
+import { useBackend, useConnectionState } from '@/state/ConnectionProvider'
 import { useAgents, useSelectedAgent, useSelectedAgentOrNull } from '@/state/agents'
 import { useChatInbox } from '@/state/chat-inbox'
 import { useCreateSession } from '@/state/queries'
@@ -36,7 +36,8 @@ export default function NewSessionScreen() {
   const agent = useSelectedAgent()
   const agents = useAgents(state => state.agents)
   const select = useAgents(state => state.select)
-  const { backend, state } = useActiveConnection()
+  const backend = useBackend()
+  const state = useConnectionState()
   const openSidebar = useSidebar(store => store.show)
   const submitMessage = useChatInbox(inbox => inbox.submit)
   const [switcherOpen, setSwitcherOpen] = useState(false)
