@@ -42,12 +42,26 @@ if (typeof globalThis.DOMException === 'undefined') {
 
 // A browser-shaped `location` the vendored URL builder can read past. Only the
 // two fields it touches, and only when RN has not provided one.
+//
+// Guarded, because this runs before anything else in the app: if the property
+// were already defined and non-configurable, `defineProperty` throws, and a
+// throw here is not a failed polyfill — it is an app that will not open at all.
+// A missing shim costs one broken feature; a throw costs everything.
 if (typeof window !== 'undefined' && (window as { location?: unknown }).location === undefined) {
-  Object.defineProperty(window, 'location', {
-    value: { host: '', protocol: 'http:' },
-    writable: true,
-    configurable: true
-  })
+  try {
+    Object.defineProperty(window, 'location', {
+      value: { host: '', protocol: 'http:' },
+      writable: true,
+      configurable: true
+    })
+  } catch {
+    try {
+      ;(window as { location?: unknown }).location = { host: '', protocol: 'http:' }
+    } catch {
+      // Nothing more to try. The gateway URL builder will throw on dial, which
+      // surfaces in the connection banner rather than on the splash screen.
+    }
+  }
 }
 
 export {}
