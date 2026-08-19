@@ -7,7 +7,7 @@
  * expensive half is remembering to do it everywhere.
  */
 
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { AgentBackend, AgentId } from '@/domain'
 
@@ -33,5 +33,25 @@ export function useSessionSearch(agentId: AgentId, backend: AgentBackend | null,
     queryKey: searchKey(agentId, trimmed),
     enabled: Boolean(backend) && trimmed.length > 1,
     queryFn: () => backend!.searchSessions(trimmed)
+  })
+}
+
+/**
+ * Start a session and hand back its id.
+ *
+ * Shared rather than inlined because two places create sessions — the Sessions
+ * screen and the sidebar — and the invalidation is the easy half to forget: a
+ * new session that is not in the list is a session you cannot get back to.
+ */
+export function useCreateSession(agentId: AgentId, backend: AgentBackend | null) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async () => {
+      if (!backend) throw new Error('Not connected')
+
+      return backend.createSession({ title: 'New session' })
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: sessionsKey(agentId) })
   })
 }
