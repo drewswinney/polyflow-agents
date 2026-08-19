@@ -4,9 +4,11 @@ The host half of the app's notifications. A Hermes plugin, not a service — see
 [`../../docs/push-relay.md`](../../docs/push-relay.md) for why, and for the
 verified hook inventory this is built on.
 
-**Status: written, not yet run.** Nothing here has executed against a live
-Hermes. Every claim below is read off the upstream source at ref `c86197e`; the
-first deploy is the first test.
+**Status: deployed and partly proven.** Device registration works end to end
+against the live host — signed POST → webhook route → this plugin → registry on
+disk. The hooks are loaded but have not yet fired against a real approval, and
+no push has ever been sent to a real device, because there is no app build to
+register one yet.
 
 ## What it does
 
@@ -42,18 +44,45 @@ plugin-registered platforms (`platform_registry.is_registered(deliver_type)` in
 `gateway/platforms/webhook.py`). So the app POSTs to a webhook route that
 delivers to us, and we treat the message as a control frame.
 
-Add the route under `platforms.webhook.extra.routes` in `config.yaml`:
+Three pieces of host config, all of them learned the hard way on the first
+deploy — each missing one fails at a different stage:
 
 ```yaml
-handheld-register:
-  secret: "<generate one; the app signs with it>"
-  deliver: handheld
-  deliver_only: true
-  prompt: '#handheld:{"action":"{{ payload.action }}","token":"{{ payload.token }}","platform":"{{ payload.platform }}","label":"{{ payload.label }}"}'
+platforms:
+  # 1. The platform must be enabled, or the route resolves and delivery fails
+  #    with "Platform handheld not connected".
+  handheld:
+    enabled: true
+
+  webhook:
+    enabled: true
+    extra:
+      host: <tailnet or tunnel address the phone can reach>
+      port: 8644
+      routes:
+        handheld-register:
+          secret: "<generate one; the app signs with it>"
+          deliver: handheld
+          deliver_only: true
+          # 2. Single-brace templating, and `{__raw__}` is the whole payload as
+          #    JSON — exactly the control frame this plugin parses.
+          prompt: '#handheld:{__raw__}'
+          # 3. Cross-platform delivery demands a target. This platform has no
+          #    chats, so the value only satisfies the router; without it the
+          #    failure is "No chat_id or home channel for handheld".
+          deliver_extra:
+            chat_id: devices
 ```
 
-The app then POSTs `{action, token, platform, label}` to
-`https://<host>:<webhook-port>/webhooks/handheld-register`, HMAC-signed.
+The app POSTs `{action, token, platform, label, prefs}` to
+`http://<host>:8644/webhooks/handheld-register` with two headers:
+
+- `X-Webhook-Timestamp`: unix seconds
+- `X-Webhook-Signature-V2`: hex HMAC-SHA256 of `"<timestamp>.<body>"` under the
+  route secret
+
+V1 (`X-Webhook-Signature`, body only) is accepted but deprecated upstream — it
+has no replay protection. Use V2.
 
 This reuses the webhook server's HMAC validation, rate limiting, idempotency
 cache and body-size caps rather than reimplementing them. What it costs:
@@ -71,6 +100,13 @@ cache and body-size caps rather than reimplementing them. What it costs:
 
 If a plugin ever gains a way to register an HTTP route directly, that replaces
 all three costs and this becomes a footnote.
+
+## Cron delivery
+
+`deliver=handheld` needs a home channel, which is what `HANDHELD_HOME_CHANNEL`
+is declared for (`cron_deliver_env_var` on the platform registration). Set it to
+any non-empty value — the devices come from the registry, not from the channel.
+Untested: no cron job has delivered here yet.
 
 ## Known weak points
 

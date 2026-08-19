@@ -160,10 +160,14 @@ def _build_adapter(config: Any) -> Any:
         idempotency, so this plugin does not have to own a port to be reachable.
         """
 
+        # Signatures below mirror `gateway/platforms/base.py` exactly. The
+        # gateway calls `connect(is_reconnect=...)` and `send_typing(chat_id,
+        # metadata)`; a shortened override raises TypeError at connect time and
+        # the platform never comes up.
         def __init__(self, cfg: Any) -> None:
             super().__init__(cfg, Platform(PLATFORM_NAME))
 
-        async def connect(self) -> bool:
+        async def connect(self, *, is_reconnect: bool = False) -> bool:
             logger.info("[handheld-push] platform ready (%d device(s))", len(devices.load()))
 
             return True
@@ -171,22 +175,30 @@ def _build_adapter(config: Any) -> Any:
         async def disconnect(self) -> None:
             return None
 
-        async def send(self, chat_id: str, text: str, **_: Any) -> Any:
-            control = _handle_control(text)
+        async def send(
+            self,
+            chat_id: str,
+            content: str,
+            reply_to: Optional[str] = None,
+            metadata: Optional[Dict[str, Any]] = None,
+        ) -> Any:
+            control = _handle_control(content)
 
             if control is not None:
                 return SendResult(success=control)
 
             push.notify(
-                kind="cronFailures" if _looks_like_failure(text) else "turnComplete",
+                kind="cronFailures" if _looks_like_failure(content) else "turnComplete",
                 title="Hermes",
-                body=text[:200],
+                body=content[:200],
                 data={"chatId": chat_id or ""},
             )
 
             return SendResult(success=True)
 
-        async def send_typing(self, chat_id: str) -> None:
+        async def send_typing(self, chat_id: str, metadata: Any = None) -> None:
+            # Nothing to show: a push is not a conversation you can see someone
+            # typing into.
             return None
 
         async def send_image(self, chat_id: str, image_url: str, caption: str = "", **_: Any) -> Any:
