@@ -177,27 +177,31 @@ Nothing here is built yet; the app currently has no push-token code at all.
 5. **New preference rows.** `notification-prefs.ts` covers approvals, turn
    complete and cron failures with quiet hours. Clarify and artifacts are new.
 
-**Device registration has no channel yet.** The previous design assumed the
-plugin would expose `POST /devices`, which assumed the plugin can serve HTTP —
-still unverified (§6 resolved *answering*, not registration). The obvious
-shortcut does not work either: `config.set` on the app's own gateway is a
-curated if/elif over known keys and ends in `return _err(rid, 4002, f"unknown
-config key: {key}")`, so the app cannot write `plugins.handheld_push.devices`
-through it.
+**Device registration rides the webhook gateway.** Resolved, with a caveat.
 
-Options, in the order they should be tried:
+A plugin cannot add an HTTP route: `gateway/platforms/webhook.py` registers a
+fixed table (`/webhooks/{route_name}` plus a profile-prefixed variant) and
+exposes no extension point. But a route's **`deliver` target may be a
+plugin-registered platform** — `platform_registry.is_registered(deliver_type)` —
+and **`deliver_only: true` skips the agent entirely**, handing the rendered
+payload straight to that target's send path at "zero LLM cost and sub-second
+delivery", in the upstream comment's words. So the app POSTs an HMAC-signed
+registration to a webhook route that delivers to us.
 
-1. **A loopback listener owned by the plugin.** Small, and the host is already
-   reached over Tailscale or a tunnel, so no new exposure — but it is the
-   sidecar's port question returning at reduced scale.
-2. **A route on Hermes's webhook gateway** (`/api/webhooks`, per-route HMAC),
-   if a plugin can register one.
-3. **Out-of-band for now**: the deploy script writes the token into the plugin's
-   config. Fine for one or two known devices, wrong the moment tokens rotate —
-   and Expo push tokens rotate.
+That reuses the webhook server's HMAC validation, rate limiting, idempotency
+cache and body caps instead of reimplementing them, at three costs, all real:
+a **second endpoint** (the webhook server is the messaging gateway's, on its own
+port, not the one the app already talks to), a **second device secret** (the
+route's HMAC key — not the pairing token, and never to be sent in a push
+payload), and **structured data on a prose channel** (`deliver_only` renders a
+template, so registration rides a JSON line behind a `#handheld:` sentinel).
 
-This is the last unanswered question in the design, and it is smaller than the
-one §6 closed.
+The shortcut that would have avoided all three does not exist: `config.set` on
+the app's own gateway is a curated if/elif over known keys ending in
+`return _err(rid, 4002, f"unknown config key: {key}")`, so the app cannot write a
+plugin's config key through it.
+
+Implementation and its weak points: [`../host/handheld-push/README.md`](../host/handheld-push/README.md).
 
 ## 6. Answering from the lock screen — `register_approval_transport`
 
@@ -308,10 +312,12 @@ and the answer getting back to the plugin.
 
 Listed so the next person does not mistake this document for a finished spec:
 
-- **Device registration (§5)** — the one open question in the design.
+- **Everything in `host/handheld-push/` — it has never run.** Written against the
+  source at ref `c86197e`; the first deploy is the first test.
+- Whether `on_session_finalize` fires for an app session at all, and whether it
+  is redundant with `background.complete` on the app's own socket.
 - How the app's approval card answers a transport-presented request in shape A
   (§6.2) — the plugin owns that channel, and nothing about it is designed yet.
-- Whether a plugin can serve HTTP at all, which both of the above turn on.
 - Which process a hook fires in for **cron-driven** turns specifically. Kanban
   workers are documented as separate `hermes -p <profile> chat -q` subprocesses;
   cron may be similar, which is exactly why `standalone_sender_fn` exists.
