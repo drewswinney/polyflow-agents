@@ -753,15 +753,21 @@ The feature that makes a phone client meaningfully different from the desktop ap
 `approval.request` and `background.complete` (§2.4) are the triggers: the agent
 is blocked on you, or it finished while you were away.
 
-This requires a small server-side piece — Hermes has no push support today. **Use
-a relay on the host** that watches the event stream and posts to Expo's push
-service. Two facts from this document force that choice over reusing the
-messaging gateway:
+This requires a piece on the host — Hermes has no push support today. **Ship it as
+a Hermes plugin**, not as a service beside `hermes serve`: the app's own sessions
+already run inside the gateway (`Platform.API_SERVER`), so their approvals fire
+`pre_approval_request` in-process, where a plugin hook is already listening. The
+full inventory, event coverage and open questions are in
+[`push-relay.md`](push-relay.md).
+
+Two constraints survive from the earlier sidecar design and still shape it:
 
 - Only one agent holds a live socket (§5.2), so notifications for *other* agents
-  cannot come from the app at all
+  cannot come from the app at all — which is why delivery belongs on the host,
+  wherever it runs
 - The lock-screen **Allow / Deny** chips (§7.12) must round-trip
-  `approval.respond`, which needs a real endpoint, not a chat message
+  `approval.respond`, which needs a real endpoint, not a chat message. Plugin
+  hooks are observers and cannot answer an approval
 
 Until it exists, the app can only surface these while foregrounded — acceptable
 for v1, but it should be v1.1.
