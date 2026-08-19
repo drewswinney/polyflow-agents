@@ -39,7 +39,6 @@ import {
   type SessionUpdate,
   type SkillSummary,
   type Unsubscribe,
-  type UsageSummary
 } from '@/domain'
 
 import { mapGatewayEvent, type MapContext, toEventRecord } from './event-map'
@@ -62,7 +61,7 @@ export const HERMES_CAPABILITIES: Capabilities = {
   settings: { schemaDriven: true, model: true, providers: true },
   extras: { cron: true, skills: true, mcp: true, profiles: true },
   approvals: { requests: true, policy: true },
-  activity: { spend: true, events: true },
+  logs: { events: true },
   // Audio is request/response REST, not a duplex channel — push-to-talk only (§2.6, §7.9).
   media: { images: true, audioIn: true, audioOut: true }
 }
@@ -411,26 +410,6 @@ export class HermesBackend implements AgentBackend {
   }
 
   // --- Capability-gated surfaces -----------------------------------------
-
-  async getUsage(): Promise<UsageSummary> {
-    const analytics = await this.rest.analytics(1)
-    const today = analytics.daily.at(-1) ?? null
-
-    // `actual` is set when the provider quoted a price; `estimated` is Hermes's
-    // own pricing-table math. Subscription auth quotes neither, which is why
-    // both can legitimately be zero — reported as null rather than "$0.00".
-    const spend = today ? today.actual_cost || today.estimated_cost : 0
-
-    return {
-      spendTodayUsd: spend > 0 ? spend : null,
-      // Hermes exposes no per-day spend cap endpoint; the design's cap line has
-      // nothing behind it, so it stays absent rather than invented.
-      spendCapUsd: null,
-      turnsToday: today?.api_calls ?? 0,
-      tokensToday: today ? today.input_tokens + today.output_tokens : 0,
-      latencyMs: null
-    }
-  }
 
   /**
    * `/api/logs` returns raw log lines, not structured events. They are parsed

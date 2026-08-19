@@ -1,4 +1,3 @@
-import { useQueryClient } from '@tanstack/react-query'
 import { router } from 'expo-router'
 import { useMemo, useState } from 'react'
 import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, TextInput, View } from 'react-native'
@@ -7,7 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { SessionSummary } from '@/domain'
 import { useActiveConnection } from '@/state/ConnectionProvider'
 import { useAgents, useSelectedAgent } from '@/state/agents'
-import { sessionsKey, useSessions, useSessionSearch } from '@/state/queries'
+import { useSessions, useSessionSearch } from '@/state/queries'
+import { useSidebar } from '@/state/sidebar'
 import { AgentPill } from '@/ui/components/AgentPill'
 import { AgentSwitcher } from '@/ui/components/AgentSwitcher'
 import { BlockedStrip } from '@/ui/components/BlockedStrip'
@@ -22,7 +22,10 @@ import { relativeTime, recencyGroup } from '@/ui/format'
 import { useTheme } from '@/ui/ThemeProvider'
 
 /**
- * Sessions (§7.1) — the app's home.
+ * Sessions (§7.1) — the full list.
+ *
+ * Home is the new-session screen (§7.18); this is where you come to find an
+ * existing session rather than start one.
  *
  * Search expands in place in the header rather than pushing a route or opening
  * a modal (§7.7), so cancelling always returns you exactly where you were.
@@ -34,7 +37,7 @@ export default function SessionsScreen() {
   const agents = useAgents(state => state.agents)
   const select = useAgents(state => state.select)
   const { backend, state, attempt } = useActiveConnection()
-  const queryClient = useQueryClient()
+  const openSidebar = useSidebar(store => store.show)
 
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [searchActive, setSearchActive] = useState(false)
@@ -46,14 +49,6 @@ export default function SessionsScreen() {
   const groups = useMemo(() => groupSessions(sessions.data ?? []), [sessions.data])
 
   const openSession = (id: string) => router.push(`/chat/${id}`)
-
-  const createSession = async () => {
-    if (!backend) return
-
-    const id = await backend.createSession({ title: 'New session' })
-    await queryClient.invalidateQueries({ queryKey: sessionsKey(agent.id) })
-    openSession(id)
-  }
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
@@ -71,6 +66,7 @@ export default function SessionsScreen() {
       ) : (
         <ScreenHeader
           title="Sessions"
+          onMenu={openSidebar}
           center={<AgentPill agent={agent} open={switcherOpen} onPress={() => setSwitcherOpen(true)} />}
           right={
             <IconButton
@@ -100,7 +96,7 @@ export default function SessionsScreen() {
           />
         ) : (
           <>
-            <NewSessionButton onPress={() => void createSession()} />
+            <NewSessionButton onPress={() => router.navigate('/')} />
 
             {sessions.isLoading ? (
               <ActivityIndicator color={theme.color.secondary} style={styles.loading} />

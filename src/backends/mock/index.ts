@@ -30,7 +30,6 @@ import {
   type SessionUpdate,
   type SkillSummary,
   type Unsubscribe,
-  type UsageSummary
 } from '@/domain'
 
 export const MOCK_CAPABILITIES: Capabilities = {
@@ -38,7 +37,7 @@ export const MOCK_CAPABILITIES: Capabilities = {
   settings: { schemaDriven: true, model: true, providers: false },
   extras: { cron: true, skills: true, mcp: true, profiles: false },
   approvals: { requests: true, policy: true },
-  activity: { spend: true, events: true },
+  logs: { events: true },
   // Push-to-talk is exercisable against the mock; speech synthesis is not, and
   // says so rather than returning silence.
   media: { images: false, audioIn: true, audioOut: false }
@@ -314,12 +313,6 @@ export class MockBackend implements AgentBackend {
     return () => {
       this.eventSinks.delete(sink)
     }
-  }
-
-  async getUsage(): Promise<UsageSummary> {
-    await tick(120)
-
-    return { spendTodayUsd: 1.84, spendCapUsd: 10, turnsToday: 37, tokensToday: 214_800, latencyMs: 28 }
   }
 
   async listEvents(limit = 200): Promise<EventRecord[]> {

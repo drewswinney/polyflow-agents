@@ -13,7 +13,7 @@ export interface Capabilities {
   settings: { schemaDriven: boolean; model: boolean; providers: boolean }
   extras: { cron: boolean; skills: boolean; mcp: boolean; profiles: boolean }
   approvals: { requests: boolean; policy: boolean }
-  activity: { spend: boolean; events: boolean }
+  logs: { events: boolean }
   media: { images: boolean; audioIn: boolean; audioOut: boolean }
 }
 
@@ -23,7 +23,7 @@ export const NO_CAPABILITIES: Capabilities = {
   settings: { schemaDriven: false, model: false, providers: false },
   extras: { cron: false, skills: false, mcp: false, profiles: false },
   approvals: { requests: false, policy: false },
-  activity: { spend: false, events: false },
+  logs: { events: false },
   media: { images: false, audioIn: false, audioOut: false }
 }
 
@@ -39,7 +39,6 @@ export function missingCapabilityLabels(caps: Capabilities): string[] {
   if (!caps.extras.cron) missing.push('Cron')
   if (!caps.extras.mcp) missing.push('MCP')
   if (!caps.approvals.requests) missing.push('Approvals')
-  if (!caps.activity.spend) missing.push('Spend')
 
   return missing
 }

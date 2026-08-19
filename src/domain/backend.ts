@@ -28,8 +28,7 @@ import type {
   StopReason,
   ToolCall,
   ToolStatus,
-  Usage,
-  UsageSummary
+  Usage
 } from './models'
 
 export type ConnectionState = 'idle' | 'connecting' | 'open' | 'closed' | 'error'
@@ -101,9 +100,7 @@ export interface AgentBackend {
   // backend that cannot answer is free to throw rather than fake a shape
   // (§4.1). None of them exist to be called speculatively.
 
-  /** Requires `capabilities.activity.spend`. */
-  getUsage(): Promise<UsageSummary>
-  /** Requires `capabilities.activity.events`. Historical rows, newest first. */
+  /** Requires `capabilities.logs.events`. Historical rows, newest first. */
   listEvents(limit?: number): Promise<EventRecord[]>
   /** Requires `capabilities.extras.mcp`. */
   listMcpServers(): Promise<McpServerStatus[]>

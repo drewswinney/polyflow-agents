@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { missingCapabilityLabels } from '@/domain'
 import { useActiveConnection } from '@/state/ConnectionProvider'
 import { useAgents, useSelectedAgent } from '@/state/agents'
+import { useSidebar } from '@/state/sidebar'
 import { AgentPill } from '@/ui/components/AgentPill'
 import { AgentSwitcher } from '@/ui/components/AgentSwitcher'
 import { Card, Divider } from '@/ui/components/Card'
@@ -32,6 +33,7 @@ export default function SettingsScreen() {
   const agents = useAgents(state => state.agents)
   const select = useAgents(state => state.select)
   const { backend, state, reconnect } = useActiveConnection()
+  const openSidebar = useSidebar(store => store.show)
   const [switcherOpen, setSwitcherOpen] = useState(false)
 
   const capabilities = backend?.capabilities
@@ -76,6 +78,7 @@ export default function SettingsScreen() {
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
       <ScreenHeader
         title="Settings"
+        onMenu={openSidebar}
         center={<AgentPill agent={agent} open={switcherOpen} onPress={() => setSwitcherOpen(true)} />}
       />
 
