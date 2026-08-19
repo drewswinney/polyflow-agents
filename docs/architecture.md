@@ -154,7 +154,7 @@ main reason the design and this document disagree anywhere.
 |---|---|---|
 | Voice mode: `realtime · 180ms round trip`, barge-in | Audio is three request/response REST endpoints — `/api/audio/transcribe`, `/api/audio/speak`, `/api/audio/elevenlabs/voices`. No duplex channel exists | **Descoped to push-to-talk** (§7.9) |
 | Activity: CPU / memory / disk tiles | No `/api/monitoring`, `/metrics`, `/system` or `/host` endpoint. `hermes monitoring` is OTLP export to an operator endpoint, explicitly "content-free by construction" | **Tiles dropped**; ship what is backed (§7.5) |
-| Approval countdown, `expires 4:52` | `expires_at` appears only on OAuth types (`OAuthProviderStatus`, `OAuthPollResponse`). Approval requests carry no TTL | **No countdown** until the API grows one (§7.6) |
+| Approval countdown, `expires 4:52` | No `expires_at` on the wire — it appears only on OAuth types (`OAuthProviderStatus`, `OAuthPollResponse`). But the host *does* enforce one: `approvals.timeout`, default **300s**, read by `tools/approval.py::_get_approval_timeout()` and part of `DEFAULT_CONFIG`, so it is visible through `/api/config/schema` | **Countdown is buildable** off receipt time + the configured timeout (§7.6); not yet built |
 | QR pairing, `hermes pair` | `hermes pairing` is `list / approve / revoke / clear-pending`. No `pair` subcommand, no token issuance, no QR flow | **Manual host + token only** (§7.8) |
 
 ---
@@ -573,7 +573,11 @@ consequence sentence naming the host, the exact command in a mono code block,
 then three outcomes: **Allow once** / **Always allow** / **Deny** →
 `approval.respond`. The held tool card shows `held`.
 
-No expiry countdown (§2.6). If the API grows a TTL, the countdown is additive.
+A countdown is **buildable**, though not yet built. The approval event carries no
+expiry, but the host fails the request closed after `approvals.timeout` (default
+300s, §2.6) — the same deadline a plugin approval transport races
+([`push-relay.md`](push-relay.md) §7). Anchoring it to receipt time is honest;
+inventing a TTL the host does not enforce is not.
 
 ### 7.7 Search
 

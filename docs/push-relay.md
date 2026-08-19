@@ -9,9 +9,9 @@ standalone service running beside `hermes serve`, holding its own WebSocket per
 agent and exposing its own HTTP API. That is no longer the recommended shape.
 Reading the Hermes source on the host turned up two plugin systems and one fact
 that removes most of the sidecar's reason to exist — see §2. What survives from
-the old design is the contract's *substance*: what gets delivered, what must
-never travel in a payload, and the fact that answering from the lock screen
-needs a real endpoint.
+the old design is the contract's *substance*: what gets delivered and what must
+never travel in a payload. Answering from the lock screen turned out to be a
+solved problem upstream — see §6.
 
 ## 1. Why it is needed
 
@@ -136,8 +136,8 @@ Notes that change behaviour rather than decorate it:
   preference is *failures only* (`src/state/notification-prefs.ts`), so the
   filtering is ours to do before sending.
 - **Hooks cannot answer.** They are observers by design; a plugin cannot veto or
-  pre-answer an approval. That is a correctness property, not a limitation to
-  work around — see §6.
+  pre-answer an approval from one. That is a correctness property, not a
+  limitation to work around — answering is a different API entirely (§6).
 
 ## 5. The device half
 
@@ -165,28 +165,94 @@ POST   /devices                 { agentId, expoPushToken, platform }
 DELETE /devices/{expoPushToken}
 ```
 
-## 6. The open question: answering from the lock screen
+## 6. Answering from the lock screen — `register_approval_transport`
 
-The design's **Allow / Deny** chips (§7.12) must resolve the approval without
-opening the app. Hooks cannot do this, so something must accept an inbound
-request and call `tools.approval.resolve_gateway_approval`.
+The earlier version of this document listed this as the open question, on the
+assumption that hooks are observers and something else would have to accept an
+inbound HTTP call. That assumption was wrong. Hermes has a first-class API for
+exactly this: `PluginContext.register_approval_transport(name, present_fn)`,
+contract in `hermes_cli/approval_transport.py`.
 
-Two candidates, neither verified:
+A transport is **handed the request and returns the human's decision**:
 
-1. **Hermes's webhook gateway** — `/api/webhooks` is real inbound-HTTP
-   infrastructure with per-route HMAC secrets, redacted on read and surfaced
-   once on create. Whether a plugin can register a route, and whether a payload
-   can carry the `request_id` through to a handler, is the next thing to check.
-2. **A listener owned by the plugin** — more control, but it reintroduces the
-   sidecar's port, supervision and TLS questions on a smaller scale.
+```python
+ApprovalPresentFn = Callable[[ApprovalRequest], ApprovalDecision | Awaitable[ApprovalDecision]]
+```
 
-Platform adapters also already define `send_exec_approval(chat_id, command,
-session_key, description, ...)` — "render dangerous-command approval as
-Approve/Deny buttons", with taps routed to `resolve_gateway_approval`. The
-button semantics we want exist; what is unclear is how a push notification's
-action, rather than a chat platform's, gets back into that path.
+`ApprovalRequest` is immutable and already redacted (`redact_sensitive_text(...,
+force=True)` runs before the plugin sees it), carrying `request_id`, `digest`,
+`command`, `description`, `pattern_key(s)`, `surface`, `timeout_seconds` and
+`allowed_choices`. The plugin pushes, waits however it likes, and returns
+`request.respond("once" | "session" | "always" | "deny")`.
 
-## 7. Constraints worth respecting
+**The host owns every failure, and every failure is a denial.** From
+`invoke_approval_transport`: worker capacity exhausted (8 concurrent) → `deny`,
+timeout → `deny`, callback raised → `deny`, wrong return type → `deny`,
+`request_id`/`digest` mismatch → `deny` ("stale"), choice outside
+`allowed_choices` → `deny`, interrupted → `deny`. A late result is discarded and
+"cannot authorize another request". The digest binding is what makes a push
+round-trip safe: a decision cannot be replayed against a different request.
+
+### 6.1 Selection is profile-wide config, not per-client
+
+```yaml
+security:
+  approval:
+    transport: handheld-push     # default "builtin"
+    transport_fallback: builtin  # optional; anything else means fail closed
+```
+
+`_present_with_selected_transport` runs **before** the built-in prompt on both
+call sites in `tools/approval.py`, with `surface` set to `"gateway"` or `"cli"`.
+This is the consequence to design around: selecting our transport takes over
+approvals for the whole profile, including the TUI, the desktop app and any
+other client. The in-app approval sheet as it works today — `approval.request`
+over `/api/ws`, answered with `approval.respond` — would no longer be the thing
+being asked, because the built-in gateway prompt never runs.
+
+`transport_fallback: builtin` is the safety valve: on any transport failure the
+host falls through to the built-in prompt instead of denying. Without it, a
+plugin that is down denies every command on the host. **Set it.**
+
+### 6.2 Two coherent shapes
+
+**A — transport-owned (full lock-screen resolve).** The plugin is the single
+presenter: push out, decision back, `resolve_gateway_approval` never enters the
+picture. The app's approval sheet is rewired to answer through the plugin rather
+than `approval.respond`. This is what the API is built for and the only shape
+that resolves an approval without opening the app. Cost: it changes the app's
+existing approval path and takes over other clients on that host.
+
+**B — hooks only (notify, answer in-app).** Keep `approval.request` /
+`approval.respond` exactly as they are and use `pre_approval_request` purely to
+raise the push. Tapping opens the app and the existing sheet answers. No
+takeover, no protocol change, and no true lock-screen action.
+
+B is the smaller step and is fully specified by §4 alone. A is the destination.
+They share the plugin, the push client and the device registry, so B does not
+have to be thrown away to get to A.
+
+## 7. The approval timeout is real, and the design's countdown is buildable
+
+`_get_approval_timeout()` reads `approvals.timeout`, **default 300 seconds**,
+and its docstring names our exact case: "Gateway approvals arrive as push
+notifications the user may not see for a couple of minutes; 60s proved too tight
+in practice (Telegram taps landed after the wait had already failed closed)."
+
+This corrects `architecture.md` §2.6, which reads the absence of an `expires_at`
+field on the wire as meaning approvals have no TTL and the design's `expires
+4:52` chip has nothing behind it. The event carries no expiry — that part
+stands — but the host does enforce one, `approvals.timeout` is part of
+`DEFAULT_CONFIG` and therefore visible through `/api/config/schema`, which the
+app already reads. A countdown anchored to receipt time plus the configured
+timeout is honest, and it is the same deadline the transport is racing.
+
+Two practical consequences: a push notification worth acting on has a **five
+minute** default life, not an indefinite one; and if a transport is selected,
+that timeout is the budget for the whole round trip — delivery, lock-screen tap,
+and the answer getting back to the plugin.
+
+## 8. Constraints worth respecting
 
 - **Never put the pairing token in a push payload.** It would be logged by
   Apple's and Google's infrastructure. The plugin holds the credential; the
@@ -204,11 +270,12 @@ action, rather than a chat platform's, gets back into that path.
   observability is not". Keep the plugin's own failure modes inside that
   contract: never block, never retry inline.
 
-## 8. Still unverified
+## 9. Still unverified
 
 Listed so the next person does not mistake this document for a finished spec:
 
-- Whether a plugin can register an inbound HTTP route (§6).
+- How the app's approval sheet answers a transport-presented request in shape A
+  (§6.2) — the plugin owns that channel, and nothing about it is designed yet.
 - Which process a hook fires in for **cron-driven** turns specifically. Kanban
   workers are documented as separate `hermes -p <profile> chat -q` subprocesses;
   cron may be similar, which is exactly why `standalone_sender_fn` exists.
