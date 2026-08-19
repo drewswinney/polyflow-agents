@@ -35,7 +35,7 @@ export default function ChatScreen() {
   const theme = useTheme()
   const agent = useSelectedAgent()
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { backend, state, attempt } = useActiveConnection()
+  const { backend, state, attempt, error } = useActiveConnection()
   const openSidebar = useSidebar(store => store.show)
   const listRef = useRef<FlashListRef<TranscriptEntry>>(null)
 
@@ -145,7 +145,7 @@ export default function ChatScreen() {
             contentContainerStyle={styles.list}
             ListHeaderComponent={
               <View style={styles.header}>
-                <ConnectionBanner state={state} attempt={attempt} />
+                <ConnectionBanner state={state} attempt={attempt} error={error} />
                 {stream.loadError ? (
                   <Text variant="secondary" color={theme.color.error700}>
                     {stream.loadError}

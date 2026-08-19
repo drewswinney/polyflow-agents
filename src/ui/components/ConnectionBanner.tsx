@@ -11,8 +11,22 @@ import { Text } from './Text'
  * The copy is the important part: the agent keeps working on the VM whether or
  * not the phone is attached, and saying so is what stops a dropped socket from
  * reading as lost work.
+ *
+ * It used to headline every failure "Tailnet unreachable", which is a cause it
+ * has no way of knowing and was usually wrong — a blocked cleartext request, a
+ * refused upgrade and a bad credential all reach here, and all of them happen
+ * with a perfectly healthy tailnet. It now says only what it knows, and shows
+ * the error it was already given and had been discarding.
  */
-export function ConnectionBanner({ state, attempt }: { state: ConnectionState; attempt: number }) {
+export function ConnectionBanner({
+  state,
+  attempt,
+  error
+}: {
+  state: ConnectionState
+  attempt: number
+  error?: string | null
+}) {
   const theme = useTheme()
 
   if (state === 'open' || state === 'idle') return null
@@ -31,11 +45,16 @@ export function ConnectionBanner({ state, attempt }: { state: ConnectionState; a
       ]}
     >
       <Text variant="rowLabelStrong" color={theme.color.warning700}>
-        {connecting ? 'Reconnecting…' : 'Tailnet unreachable'}
+        {connecting ? 'Reconnecting…' : 'Not connected'}
       </Text>
       <Text variant="secondary" color={theme.color.warningText}>
         The agent keeps working on the VM. This transcript resumes from where it left off.
       </Text>
+      {!connecting && error ? (
+        <Text variant="monoSmall" color={theme.color.warningText}>
+          {error}
+        </Text>
+      ) : null}
       {attempt > 0 ? <Text variant="monoSmall" color={theme.color.warning700}>{`retry ${attempt}`}</Text> : null}
     </View>
   )

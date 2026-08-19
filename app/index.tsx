@@ -32,7 +32,7 @@ export default function NewSessionScreen() {
   const agent = useSelectedAgent()
   const agents = useAgents(state => state.agents)
   const select = useAgents(state => state.select)
-  const { backend, state, attempt } = useActiveConnection()
+  const { backend, state, attempt, error } = useActiveConnection()
   const openSidebar = useSidebar(store => store.show)
   const submitMessage = useChatInbox(inbox => inbox.submit)
   const [switcherOpen, setSwitcherOpen] = useState(false)
@@ -66,7 +66,7 @@ export default function NewSessionScreen() {
         keyboardVerticalOffset={0}
       >
         <View style={styles.body}>
-          <ConnectionBanner state={state} attempt={attempt} />
+          <ConnectionBanner state={state} attempt={attempt} error={error} />
 
           <View style={styles.empty}>
             <View style={[styles.ring, { borderColor: theme.color.secondaryMuted }]}>
