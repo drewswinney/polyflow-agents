@@ -43,7 +43,7 @@ export default function NewSessionScreen() {
 
   const createSession = useCreateSession(maybeAgent?.id ?? '', backend)
 
-  if (!maybeAgent) return <Redirect href="/agents/new" />
+  if (!maybeAgent) return <Redirect href="/welcome" />
 
   const start = (text: string) => {
     if (createSession.isPending) return

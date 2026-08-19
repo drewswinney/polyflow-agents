@@ -71,6 +71,7 @@ export default function RootLayout() {
             <StatusBar style="dark" />
             <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: NEUTRAL.bg } }}>
               <Stack.Screen name="index" />
+              <Stack.Screen name="welcome" />
               <Stack.Screen name="sessions" />
               <Stack.Screen name="settings" />
               <Stack.Screen name="chat/[id]" />
@@ -114,6 +115,7 @@ function AppSidebar() {
       sessions={sessions.data ?? []}
       loading={sessions.isLoading}
       activePath={pathname}
+      paired={Boolean(agent)}
       onOpenSession={id => router.push(`/chat/${id}`)}
       // `navigate` returns to a top-level destination already on the stack
       // instead of stacking a second copy of it behind the drawer.
