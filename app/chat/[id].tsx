@@ -1,6 +1,6 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
 import { ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native'
 
@@ -11,7 +11,7 @@ import { useSidebar } from '@/state/sidebar'
 import { useSessionStream } from '@/state/session-stream'
 import { useIsStreaming } from '@/state/stream-tail'
 import { useChatInbox } from '@/state/chat-inbox'
-import { ApprovalSheet } from '@/ui/components/ApprovalSheet'
+import { ApprovalCard, ApprovalNudge } from '@/ui/components/ApprovalCard'
 import { Composer } from '@/ui/components/Composer'
 import { ConnectionBanner } from '@/ui/components/ConnectionBanner'
 import { IconButton } from '@/ui/components/IconButton'
@@ -51,9 +51,16 @@ export default function ChatScreen() {
    */
   const atBottom = useRef(true)
 
+  /**
+   * Mirrors `atBottom` as state, but only crossing the threshold re-renders —
+   * this drives the pending-approval bar, and nothing else may pay per frame.
+   */
+  const [scrolledAway, setScrolledAway] = useState(false)
+
   const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
     atBottom.current = contentSize.height - (contentOffset.y + layoutMeasurement.height) < 80
+    setScrolledAway(current => (current === !atBottom.current ? current : !atBottom.current))
   }, [])
 
   // New entries — a message, a tool card — follow the tail. Expanding something
@@ -61,6 +68,15 @@ export default function ChatScreen() {
   useEffect(() => {
     if (atBottom.current) listRef.current?.scrollToEnd({ animated: true })
   }, [stream.entries.length])
+  // An approval that arrives while you are at the bottom should be on screen,
+  // not just appended below the fold. Keyed by id so being asked a second time
+  // scrolls again.
+  const approvalId = stream.approval?.id
+
+  useEffect(() => {
+    if (approvalId && atBottom.current) listRef.current?.scrollToEnd({ animated: true })
+  }, [approvalId])
+
   const pendingMessage = useChatInbox(inbox => inbox.pending)
   const takeMessage = useChatInbox(inbox => inbox.take)
 
@@ -140,6 +156,18 @@ export default function ChatScreen() {
             ListFooterComponent={
               <View style={styles.entry}>
                 <StreamingTail tail={stream.tail} />
+
+                {/* In the transcript, not over it: the turn is halted, but only
+                    this session's, so nothing else needs to be blocked (§7.6). */}
+                {stream.approval ? (
+                  <View style={styles.approval}>
+                    <ApprovalCard
+                      request={stream.approval}
+                      hostName={agent.host}
+                      onRespond={stream.respondToApproval}
+                    />
+                  </View>
+                ) : null}
               </View>
             }
             onScroll={onScroll}
@@ -153,6 +181,10 @@ export default function ChatScreen() {
           />
         )}
 
+        {stream.approval && scrolledAway ? (
+          <ApprovalNudge onPress={() => listRef.current?.scrollToEnd({ animated: true })} />
+        ) : null}
+
         <Composer
           streaming={streaming}
           offline={state !== 'open'}
@@ -162,9 +194,6 @@ export default function ChatScreen() {
           onVoice={backend?.capabilities.media.audioIn ? () => router.push(`/voice/${id}`) : undefined}
         />
       </KeyboardAvoidingView>
-
-      {/* Blocking: the turn is halted on the host until this is answered. */}
-      <ApprovalSheet request={stream.approval} hostName={agent.host} onRespond={stream.respondToApproval} />
     </View>
   )
 }
@@ -175,5 +204,6 @@ const styles = StyleSheet.create({
   loading: { marginTop: 32 },
   list: { paddingHorizontal: 16, paddingVertical: 16 },
   header: { gap: 10, paddingBottom: 6 },
-  entry: { paddingVertical: 7 }
+  entry: { paddingVertical: 7 },
+  approval: { paddingTop: 7 }
 })

@@ -106,6 +106,14 @@ export interface MapContext {
   now: number
   /** Tracks tool start times so `tool.complete` can report a duration. */
   toolStartedAt: Map<string, number>
+  /**
+   * The host's `approvals.timeout`, in milliseconds, or null when it could not
+   * be read. Approvals fail **closed** when it elapses, so this is a real
+   * deadline rather than a hint — but it is host config, not a field on the
+   * event, which is why it is injected here and why null means "show no
+   * countdown" rather than "assume the default".
+   */
+  approvalTimeoutMs: number | null
 }
 
 /**
@@ -198,8 +206,11 @@ export function mapGatewayEvent(event: GatewayEvent, ctx: MapContext): SessionUp
         sudo: /^\s*sudo\b/.test(str(payload?.command)),
         // The backend omits the field unless a tirith warning forbids it.
         allowPermanent: payload?.allow_permanent !== false,
-        // Approval requests carry no TTL today (§2.6) — no countdown until they do.
-        expiresAt: null
+        // The event carries no expiry, but the host enforces `approvals.timeout`
+        // and denies when it elapses (§7.6). Anchored to arrival: the app cannot
+        // know when the host started waiting, and erring late would show time
+        // that is already gone.
+        expiresAt: ctx.approvalTimeoutMs === null ? null : ctx.now + ctx.approvalTimeoutMs
       }
 
       updates.push({ kind: 'permission_request', req })

@@ -489,7 +489,7 @@ sub-screen reached by a back chevron.
 | 7.2 | Chat | sub | `/api/ws`, `prompt.submit`, `process.kill` |
 | 7.3 | *(streaming performance)* | — | — |
 | 7.4 | Settings | top-level | `/api/config/schema`, `/api/model/*` |
-| 7.6 | Approval sheet | modal | `approval.request` → `approval.respond` |
+| 7.6 | Approval card | in-transcript | `approval.request` → `approval.respond` |
 | 7.7 | Search | in-place | `/api/sessions/search` |
 | 7.8 | Pairing / onboarding | sub | `hermes pairing approve` (manual) |
 | 7.9 | Voice (push-to-talk) | sub | `/api/audio/transcribe`, `/api/audio/speak` |
@@ -574,18 +574,39 @@ and shows the same rows with payload detail. With the tab gone, `/api/analytics
 /usage` is no longer called and `capabilities.activity` collapses to
 `capabilities.logs.events`.
 
-### 7.6 Approval sheet
+### 7.6 Approval card
 
-Blocking bottom sheet over a dimmed transcript. Shield icon, plain-language
-consequence sentence naming the host, the exact command in a mono code block,
-then three outcomes: **Allow once** / **Always allow** / **Deny** →
-`approval.respond`. The held tool card shows `held`.
+**In the transcript, not over it.** The design draws a blocking bottom sheet over
+a dimmed transcript; the app ships an inline card instead. An approval halts
+*one* session — the host's wait is keyed by session (`human_wait_window(session_key)`)
+— so a modal blocks you from every other agent and session to no purpose, and its
+Android back button had to mean *deny*, which is a destructive default for a
+gesture people use to go back.
 
-A countdown is **buildable**, though not yet built. The approval event carries no
-expiry, but the host fails the request closed after `approvals.timeout` (default
-300s, §2.6) — the same deadline a plugin approval transport races
-([`push-relay.md`](push-relay.md) §7). Anchoring it to receipt time is honest;
-inventing a TTL the host does not enforce is not.
+Same content, same three outcomes: shield icon, plain-language consequence
+sentence naming the host, the exact command in a mono code block, then **Allow
+once** / **Always allow** / **Deny** → `approval.respond`. The held tool card
+still shows `held`.
+
+What makes leaving safe rather than negligent:
+
+- **A countdown**, because the request expires. The event carries no `expires_at`,
+  but the host denies when `approvals.timeout` elapses (default 300s, §2.6). The
+  app reads that from config once per connection and anchors the deadline to
+  arrival — it cannot know when the host started waiting, and erring late would
+  show time that is already gone. No timeout reported means **no countdown**,
+  never an assumed one.
+- **An expired state.** Past the deadline the card stops offering buttons that
+  would only bounce, and says the host denied it.
+- **A bar above the composer** when the card is scrolled out of view, which
+  scrolls back to it rather than answering in place. A one-tap Allow you cannot
+  read the command from is the habit an approval prompt exists to prevent.
+- **The blocked marker on every list that leads back**: the session row's
+  "Waiting on your answer" strip (§7.1), and the chat header's `blocked on you`.
+
+Out-of-app delivery is the notification path's job ([`push-relay.md`](push-relay.md)),
+and it is what makes walking away a real option rather than a way to lose the
+request.
 
 ### 7.7 Search
 

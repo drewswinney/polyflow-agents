@@ -108,7 +108,7 @@ assert.deepEqual(events, ['message.delta'], 'notifications should dispatch by ty
 
 // --- 2. The event mapping ---------------------------------------------------
 
-const ctx = { now: 1_000, toolStartedAt: new Map<string, number>() }
+const ctx = { now: 1_000, toolStartedAt: new Map<string, number>(), approvalTimeoutMs: null as number | null }
 const map = (type: string, payload: unknown) =>
   mapGatewayEvent({ type, session_id: 'ses-1', payload } as never, ctx)
 
@@ -143,7 +143,18 @@ const approval = expect(
 )
 assert.equal(approval.req.sudo, true, 'a sudo command should be recognised as one')
 assert.equal(approval.req.allowPermanent, true, 'allow_permanent is opt-out, not opt-in')
-assert.equal(approval.req.expiresAt, null, 'approvals carry no TTL in the API today')
+assert.equal(
+  approval.req.expiresAt,
+  null,
+  'without the host timeout there is no deadline to show, and none may be invented'
+)
+
+// The deadline is the host's `approvals.timeout`, anchored to arrival — the
+// event itself still carries no expiry.
+ctx.approvalTimeoutMs = 300_000
+const timed = expect(map('approval.request', { request_id: 'req-2', command: 'ls' })[0], 'permission_request')
+assert.equal(timed.req.expiresAt, ctx.now + 300_000, 'the deadline is arrival plus the configured timeout')
+ctx.approvalTimeoutMs = null
 
 const usage = expect(map('session.usage', { usage: { input: 10, output: 4, total: 14 } })[0], 'usage')
 assert.deepEqual(usage, {

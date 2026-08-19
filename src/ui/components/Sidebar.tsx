@@ -225,7 +225,14 @@ function NavRow({
   )
 }
 
-/** One line per session — title and age. The full row, with preview, is the Sessions screen's. */
+/**
+ * One line per session — title and age. The full row, with preview, is the
+ * Sessions screen's.
+ *
+ * A session blocked on you is marked here too. In-chat approvals mean a halted
+ * session is one you can walk away from (§7.6), so every list that leads back to
+ * it has to say which one is waiting.
+ */
 function RecentRow({ session, onPress }: { session: SessionSummary; onPress: () => void }) {
   const theme = useTheme()
 
@@ -238,10 +245,15 @@ function RecentRow({ session, onPress }: { session: SessionSummary; onPress: () 
         { borderRadius: theme.radius.row, backgroundColor: pressed ? theme.color.bgSubtle : 'transparent' }
       ]}
     >
+      {session.blockedOn ? <Icon name="hand" size={11} color={theme.color.warning700} /> : null}
+
       <Text variant="rowLabel" numberOfLines={1} style={styles.recentTitle}>
         {session.title}
       </Text>
-      <Text variant="monoSmall">{relativeTime(session.updatedAt)}</Text>
+
+      <Text variant="monoSmall" color={session.blockedOn ? theme.color.warning700 : undefined}>
+        {session.blockedOn ? 'waiting' : relativeTime(session.updatedAt)}
+      </Text>
     </Pressable>
   )
 }
