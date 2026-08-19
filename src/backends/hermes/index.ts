@@ -44,7 +44,7 @@ import {
 
 import { mapGatewayEvent, type MapContext, toEventRecord } from './event-map'
 import { toSearchHit, toSessionSummary, toTranscriptEntries, usableTitle } from './normalize'
-import { HermesRest, type HermesRestConfig } from './rest'
+import { HermesRest, type HermesRestConfig, HermesRestError } from './rest'
 
 export { HermesRest, HermesRestError, probeScheme } from './rest'
 export { mapGatewayEvent } from './event-map'
@@ -301,8 +301,14 @@ export class HermesBackend implements AgentBackend {
     // One session, fetched as one session. Reading a page and searching it for
     // this id both sent `limit=200` — past the server's cap of 100, so it 422'd
     // — and pulled dozens of unrelated rows to use one.
+    //
+    // Both calls tolerate a 404, because a *brand-new* session genuinely is not
+    // there: Hermes persists a session once it has content, so everything about
+    // one created seconds ago 404s until its first turn lands. That is an empty
+    // transcript, not a failure, and reporting it as one left an error banner
+    // pinned above a chat that was working perfectly.
     const [messages, info] = await Promise.all([
-      this.rest.sessionMessages(id),
+      this.rest.sessionMessages(id).catch(emptyOn404),
       this.rest.session(id).catch(() => null)
     ])
 
@@ -605,6 +611,19 @@ function parseTimestamp(value: string | null | undefined): number | null {
   const parsed = Date.parse(value)
 
   return Number.isNaN(parsed) ? null : parsed
+}
+
+/**
+ * A missing transcript is empty, not broken — but only for a 404. Anything else
+ * (401 after a session expires, 500, a dead host) still surfaces, because those
+ * are failures the user needs to know about.
+ */
+function emptyOn404(error: unknown): { messages: [] ; session_id: string } {
+  if (error instanceof HermesRestError && error.status === 404) {
+    return { messages: [], session_id: '' }
+  }
+
+  throw error
 }
 
 const LOG_LINE = /^(?<time>[\d-]{10}[ T][\d:]{8})\S*\s+(?<level>[A-Z]+)\s+(?<rest>.*)$/
