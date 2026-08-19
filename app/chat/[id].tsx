@@ -50,9 +50,10 @@ export default function ChatScreen() {
   /**
    * Whether the transcript is parked at the bottom.
    *
-   * Auto-scroll is only ever welcome when you are already following the tail. A
-   * ref, not state, because it changes on every scroll frame and nothing should
-   * re-render for it.
+   * Following the tail is FlashList's job now (`maintainVisibleContentPosition`
+   * below); this only decides whether a *pending approval* is worth yanking the
+   * view to. A ref, not state, because it changes on every scroll frame and
+   * nothing should re-render for it.
    */
   const atBottom = useRef(true)
 
@@ -68,11 +69,6 @@ export default function ChatScreen() {
     setScrolledAway(current => (current === !atBottom.current ? current : !atBottom.current))
   }, [])
 
-  // New entries — a message, a tool card — follow the tail. Expanding something
-  // already on screen does not add an entry, so it no longer moves the view.
-  useEffect(() => {
-    if (atBottom.current) listRef.current?.scrollToEnd({ animated: true })
-  }, [stream.entries.length])
   // An approval should be on screen, not appended below the fold. Keyed by id so
   // being asked a second time scrolls again.
   const approvalId = stream.approval?.id ?? stream.clarify?.id
@@ -86,9 +82,8 @@ export default function ChatScreen() {
     if (!approvalId || stream.loading) return
     if (approvalId !== restoredApprovalId && !atBottom.current) return
 
-    // After a mount the footer has not been measured yet, so an immediate
-    // scrollToEnd lands short — which is exactly the "it does not scroll to the
-    // approval" case. One frame is enough.
+    // The footer holding the card is only measured a frame after mount, so an
+    // immediate scrollToEnd lands short of it. One frame is enough.
     const timer = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50)
 
     return () => clearTimeout(timer)
@@ -197,12 +192,23 @@ export default function ChatScreen() {
             }
             onScroll={onScroll}
             scrollEventThrottle={16}
-            // Only while tokens are actually arriving. Bound to content size,
-            // this fired for *any* growth — expanding a thinking block or a tool
-            // card's output yanked the transcript to the bottom.
-            onContentSizeChange={() => {
-              if (streaming && atBottom.current) listRef.current?.scrollToEnd({ animated: true })
+            // The list's own bottom-anchoring, in place of the hand-rolled
+            // scrollToEnd effects this replaces: it opens already at the last
+            // message rather than animating down to it, and follows anything
+            // that grows below — tokens, a new card — while you are parked
+            // there. The threshold is a fraction of the viewport, so ~10% of
+            // the screen is the "still following" band.
+            maintainVisibleContentPosition={{
+              startRenderingFromBottom: true,
+              autoscrollToBottomThreshold: 0.1
             }}
+            // Dragging the transcript down takes the keyboard with it, the way
+            // it does in Messages. Android has no interactive mode, so the
+            // keyboard leaves on the drag instead of tracking the finger.
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            // With the keyboard up, the first tap on an approval button should
+            // answer it, not just close the keyboard.
+            keyboardShouldPersistTaps="handled"
           />
         )}
 
