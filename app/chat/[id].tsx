@@ -9,7 +9,7 @@ import { useActiveConnection } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { useSessionStream } from '@/state/session-stream'
 import { useIsStreaming } from '@/state/stream-tail'
-import { useVoiceInbox } from '@/state/voice-inbox'
+import { useChatInbox } from '@/state/chat-inbox'
 import { ApprovalSheet } from '@/ui/components/ApprovalSheet'
 import { Composer } from '@/ui/components/Composer'
 import { ConnectionBanner } from '@/ui/components/ConnectionBanner'
@@ -60,19 +60,22 @@ export default function ChatScreen() {
   useEffect(() => {
     if (atBottom.current) listRef.current?.scrollToEnd({ animated: true })
   }, [stream.entries.length])
-  const pendingVoice = useVoiceInbox(inbox => inbox.pending)
-  const takeVoice = useVoiceInbox(inbox => inbox.take)
+  const pendingMessage = useChatInbox(inbox => inbox.pending)
+  const takeMessage = useChatInbox(inbox => inbox.take)
 
-  // Dictation comes back through chat's own send path rather than being sent by
-  // the voice screen, so it gets the optimistic bubble and the offline outbox
-  // like any typed message.
+  // A dictated message, or the first message of a session started from home,
+  // goes out through chat's own send path rather than the producing screen's, so
+  // it gets the optimistic bubble and the offline outbox like anything typed.
+  //
+  // Not until the transcript has loaded: the load overwrites `entries`, so a
+  // send that beats it in would have its own bubble wiped off the screen.
   useEffect(() => {
-    if (!pendingVoice) return
+    if (!pendingMessage || stream.loading) return
 
-    const text = takeVoice()
+    const text = takeMessage()
 
     if (text) stream.send(text)
-  }, [pendingVoice, takeVoice, stream])
+  }, [pendingMessage, takeMessage, stream])
 
   const renderItem = useCallback(
     ({ item }: { item: TranscriptEntry }) => (

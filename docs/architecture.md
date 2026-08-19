@@ -478,9 +478,9 @@ Identical information architecture on both platforms; only the chrome differs.
 sizes, spacing and touch targets. This section covers **behaviour and API
 backing**; it deliberately does not duplicate the tokens.
 
-Navigation is a **slide-out sidebar** (§7.17), opened from the hamburger at the
-top-left of every top-level screen. Everything else is a sub-screen reached by a
-back chevron.
+Home is **New session** (§7.18). Navigation is a **slide-out sidebar** (§7.17),
+opened from the hamburger at the top-left of every top-level screen. Everything
+else is a sub-screen reached by a back chevron.
 
 | # | Screen | Kind | Backed by |
 |---|---|---|---|
@@ -500,6 +500,7 @@ back chevron.
 | 7.15 | Logs & events | sub | `/api/logs` |
 | 7.16 | Connection lost | state | — |
 | 7.17 | Sidebar | overlay | `/api/sessions` |
+| 7.18 | New session | home | `/api/sessions` (on first send) |
 
 ### 7.1 Sessions
 
@@ -655,8 +656,9 @@ The app's primary navigation, in place of the bottom tab bar it replaced. Slides
 in from the left over a scrim, opened by the hamburger in each top-level header
 and dismissed by the scrim or the Android back button.
 
-It carries the two things reached for constantly — **New session** and the eight
-most recent sessions — plus rows for **Sessions** and **Settings**. It
+It carries the two things reached for constantly — **New session**, which is
+home, and the eight most recent sessions — plus rows for **Sessions** and
+**Settings**. It
 deliberately does not try to be the sessions list: recency grouping, the blocked
 strip and search all stay on the Sessions screen (§7.1, §7.7), one row away. A
 drawer that reimplements the list ends up a worse list.
@@ -665,6 +667,22 @@ Mounted once beside the router rather than inside a screen, so one instance
 serves every screen, and navigating to a top-level destination uses `navigate`
 rather than `push` — the drawer returns to a screen already on the stack instead
 of stacking a second copy of it.
+
+### 7.18 New session
+
+The app opens on an empty composer rather than a list, so the common case —
+telling the agent to do something — costs no navigation.
+
+**The session is created by the first message, not by arriving here.** Opening
+the app is not intent to start anything, and a session created on launch is one
+that has to be cleaned up on the host. On send, the app calls `createSession`,
+hands the text to chat through the same inbox voice uses (§7.9) and *replaces*
+itself with `/chat/:id` — so backing out of a session you just started leaves you
+at home rather than at a second copy of it. Chat owns the one send path, which is
+why the first message is handed over rather than sent here (§5.4).
+
+No mic on this screen: dictation records into a session, and there is not one
+yet.
 
 ---
 

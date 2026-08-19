@@ -19,7 +19,7 @@ import { Icon } from './Icon'
 import { Text } from './Text'
 
 /** The drawer's destinations, as expo-router's typed routes see them. */
-export type SidebarPath = '/' | '/settings'
+export type SidebarPath = '/' | '/sessions' | '/settings'
 
 const MAX_WIDTH = 320
 const WIDTH_FRACTION = 0.84
@@ -35,6 +35,9 @@ const SLIDE_MS = 190
  * search, and is one row away here. A drawer that tries to be the list ends up
  * a worse list.
  *
+ * "New session" navigates home rather than creating anything: home *is* the new
+ * session, and it holds off creating one until there is a message to send.
+ *
  * Mounted once above the router, so the hamburger works from any screen.
  */
 export function Sidebar({
@@ -42,7 +45,6 @@ export function Sidebar({
   sessions,
   loading,
   activePath,
-  onNewSession,
   onOpenSession,
   onNavigate,
   onDismiss
@@ -52,7 +54,6 @@ export function Sidebar({
   loading: boolean
   /** Drives the selected row's tint; the route the drawer is sitting over. */
   activePath: string
-  onNewSession: () => void
   onOpenSession: (id: string) => void
   onNavigate: (path: SidebarPath) => void
   onDismiss: () => void
@@ -119,18 +120,19 @@ export function Sidebar({
             icon="plus"
             label="New session"
             accent
+            selected={activePath === '/'}
             onPress={() => {
               onDismiss()
-              onNewSession()
+              onNavigate('/')
             }}
           />
           <NavRow
             icon="comments"
             label="Sessions"
-            selected={activePath === '/'}
+            selected={activePath === '/sessions'}
             onPress={() => {
               onDismiss()
-              onNavigate('/')
+              onNavigate('/sessions')
             }}
           />
         </View>

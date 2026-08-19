@@ -16,7 +16,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 
 import { ConnectionProvider, useActiveConnection } from '@/state/ConnectionProvider'
 import { useAgents, useSelectedAgent } from '@/state/agents'
-import { useCreateSession, useSessions } from '@/state/queries'
+import { useSessions } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
 import { Sidebar } from '@/ui/components/Sidebar'
 import { ThemeProvider } from '@/ui/ThemeProvider'
@@ -68,6 +68,7 @@ export default function RootLayout() {
             <StatusBar style="dark" />
             <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: NEUTRAL.bg } }}>
               <Stack.Screen name="index" />
+              <Stack.Screen name="sessions" />
               <Stack.Screen name="settings" />
               <Stack.Screen name="chat/[id]" />
               <Stack.Screen name="logs" />
@@ -102,7 +103,6 @@ function AppSidebar() {
   const pathname = usePathname()
 
   const sessions = useSessions(agent.id, backend)
-  const createSession = useCreateSession(agent.id, backend)
 
   return (
     <Sidebar
@@ -110,9 +110,6 @@ function AppSidebar() {
       sessions={sessions.data ?? []}
       loading={sessions.isLoading}
       activePath={pathname}
-      onNewSession={() => {
-        createSession.mutate(undefined, { onSuccess: id => router.push(`/chat/${id}`) })
-      }}
       onOpenSession={id => router.push(`/chat/${id}`)}
       // `navigate` returns to a top-level destination already on the stack
       // instead of stacking a second copy of it behind the drawer.
