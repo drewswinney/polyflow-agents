@@ -226,9 +226,12 @@ export class HermesBackend implements AgentBackend {
   }
 
   async loadSession(id: SessionId): Promise<SessionTranscript> {
+    // One session, fetched as one session. Reading a page and searching it for
+    // this id both sent `limit=200` — past the server's cap of 100, so it 422'd
+    // — and pulled dozens of unrelated rows to use one.
     const [messages, info] = await Promise.all([
       this.rest.sessionMessages(id),
-      this.rest.listSessions(200).then(page => page.sessions.find(session => session.id === id) ?? null)
+      this.rest.session(id).catch(() => null)
     ])
 
     return {

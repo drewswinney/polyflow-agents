@@ -25,6 +25,7 @@ import type {
   ModelInfoResponse,
   ModelOptionsResponse,
   PaginatedSessions,
+  SessionInfo,
   SessionMessagesResponse,
   SessionSearchResponse,
   SkillInfo,
@@ -184,11 +185,28 @@ export class HermesRest {
 
   // --- Sessions -----------------------------------------------------------
 
+  /**
+   * The server caps `limit` at 100 and rejects anything larger with a 422, so
+   * the clamp is here rather than at each call site — a caller asking for more
+   * should get the most it can have, not an error.
+   *
+   * `order=recent` sorts by latest activity across a compression chain, which
+   * is what a "most recent first" list means; the server's own default
+   * (`created`) would drop a long-running conversation off the first page the
+   * moment it auto-compresses into a fresh id.
+   */
   listSessions(limit = 50, offset = 0, minMessages = 1): Promise<PaginatedSessions> {
+    const capped = Math.min(Math.max(0, limit), 100)
+
     return this.request<PaginatedSessions>(
-      `/api/sessions?limit=${limit}&offset=${offset}&min_messages=${Math.max(0, minMessages)}`,
+      `/api/sessions?limit=${capped}&offset=${offset}&min_messages=${Math.max(0, minMessages)}&order=recent`,
       { timeoutMs: 60_000 }
     )
+  }
+
+  /** One session's row, without dragging a page of them across the network. */
+  session(id: string): Promise<SessionInfo> {
+    return this.request<SessionInfo>(`/api/sessions/${encodeURIComponent(id)}`)
   }
 
   sessionMessages(id: string, limit?: number): Promise<SessionMessagesResponse> {
