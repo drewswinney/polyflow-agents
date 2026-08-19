@@ -43,7 +43,7 @@ import {
 } from '@/domain'
 
 import { mapGatewayEvent, type MapContext, toEventRecord } from './event-map'
-import { toSearchHit, toSessionSummary, toTranscriptEntries } from './normalize'
+import { toSearchHit, toSessionSummary, toTranscriptEntries, usableTitle } from './normalize'
 import { HermesRest, type HermesRestConfig } from './rest'
 
 export { HermesRest, HermesRestError, probeScheme } from './rest'
@@ -308,7 +308,9 @@ export class HermesBackend implements AgentBackend {
 
     return {
       sessionId: id,
-      title: (info?.title ?? '').trim() || 'Untitled session',
+      // Same fallback the list uses, so a session does not change name when you
+      // open it.
+      title: usableTitle(info?.title, (info?.preview ?? '').trim()),
       model: info?.model ?? null,
       entries: toTranscriptEntries(messages.messages),
       usage: info

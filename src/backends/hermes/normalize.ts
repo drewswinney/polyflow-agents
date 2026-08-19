@@ -22,11 +22,47 @@ export function toMillis(seconds: number | null | undefined): number {
 
 const UNTITLED = 'Untitled session'
 
+/**
+ * A stored title that carries no information.
+ *
+ * Hermes titles sessions with a model, and that occasionally returns a bare
+ * number — real rows on a live host read `-1.0000000000000002e+308`, and one is
+ * that followed by eighty more digits. They are not empty, so an empty-string
+ * check lets them through to the sessions list, where they are worse than no
+ * title at all: they push the row's only identifying text off the screen.
+ *
+ * Matching "numeric junk" rather than "has no letters" is deliberate — the
+ * latter would reject a perfectly good title written in a script this pattern
+ * knows nothing about.
+ */
+function isNumericJunk(title: string): boolean {
+  return /^[\s\d.eE+-]+$/.test(title)
+}
+
+/**
+ * Title, then preview, then a placeholder — the same fallback chain Hermes's own
+ * ACP adapter uses (`_build_session_title`), so a session reads the same here as
+ * it does anywhere else that lists it.
+ */
+export function usableTitle(rawTitle: string | null | undefined, preview: string): string {
+  const title = (rawTitle ?? '').trim()
+
+  if (title && !isNumericJunk(title)) return title
+
+  const firstLine = preview.split('\n', 1)[0].trim()
+
+  if (firstLine) return firstLine.length > 80 ? `${firstLine.slice(0, 79)}…` : firstLine
+
+  return UNTITLED
+}
+
 export function toSessionSummary(info: SessionInfo): SessionSummary {
+  const preview = (info.preview ?? '').trim()
+
   return {
     id: info.id,
-    title: (info.title ?? '').trim() || UNTITLED,
-    preview: (info.preview ?? '').trim(),
+    title: usableTitle(info.title, preview),
+    preview,
     updatedAt: toMillis(info.last_active),
     pinned: info.pinned === true,
     unread: info.unread === true,
