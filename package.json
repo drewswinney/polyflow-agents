@@ -1,8 +1,23 @@
 {
-  "name": "agent-handheld",
-  "main": "expo-router/entry",
+  "name": "hermes-agent",
   "version": "0.1.0",
   "private": true,
+  "description": "A cross-platform (iOS + Android) mobile client for a [Hermes](https://github.com/) agent, built so the agent harness behind it can be swapped later.",
+  "homepage": "https://github.com/drewswinney/agent-handheld#readme",
+  "bugs": {
+    "url": "https://github.com/drewswinney/agent-handheld/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/drewswinney/agent-handheld.git"
+  },
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "expo-router/entry",
+  "directories": {
+    "doc": "docs"
+  },
   "scripts": {
     "start": "expo start",
     "android": "expo start --android",
