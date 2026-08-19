@@ -1,6 +1,7 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useRef } from 'react'
+import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
 import { ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native'
 
 import type { TranscriptEntry } from '@/domain'
@@ -39,6 +40,26 @@ export default function ChatScreen() {
 
   const stream = useSessionStream(backend, id, state)
   const streaming = useIsStreaming(stream.tail)
+
+  /**
+   * Whether the transcript is parked at the bottom.
+   *
+   * Auto-scroll is only ever welcome when you are already following the tail. A
+   * ref, not state, because it changes on every scroll frame and nothing should
+   * re-render for it.
+   */
+  const atBottom = useRef(true)
+
+  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+    atBottom.current = contentSize.height - (contentOffset.y + layoutMeasurement.height) < 80
+  }, [])
+
+  // New entries — a message, a tool card — follow the tail. Expanding something
+  // already on screen does not add an entry, so it no longer moves the view.
+  useEffect(() => {
+    if (atBottom.current) listRef.current?.scrollToEnd({ animated: true })
+  }, [stream.entries.length])
   const pendingVoice = useVoiceInbox(inbox => inbox.pending)
   const takeVoice = useVoiceInbox(inbox => inbox.take)
 
@@ -116,7 +137,14 @@ export default function ChatScreen() {
                 <StreamingTail tail={stream.tail} />
               </View>
             }
-            onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+            onScroll={onScroll}
+            scrollEventThrottle={16}
+            // Only while tokens are actually arriving. Bound to content size,
+            // this fired for *any* growth — expanding a thinking block or a tool
+            // card's output yanked the transcript to the bottom.
+            onContentSizeChange={() => {
+              if (streaming && atBottom.current) listRef.current?.scrollToEnd({ animated: true })
+            }}
           />
         )}
 

@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, View } from 'react-native'
 
 import type { TranscriptEntry } from '@/domain'
 
-import { clockTime } from '../format'
+import { clockTime, duration } from '../format'
 import { Markdown } from '../markdown/Markdown'
 import { useGradient, useTheme } from '../ThemeProvider'
 import { Icon } from './Icon'
@@ -20,7 +20,7 @@ export const TranscriptEntryView = memo(function TranscriptEntryView({ entry }: 
     case 'message':
       return entry.role === 'user' ? <UserBubble text={entry.text} /> : <AgentText text={entry.text} role={entry.role} />
     case 'thinking':
-      return <ThinkingPill text={entry.text} />
+      return <ThinkingLink text={entry.text} durationMs={entry.durationMs} />
     case 'tool':
       return <ToolCard call={entry.call} />
     case 'stream_cut':
@@ -63,23 +63,34 @@ function AgentText({ text, role }: { text: string; role: 'agent' | 'system' }) {
   return <Markdown source={text} />
 }
 
-/** Thinking blocks are collapsed by default — a phone has no room for them open. */
-function ThinkingPill({ text }: { text: string }) {
+/**
+ * Thinking is a link, not a control.
+ *
+ * It is an aside about the turn, not something to act on, and a filled pill gave
+ * it the visual weight of the tool cards beside it — which *are* actions with
+ * consequences on a host. Collapsed by default: a phone has no room to hold them
+ * open, and the reasoning is rarely what you came for.
+ */
+function ThinkingLink({ text, durationMs }: { text: string; durationMs?: number }) {
   const theme = useTheme()
   const [open, setOpen] = useState(false)
 
+  const label = open ? 'Hide thinking' : durationMs ? `Thought for ${duration(durationMs)}` : 'Thought for a moment'
+
   return (
-    <View>
+    <View style={styles.thinking}>
       <Pressable
         accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={label}
         onPress={() => setOpen(value => !value)}
-        style={[styles.thinking, { backgroundColor: theme.color.secondaryTint, borderRadius: theme.radius.row }]}
+        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+        style={({ pressed }) => [styles.thinkingLink, { opacity: pressed ? 0.6 : 1 }]}
       >
-        <Icon name="brain" size={13} color={theme.color.secondary} />
-        <Text variant="secondary" color={theme.color.secondaryDeep} style={styles.thinkingLabel}>
-          Thought for a moment
+        <Text variant="secondary" color={theme.color.primary}>
+          {label}
         </Text>
-        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={10} color={theme.color.secondary} />
+        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={9} color={theme.color.primary} />
       </Pressable>
 
       {open ? (
@@ -119,16 +130,9 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 6,
     borderBottomLeftRadius: 12
   },
-  thinking: {
-    height: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-    paddingHorizontal: 13,
-    alignSelf: 'flex-start'
-  },
-  thinkingLabel: { maxWidth: 220 },
-  thinkingBody: { marginTop: 8, paddingHorizontal: 4 },
+  thinking: { alignItems: 'flex-start' },
+  thinkingLink: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 2 },
+  thinkingBody: { marginTop: 8 },
   cutRow: { alignItems: 'center' },
   cutPill: { borderWidth: 1, borderStyle: 'dashed', paddingHorizontal: 12, paddingVertical: 6 }
 })

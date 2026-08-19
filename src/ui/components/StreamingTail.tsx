@@ -4,7 +4,6 @@ import { StyleSheet, View } from 'react-native'
 import type { StreamTail } from '@/state/stream-tail'
 
 import { useTheme } from '../ThemeProvider'
-import { Icon } from './Icon'
 import { Text } from './Text'
 
 /**
@@ -28,13 +27,12 @@ export function StreamingTail({ tail }: { tail: StreamTail }) {
 
   return (
     <View style={styles.wrap}>
+      {/* Plain text, to match the settled thinking link rather than sitting
+          above it as a filled pill. */}
       {snapshot.thinking ? (
-        <View style={[styles.thinking, { backgroundColor: theme.color.secondaryTint, borderRadius: theme.radius.row }]}>
-          <Icon name="brain" size={13} color={theme.color.secondary} />
-          <Text variant="secondary" color={theme.color.secondaryDeep}>
-            Thinking
-          </Text>
-        </View>
+        <Text variant="secondary" color={theme.color.gray500}>
+          Thinking…
+        </Text>
       ) : null}
 
       {snapshot.text ? (
@@ -54,14 +52,6 @@ function Cursor() {
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 10 },
-  thinking: {
-    height: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-    paddingHorizontal: 13,
-    alignSelf: 'flex-start'
-  },
+  wrap: { gap: 8 },
   cursor: { opacity: 0.9 }
 })
