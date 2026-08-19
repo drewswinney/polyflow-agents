@@ -1,0 +1,23 @@
+{
+  // The scripts run under Node, not React Native: different libs, different
+  // globals, and `node:` builtins that the app's bundler-flavoured resolution
+  // does not resolve. They are still typechecked — just against the right
+  // environment. `npm run typecheck` runs both projects.
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "lib": ["ESNext", "DOM"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "target": "ESNext",
+    "types": ["node"],
+    "skipLibCheck": true,
+    "paths": {
+      "@/*": ["./src/*"],
+      "@hermes/shared": ["./src/backends/hermes/adapters/shared.ts"],
+      "@hermes/types": ["./vendor/hermes/types/hermes.ts"]
+    }
+  },
+  "include": ["scripts/**/*.mts"]
+}

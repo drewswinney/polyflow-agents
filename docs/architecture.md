@@ -361,16 +361,60 @@ Hermes offers three shapes; we support two:
    minted via `POST /api/auth/ws-ticket`, TTL **30 seconds**, consumed on upgrade.
 3. *(Not used)* the process-lifetime internal credential — server-spawned children only.
 
+### 5.3.1 What the host actually does
+
+Reading the server corrected shape 1. **Bearer tokens are not a general auth
+mode.** `hermes_cli/dashboard_auth/token_auth.py` only accepts a bearer token on
+routes explicitly registered with `register_token_route()`, and the only caller
+that registers one today is the `drain` plugin. Every `/api/*` route the app
+needs is gated on a **session**, not a token, so "paste a token" — which §7.8
+made the whole enrolment story — authenticates nothing on a stock install.
+
+What a self-hosted, non-loopback Hermes really runs is the built-in
+username/password provider (`HERMES_DASHBOARD_BASIC_AUTH_USERNAME` /
+`_PASSWORD`). `--insecure` cannot bypass it: it is a documented no-op since the
+June 2026 hardening. So the real flow is:
+
+```
+POST /auth/password-login  { provider, username, password }   → sets session cookies
+GET  /api/…                                                    → cookie, or Bearer <access token>
+POST /api/auth/ws-ticket                                       → { ticket, ttl_seconds: 30 }
+WSS  /api/ws?ticket=…                                          → single-use, consumed on upgrade
+```
+
+Three details that matter:
+
+- The access token is set as a **cookie** and never returned in the body, so the
+  client sends `credentials: 'include'` and lets the platform cookie store hold
+  it, rather than keeping a token in app memory.
+- **The ticket path is not OAuth-specific.** Any session-authenticated client
+  needs it, because a WebSocket upgrade cannot carry an `Authorization` header.
+  Password auth uses exactly the same mint-then-dial contract, and the 30-second
+  TTL binds just as hard.
+- `/api/auth/providers` and `/auth/password-login` are both public
+  (`_GATE_PUBLIC_PREFIXES`), which is what lets the app **ask the host what it
+  wants** before it has any credential. Add-an-agent probes `/api/status` and
+  that endpoint, so enrolment adapts to the host instead of assuming, and the
+  design's "reachability is checked before pairing" comes free.
+
+RFC 8252 native-app login (system browser + loopback + PKCE) exists at
+`/auth/native/authorize`, but the password provider declines it — that path is
+for OAuth providers such as Nous Portal. It is the natural third auth mode if a
+portal-backed agent ever needs supporting.
+
 The 30-second TTL has a hard design consequence: **mint the ticket immediately
 before opening the socket, never cache it, and re-mint on every reconnect.**
 A phone that wakes from background after an hour has a stale everything; the
 reconnect path must be mint-then-dial, in that order. `resolveGatewayWsUrl()` in
 `@hermes/shared` already implements exactly this — another argument for vendoring.
 
-Device enrolment uses `hermes pairing`: the user runs `hermes pairing approve` on
-the host, and `hermes pairing revoke` gives a real "lost my phone" story. Note
-that there is **no QR flow and no token-issuance command** (§2.6) — enrolment is
-host + token, typed (§7.8).
+`hermes pairing` is **not** device enrolment for this app — it manages DM pairing
+codes for messaging-platform users (Discord, Telegram), which is a different
+concept that happens to share the word. There is no QR flow and no
+token-issuance command (§2.6), and no per-device revocation for a phone client:
+revoking access means changing the dashboard password, which logs every device
+out. A per-device credential is a real gap, and the right shape for it is the
+token-route seam the `drain` plugin already uses.
 
 ### 5.4 Reconnect
 
@@ -400,29 +444,31 @@ client that replays from the last event it saw:
 agent-handheld/
 ├── app/                        # expo-router routes
 │   ├── (tabs)/
-│   │   ├── sessions.tsx
+│   │   ├── index.tsx           sessions (+ in-place search)
 │   │   ├── activity.tsx
-│   │   └── settings/
+│   │   └── settings.tsx
 │   ├── chat/[id].tsx
-│   └── onboarding/
+│   └── agents/new.tsx
 ├── src/
 │   ├── domain/                 ★ AgentBackend, Agent, models, capabilities
 │   ├── backends/
-│   │   ├── hermes/             REST client, WS client, event mapping
+│   │   ├── hermes/             REST client, gateway wiring, event mapping
+│   │   │   └── adapters/       wrappers over vendored code (never patches)
 │   │   ├── openai-compat/
-│   │   └── mock/
-│   ├── state/                  TanStack Query hooks, Zustand stores
+│   │   ├── mock/
+│   │   └── registry.ts         the one live backend (§5.2)
+│   ├── state/                  TanStack Query hooks, Zustand stores, stream tail
 │   ├── ui/                     components, theme tokens
-│   └── platform/               notifications, secure storage, haptics
+│   └── platform/               secure storage, RN polyfills
 ├── vendor/hermes/              vendored upstream TS (see §9)
+├── scripts/                    upstream sync, M0 checks
 └── docs/
     ├── architecture.md         this file
     └── design/                 visual handoff (README, canvas, screen map)
 ```
 
-The directory should be renamed from `agent-handheld-ios` → `agent-handheld`,
-matching `docs/design/github.md`, which already records the repo as
-`drewswinney/agent-handheld`. That remote does not exist yet.
+The directory and the remote are both `agent-handheld`, matching
+`docs/design/github.md`. `main` is the default branch.
 
 ---
 
@@ -648,10 +694,43 @@ The payoff of the TypeScript choice — but only if managed deliberately.
 - CI typechecks against the vendored types, so an upstream break surfaces as a
   red build, not a runtime crash in the user's hand
 
-Known adaptation points: `hermes.ts` imports `@/global` (`HermesConnection`) and
-`@/store/transcript-tail`, both Electron-renderer concepts. These get mobile
-shims. `WebSocketLike` is typed as the DOM `WebSocket`, which React Native
-provides — likely compatible as-is, to be confirmed in the spike (§13).
+### 9.1 What M0 actually found
+
+The spike is done, and it corrected this section in three places. All three are
+recorded in `vendor/hermes/UPSTREAM.md`.
+
+**`hermes.ts` is not vendorable — it is the Electron bridge.** The plan above
+assumed all three paths would be vendored *and compiled*. Reading it changed
+that: every REST call goes through `window.hermesDesktop.api(...)`, and its
+connection descriptor comes from `window.hermesDesktop.getConnection()`. It is
+not an HTTP client with an Electron dependency; it is the IPC bridge itself, so
+on a phone there is nothing in it to run. `src/backends/hermes/rest.ts` is our
+own client instead, typed against the vendored types. The file is still vendored
+under `vendor/hermes/reference/`, excluded from the build, so `sync-upstream`
+can diff endpoint shapes against it — the "diff instead of re-port" argument
+holds; only the mechanism changed.
+
+The **types** are where the value actually was: 1,500 lines that change with
+every API addition, kept in sync for free.
+
+**Two React Native gaps in the vendored gateway client**, both real, both
+shimmed in `src/platform/polyfills.ts` rather than patched in `vendor/`:
+
+| Gap | Where | Effect if unshimmed |
+|---|---|---|
+| `URL` is a stub — no `protocol` | `connect()` validates with `new URL(wsUrl)` | Every connect throws *"requires a ws:// or wss:// URL string"* against a valid URL |
+| `DOMException` is not a global | `request()` rejects an abort with `new DOMException(…)` | An abort throws `ReferenceError` instead of rejecting |
+
+`WebSocketLike` is typed as the DOM `WebSocket`; React Native provides one with
+`addEventListener` and `WebSocket.OPEN`. **Confirmed compatible as-is** — no shim.
+
+**Upstream's `index.ts` cannot be the entry point.** Modules behind that barrel
+import siblings as `./billing-policy.js` (NodeNext convention); Metro resolves
+`.js` literally and the bundle fails. The barrel also drags in billing, charge
+settlement, cron triggers and skins, none of which a phone client touches.
+`src/backends/hermes/adapters/shared.ts` re-exports the three modules we use —
+all three have no imports at all — and `tsconfig` maps `@hermes/shared` to it, so
+call sites still read as if they import the upstream package.
 
 ---
 
@@ -725,13 +804,23 @@ Before the app can connect to `10.0.0.68`:
 | Hermes API is undocumented and may change | Medium | It's the desktop app's own API — breaking it breaks their product too |
 | No push support in Hermes today | Medium | §10.2, deferred to v1.1 |
 | Four designed features have no API (§2.6) | Medium | Descoped in §7.5, §7.6, §7.8, §7.9 |
-| Design is light-mode only | Medium | Decide before M3; retrofitting a dark palette is expensive (§8) |
+| ~~Design is light-mode only~~ | Low | Every colour goes through theme tokens, so dark mode is a palette swap (§12 q1) |
 | Exact WS RPC params unverified | Low | Read from `hermes.ts`; confirm in spike |
 | No local Xcode | Low | EAS cloud builds (§10.1) |
 
 **Open questions**
 
-1. Dark mode in v1, or light-only and accept the retrofit cost later?
+1. ~~Dark mode in v1, or light-only and accept the retrofit cost later?~~
+   **Deferred, cheaply.** The app ships the light palette exactly as drawn, but
+   every colour resolves through `src/ui/theme.ts` and a provider — no component
+   names a hex value. Dark mode becomes a second palette rather than a refactor,
+   so the retrofit cost the risk table warned about is largely paid off already.
+
+   The provider also resolves **accent per agent**: `Agent.accent` overrides the
+   six accent tokens, so a glance at any screen can say which agent you are in.
+   The baseline Polyflow accent is used when an agent declares none — what the
+   per-agent palettes should actually be is a design decision, not one made in
+   code.
 2. Do we need Hermes multi-profile support in v1, or is one profile per agent enough?
 3. Is the OpenAI-compatible backend a v1 deliverable, or does v1 ship Hermes-only
    with the seam proven by `MockBackend`?
@@ -742,16 +831,23 @@ Before the app can connect to `10.0.0.68`:
 
 ## 13. Milestones
 
-| M | Deliverable | Proves |
-|---|---|---|
-| **M0** | Spike: vendor `@hermes/shared`, connect to `/api/ws` from Expo, print events | The whole thesis — that upstream TS runs unmodified on RN |
-| **M1** | Host prep (§11) + pairing/onboarding (§7.8) | Real remote connection over Tailscale |
-| **M2** | Sessions list + read-only transcript + search | REST layer, normalisation, agent scoping |
-| **M3** | Live chat: streaming, tool cards, approvals, cancel, reconnect | The core product |
-| **M4** | Settings from `/api/config/schema` + capability gating | G2, and the seam holding up |
-| **M5** | Activity, logs, agent switcher, add-agent | G6 |
-| **M6** | Android parity pass + EAS pipeline for both | G5 |
-| **M7** | Push relay + notification actions | G1 on a phone, properly |
+| M | Deliverable | Proves | Status |
+|---|---|---|---|
+| **M0** | Spike: vendor `@hermes/shared`, connect to `/api/ws`, print events | The whole thesis — that upstream TS runs unmodified on RN | **done** (§9.1) |
+| **M1** | Host prep (§11) + pairing/onboarding (§7.8) | Real remote connection over Tailscale | host prep is the owner's; the app side ships in M5's add-agent |
+| **M2** | Sessions list + read-only transcript + search | REST layer, normalisation, agent scoping | **done** |
+| **M3** | Live chat: streaming, tool cards, approvals, cancel, reconnect | The core product | **done** |
+| **M4** | Settings from `/api/config/schema` + capability gating | G2, and the seam holding up | **done** — the settings form is generated from the server's own schema |
+| **M5** | Activity, logs, agent switcher, add-agent | G6 | **done** — spend/turns, the live event stream, logs with payload detail, tools & integrations, switcher, add-agent |
+| **M6** | Android parity pass + EAS pipeline for both | G5 | both platforms bundle; `eas.json` carries development / preview / production profiles |
+| **M7** | Push relay + notification actions | G1 on a phone, properly | **blocked on host work** — the app half ships as local notifications; the relay's contract is specified in [`push-relay.md`](push-relay.md) |
 
-**M0 is the gate.** It is a day of work and it validates or kills the stack
-choice before anything is built on top of it. Do not skip it.
+**M0 was the gate**, and it held: the vendored client runs outside Electron, with
+two small shims and one correction to how much of it is vendorable (§9.1).
+`npm run check:m0` keeps that honest in CI without needing a host — it drives the
+vendored client through a fake socket and asserts the event normalisation.
+
+M2 and M3 are built against `MockBackend`, whose scripted turn exercises every
+branch Chat has to survive: streaming, a thinking block, a settling tool call, a
+blocking approval, usage ticks and cancellation. Pointing the same screens at a
+real host is a matter of §11 host prep and a pairing token — no app changes.
