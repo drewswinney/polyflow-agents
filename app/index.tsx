@@ -10,7 +10,6 @@ import { useSidebar } from '@/state/sidebar'
 import { AgentPill } from '@/ui/components/AgentPill'
 import { AgentSwitcher } from '@/ui/components/AgentSwitcher'
 import { Composer } from '@/ui/components/Composer'
-import { ConnectionBanner } from '@/ui/components/ConnectionBanner'
 import { AgentGlyph } from '@/ui/components/Icon'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
@@ -37,7 +36,7 @@ export default function NewSessionScreen() {
   const agent = useSelectedAgent()
   const agents = useAgents(state => state.agents)
   const select = useAgents(state => state.select)
-  const { backend, state, attempt, error } = useActiveConnection()
+  const { backend, state } = useActiveConnection()
   const openSidebar = useSidebar(store => store.show)
   const submitMessage = useChatInbox(inbox => inbox.submit)
   const [switcherOpen, setSwitcherOpen] = useState(false)
@@ -69,8 +68,6 @@ export default function NewSessionScreen() {
 
       <KeyboardInset style={styles.flex}>
         <View style={styles.body}>
-          <ConnectionBanner state={state} attempt={attempt} error={error} />
-
           <View style={styles.empty}>
             <View style={[styles.ring, { borderColor: theme.color.secondaryMuted }]}>
               <AgentGlyph name={agent.icon} size={34} color="#a78bfa" />

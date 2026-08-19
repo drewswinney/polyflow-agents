@@ -6,6 +6,13 @@ import { useTheme } from '../ThemeProvider'
 import { Text } from './Text'
 
 /**
+ * Currently mounted nowhere. It flickered: every retry re-rendered the screen
+ * with a banner one line taller or shorter, which on chat is a height change at
+ * the top of the transcript. The state it carried is still on screen — chat's
+ * header subtitle says "reconnecting…", and the composer goes dashed and offers
+ * to queue — so this is the panel, not the information, that is gone. Kept
+ * whole: it goes back by rendering it again.
+ *
  * Disconnection is normal, not an error state the user must dismiss (§10.3).
  *
  * The copy is the important part: the agent keeps working on the VM whether or

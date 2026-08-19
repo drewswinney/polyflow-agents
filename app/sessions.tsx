@@ -12,7 +12,6 @@ import { AgentPill } from '@/ui/components/AgentPill'
 import { AgentSwitcher } from '@/ui/components/AgentSwitcher'
 import { BlockedStrip } from '@/ui/components/BlockedStrip'
 import { Card, Divider } from '@/ui/components/Card'
-import { ConnectionBanner } from '@/ui/components/ConnectionBanner'
 import { AgentGlyph, Icon } from '@/ui/components/Icon'
 import { IconButton } from '@/ui/components/IconButton'
 import { SessionRow } from '@/ui/components/SessionRow'
@@ -36,7 +35,7 @@ export default function SessionsScreen() {
   const agent = useSelectedAgent()
   const agents = useAgents(state => state.agents)
   const select = useAgents(state => state.select)
-  const { backend, state, attempt, error } = useActiveConnection()
+  const { backend } = useActiveConnection()
   const openSidebar = useSidebar(store => store.show)
 
   const [switcherOpen, setSwitcherOpen] = useState(false)
@@ -83,8 +82,6 @@ export default function SessionsScreen() {
         contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}
         refreshControl={<RefreshControl refreshing={sessions.isFetching} onRefresh={() => void sessions.refetch()} />}
       >
-        <ConnectionBanner state={state} attempt={attempt} error={error} />
-
         {searchActive ? (
           <SearchResults
             query={query}

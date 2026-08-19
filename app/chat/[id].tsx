@@ -14,7 +14,6 @@ import { useChatInbox } from '@/state/chat-inbox'
 import { ApprovalCard, ApprovalNudge } from '@/ui/components/ApprovalCard'
 import { ClarifyCard } from '@/ui/components/ClarifyCard'
 import { Composer } from '@/ui/components/Composer'
-import { ConnectionBanner } from '@/ui/components/ConnectionBanner'
 import { IconButton } from '@/ui/components/IconButton'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { StreamingTail } from '@/ui/components/StreamingTail'
@@ -37,7 +36,7 @@ export default function ChatScreen() {
   const theme = useTheme()
   const agent = useSelectedAgent()
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { backend, state, attempt, error } = useActiveConnection()
+  const { backend, state } = useActiveConnection()
   const openSidebar = useSidebar(store => store.show)
   const listRef = useRef<FlashListRef<TranscriptEntry>>(null)
 
@@ -170,15 +169,18 @@ export default function ChatScreen() {
             keyExtractor={entry => entry.id}
             renderItem={renderItem}
             contentContainerStyle={styles.list}
+            // Only when there is something to say. An always-mounted header
+            // that grows and shrinks with the connection is a height change at
+            // the top of the list, which the bottom anchoring then has to
+            // absorb — that is the flicker.
             ListHeaderComponent={
-              <View style={styles.header}>
-                <ConnectionBanner state={state} attempt={attempt} error={error} />
-                {stream.loadError ? (
+              stream.loadError ? (
+                <View style={styles.header}>
                   <Text variant="secondary" color={theme.color.error700}>
                     {stream.loadError}
                   </Text>
-                ) : null}
-              </View>
+                </View>
+              ) : undefined
             }
             ListFooterComponent={
               <View style={styles.entry}>
