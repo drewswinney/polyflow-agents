@@ -10,7 +10,7 @@ import { useFonts } from 'expo-font'
 import { router, Stack, usePathname } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { View } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
@@ -25,6 +25,15 @@ import { NEUTRAL } from '@/ui/theme'
 
 void SplashScreen.preventAutoHideAsync()
 
+// How long the fonts get before the app opens without them.
+//
+// `useFonts` never resolves its `loaded` flag on failure — it only sets the
+// error — so waiting on `loaded` alone is a wait that can never end. Under
+// Metro the fonts always arrived and that was invisible; served from an EAS
+// Update's asset manifest, one that does not arrive held the splash screen
+// open forever. The app degrades to system fonts; it does not refuse to open.
+const FONT_TIMEOUT_MS = 4_000
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -37,7 +46,7 @@ const queryClient = new QueryClient({
 })
 
 export default function RootLayout() {
-  const [fontsLoaded] = useFonts({
+  const [fontsLoaded, fontError] = useFonts({
     Outfit_500Medium,
     Inter_400Regular,
     Inter_500Medium,
@@ -56,11 +65,33 @@ export default function RootLayout() {
     void hydrate()
   }, [hydrate])
 
-  useEffect(() => {
-    if (fontsLoaded && hydrated) void SplashScreen.hideAsync()
-  }, [fontsLoaded, hydrated])
+  const [fontsTimedOut, setFontsTimedOut] = useState(false)
 
-  if (!fontsLoaded || !hydrated) return <View style={{ flex: 1, backgroundColor: NEUTRAL.bg }} />
+  useEffect(() => {
+    const timer = setTimeout(() => setFontsTimedOut(true), FONT_TIMEOUT_MS)
+
+    return () => clearTimeout(timer)
+  }, [])
+
+  // Settled, not loaded: a font that failed and a font that is still missing
+  // after the timeout both count as answered. Only `hydrated` is allowed to
+  // hold the app back, because that one always resolves.
+  const fontsSettled = fontsLoaded || fontError !== null || fontsTimedOut
+  const ready = fontsSettled && hydrated
+
+  useEffect(() => {
+    if (!ready) return
+
+    // Hiding the splash is best-effort. It throws if it has already been
+    // hidden, and an unhandled rejection here would be a crash on the way in.
+    void SplashScreen.hideAsync().catch(() => {})
+  }, [ready])
+
+  useEffect(() => {
+    if (fontError) console.warn('[fonts] failed to load, falling back to system fonts:', fontError)
+  }, [fontError])
+
+  if (!ready) return <View style={{ flex: 1, backgroundColor: NEUTRAL.bg }} />
 
   return (
     <SafeAreaProvider>
