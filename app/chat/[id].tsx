@@ -97,6 +97,32 @@ export default function ChatScreen() {
     if (stream.turnActive) anchor.current = null
   }, [stream.turnActive])
 
+  /**
+   * Re-aim at each new thing, not just at the first.
+   *
+   * The anchor used to be captured once per turn, so a reply that ran long
+   * pinned the view to its opening line and everything after it — the second
+   * paragraph, every tool card, the whole rest of the turn — arrived below the
+   * fold and stayed there. One turn, one glimpse.
+   *
+   * A settled entry appearing is the same event the anchor exists for: a new
+   * thing to read. Clearing it re-arms the capture, so the next growth parks
+   * that entry's top where the reply's first line went. Reading rule unchanged,
+   * applied per item instead of per turn.
+   *
+   * Length, not the array: entries are replaced wholesale on every transcript
+   * load, and re-aiming on a reload that returned the same rows would yank the
+   * view for nothing.
+   */
+  const entryCount = stream.entries.length
+
+  useEffect(() => {
+    // Only while the view still holds the turn. Once a drag has released the
+    // anchor the reader has chosen a position, and new arrivals do not get to
+    // take it back (§7.3).
+    if (holdAnchor.current) anchor.current = null
+  }, [entryCount])
+
   const onContentSizeChange = useCallback((_width: number, height: number) => {
     const previous = contentHeight.current
 
