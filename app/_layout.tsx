@@ -10,7 +10,7 @@ import { useFonts } from 'expo-font'
 import { router, Stack, usePathname } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
 import { StatusBar } from 'expo-status-bar'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { View } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
@@ -100,13 +100,48 @@ export default function RootLayout() {
   // something upstream never answered at all.
   const ready = (fontsSettled && hydrated) || deadlinePassed
 
+  /**
+   * Keep asking for a frame until the app is ready to be seen.
+   *
+   * Everything this gate waits on lands off a promise or a timer, and all of
+   * them resolve while the app is idle behind a static splash screen. Nothing
+   * is animating, so nothing is producing frames, and a React update with no
+   * frame to commit into flips `ready` in state without ever reaching the
+   * screen. The app then sits on the splash until something produces a frame —
+   * which is why tapping the screen loaded it, and why it occasionally came up
+   * on its own. Whether anything happened to request a frame was a race, and
+   * mostly it lost.
+   *
+   * `requestAnimationFrame` does not wait for a frame; it *asks* for one. This
+   * pumps it until the gate opens, which makes the commit land on the first
+   * frame after it rather than the first touch. It cancels itself the moment
+   * `ready` is true, so it costs a handful of frames at launch and nothing
+   * after — and `STARTUP_DEADLINE_MS` guarantees `ready` arrives.
+   */
   useEffect(() => {
+    if (ready) return
+
+    let frame = requestAnimationFrame(function pump() {
+      frame = requestAnimationFrame(pump)
+    })
+
+    return () => cancelAnimationFrame(frame)
+  }, [ready])
+
+  // Tied to a real layout pass rather than fired from the effect alone: the
+  // native splash is torn down on the UI thread, so handing it a commit that
+  // has actually been laid out is what makes it go away. Best-effort — it
+  // rejects when already hidden, and an unhandled rejection on the launch path
+  // is a crash on the way in.
+  const hideSplash = useCallback(() => {
     if (!ready) return
 
-    // Hiding the splash is best-effort. It throws if it has already been
-    // hidden, and an unhandled rejection here would be a crash on the way in.
     void SplashScreen.hideAsync().catch(() => {})
   }, [ready])
+
+  useEffect(() => {
+    hideSplash()
+  }, [hideSplash])
 
   useEffect(() => {
     if (fontError) console.warn('[fonts] failed to load, falling back to system fonts:', fontError)
@@ -125,7 +160,7 @@ export default function RootLayout() {
   if (!ready) return <View style={{ flex: 1, backgroundColor: NEUTRAL.bg }} />
 
   return (
-    <SafeAreaProvider>
+    <SafeAreaProvider onLayout={hideSplash}>
       <QueryClientProvider client={queryClient}>
         {/* Accent follows the selected agent, so a glance says which one you are in. */}
         <ThemeProvider accent={agent?.accent}>
