@@ -35,6 +35,20 @@ void SplashScreen.preventAutoHideAsync()
 // open forever. The app degrades to system fonts; it does not refuse to open.
 const FONT_TIMEOUT_MS = 4_000
 
+// The ceiling on the whole gate, whatever is still outstanding.
+//
+// The font timeout only ever bounded the fonts. `hydrated` was left unbounded
+// on the reasoning that it always resolves — which is true of a read that
+// *fails*, and not true of one that never comes back. `hydrate()` awaits
+// AsyncStorage, so a native read that hangs instead of rejecting never reaches
+// its own catch, never sets `hydrated`, and holds the splash screen for good.
+//
+// No single dependency gets to be the exception. Past this deadline the app
+// renders with whatever it has: an empty agent registry reads as a fresh
+// install and lands on onboarding, which is recoverable and on screen. A
+// splash screen is neither.
+const STARTUP_DEADLINE_MS = 8_000
+
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
@@ -67,18 +81,24 @@ export default function RootLayout() {
   }, [hydrate])
 
   const [fontsTimedOut, setFontsTimedOut] = useState(false)
+  const [deadlinePassed, setDeadlinePassed] = useState(false)
 
   useEffect(() => {
-    const timer = setTimeout(() => setFontsTimedOut(true), FONT_TIMEOUT_MS)
+    const fonts = setTimeout(() => setFontsTimedOut(true), FONT_TIMEOUT_MS)
+    const deadline = setTimeout(() => setDeadlinePassed(true), STARTUP_DEADLINE_MS)
 
-    return () => clearTimeout(timer)
+    return () => {
+      clearTimeout(fonts)
+      clearTimeout(deadline)
+    }
   }, [])
 
   // Settled, not loaded: a font that failed and a font that is still missing
-  // after the timeout both count as answered. Only `hydrated` is allowed to
-  // hold the app back, because that one always resolves.
+  // after the timeout both count as answered.
   const fontsSettled = fontsLoaded || fontError !== null || fontsTimedOut
-  const ready = fontsSettled && hydrated
+  // The deadline is an override, not another term: it opens the gate even when
+  // something upstream never answered at all.
+  const ready = (fontsSettled && hydrated) || deadlinePassed
 
   useEffect(() => {
     if (!ready) return
@@ -91,6 +111,16 @@ export default function RootLayout() {
   useEffect(() => {
     if (fontError) console.warn('[fonts] failed to load, falling back to system fonts:', fontError)
   }, [fontError])
+
+  // Says which dependency was still outstanding when the deadline fired, so the
+  // next report of a slow start names a cause instead of a symptom.
+  useEffect(() => {
+    if (!deadlinePassed || (fontsSettled && hydrated)) return
+
+    console.warn(
+      `[startup] opened on the ${STARTUP_DEADLINE_MS}ms deadline — fonts settled: ${fontsSettled}, registry hydrated: ${hydrated}`
+    )
+  }, [deadlinePassed, fontsSettled, hydrated])
 
   if (!ready) return <View style={{ flex: 1, backgroundColor: NEUTRAL.bg }} />
 
