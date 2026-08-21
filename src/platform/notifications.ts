@@ -17,14 +17,41 @@ import Constants from 'expo-constants'
 import * as Notifications from 'expo-notifications'
 import { Platform } from 'react-native'
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowBanner: true,
-    shouldShowList: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false
-  })
-})
+let handlerInstalled = false
+
+/**
+ * Registered on first use, never at import.
+ *
+ * This ran at module scope, which was harmless for as long as the module was
+ * only reachable from the notifications screen. Wiring `useNotificationTap`
+ * into the root layout pulled it onto the launch path, and a side effect on
+ * the launch path is a different thing entirely: it runs while the root module
+ * is still evaluating, before React has mounted and before any timeout in the
+ * app can arm. If it throws there, nothing renders, nothing logs, and the
+ * splash screen stays up with no way to tell why.
+ *
+ * Importing this module is now inert. The handler is installed by the first
+ * call that actually needs it, once, and a failure costs the banner rather
+ * than the app.
+ */
+function ensureNotificationHandler(): void {
+  if (handlerInstalled) return
+
+  handlerInstalled = true
+
+  try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false
+      })
+    })
+  } catch (cause) {
+    console.warn('[notifications] could not install the notification handler:', cause)
+  }
+}
 
 let permissionChecked = false
 let permissionGranted = false
@@ -96,6 +123,8 @@ export interface LocalNotification {
 }
 
 export async function notifyLocally(notification: LocalNotification): Promise<void> {
+  ensureNotificationHandler()
+
   if (!(await ensureNotificationPermission())) return
 
   await Notifications.scheduleNotificationAsync({
