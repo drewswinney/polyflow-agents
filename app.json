@@ -8,6 +8,7 @@
     "scheme": "hermeshandheld",
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
+    "hostUri": "100.122.164.50:8081",
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.drewswinney.agenthandheld",

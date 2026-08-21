@@ -29,13 +29,20 @@ export const Markdown = memo(function Markdown({ source }: { source: string }) {
   // Plain prose skips the parser entirely — most replies are exactly that.
   if (!blocks) {
     return (
-      <RNText style={[styles.paragraph, { fontFamily: theme.font.body, color: theme.color.gray800 }]}>
+      <RNText 
+        style={[styles.paragraph, { fontFamily: theme.font.body, color: theme.color.gray800 }]}
+        selectable
+      >
         {source}
       </RNText>
     )
   }
 
-  return <View style={styles.root}>{blocks}</View>
+  return (
+    <RNText selectable>
+      <View style={styles.root}>{blocks}</View>
+    </RNText>
+  )
 })
 
 /** Walks the flat token stream, consuming nested ranges as it goes. */

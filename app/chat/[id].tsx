@@ -202,6 +202,8 @@ export default function ChatScreen() {
 
   const pendingMessage = useChatInbox(inbox => inbox.pending)
   const takeMessage = useChatInbox(inbox => inbox.take)
+  const streamLoading = stream.loading
+  const streamSend = stream.send
 
   // A dictated message, or the first message of a session started from home,
   // goes out through chat's own send path rather than the producing screen's, so
@@ -210,12 +212,35 @@ export default function ChatScreen() {
   // Not until the transcript has loaded: the load overwrites `entries`, so a
   // send that beats it in would have its own bubble wiped off the screen.
   useEffect(() => {
-    if (!pendingMessage || stream.loading) return
+    console.log('[Chat] Effect running:', { pendingMessage, streamLoading })
+    
+    // Only proceed when we have a message AND loading is complete
+    if (!pendingMessage) {
+      console.log('[Chat] No pending message')
+      return
+    }
+    
+    if (streamLoading) {
+      console.log('[Chat] Still loading, waiting...')
+      return
+    }
 
-    const text = takeMessage()
+    console.log('[Chat] Sending pending message:', pendingMessage)
+    
+    // Extract the message text before consuming it
+    const textToTake = pendingMessage
+    
+    // Consume the message from the inbox
+    takeMessage()
+    
+    console.log('[Chat] Calling streamSend with:', textToTake)
 
-    if (text) stream.send(text)
-  }, [pendingMessage, takeMessage, stream])
+    // Send it through the stream
+    if (textToTake) {
+      streamSend(textToTake)
+      console.log('[Chat] Message sent!')
+    }
+  }, [pendingMessage, takeMessage, streamLoading, streamSend])
 
   const renderItem = useCallback(
     ({ item }: { item: TranscriptEntry }) => (

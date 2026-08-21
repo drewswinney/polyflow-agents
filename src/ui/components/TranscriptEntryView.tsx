@@ -1,4 +1,5 @@
 import { LinearGradient } from 'expo-linear-gradient'
+import * as Clipboard from 'expo-clipboard'
 import { memo, useState } from 'react'
 import { Pressable, StyleSheet, View } from 'react-native'
 
@@ -30,37 +31,92 @@ export const TranscriptEntryView = memo(function TranscriptEntryView({ entry }: 
 
 function UserBubble({ text }: { text: string }) {
   const gradient = useGradient()
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    await Clipboard.setStringAsync(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   return (
     <View style={styles.userRow}>
-      <LinearGradient
-        colors={gradient.colors}
-        start={gradient.start}
-        end={gradient.end}
-        style={styles.userBubble}
-      >
-        <Text variant="chat" color="#ffffff">
-          {text}
-        </Text>
-      </LinearGradient>
+      <View style={styles.userContent}>
+        <LinearGradient
+          colors={gradient.colors}
+          start={gradient.start}
+          end={gradient.end}
+          style={styles.userBubble}
+        >
+          <Text variant="chat" color="#ffffff" selectable>
+            {text}
+          </Text>
+        </LinearGradient>
+        <View style={styles.buttonBar}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={copied ? 'Copied' : 'Copy message'}
+            onPress={handleCopy}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.copyButton}
+          >
+            <Icon name={copied ? 'check' : 'copy'} size={12} color="#9ca3af" />
+          </Pressable>
+        </View>
+      </View>
     </View>
   )
 }
 
 function AgentText({ text, role }: { text: string; role: 'agent' | 'system' }) {
   const theme = useTheme()
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    await Clipboard.setStringAsync(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   // System rows are the app's own error copy, never model output — there is no
   // markdown in them to render, and rendering it would style an error like prose.
   if (role === 'system') {
     return (
-      <Text variant="body" color={theme.color.error700}>
-        {text}
-      </Text>
+      <View style={styles.agentContent}>
+        <Text variant="body" color={theme.color.error700} selectable>
+          {text}
+        </Text>
+        <View style={styles.buttonBar}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={copied ? 'Copied' : 'Copy message'}
+            onPress={handleCopy}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            style={styles.copyButton}
+          >
+            <Icon name={copied ? 'check' : 'copy'} size={12} color={theme.color.secondary} />
+          </Pressable>
+        </View>
+      </View>
     )
   }
 
-  return <Markdown source={text} />
+  return (
+    <View style={styles.agentContent}>
+      <Markdown source={text} />
+      <View style={styles.buttonBar}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={copied ? 'Copied' : 'Copy message'}
+          onPress={handleCopy}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          style={styles.copyButton}
+        >
+          <Icon name={copied ? 'check' : 'copy'} size={12} color={theme.color.secondary} />
+        </Pressable>
+      </View>
+    </View>
+  )
 }
 
 /**
@@ -129,14 +185,25 @@ function StreamCut({ at }: { at: number }) {
 
 const styles = StyleSheet.create({
   userRow: { alignItems: 'flex-end' },
+  userContent: { maxWidth: '80%', gap: 4 },
   userBubble: {
-    maxWidth: '80%',
     paddingHorizontal: 13,
     paddingVertical: 10,
     borderTopLeftRadius: 12,
     borderTopRightRadius: 12,
     borderBottomRightRadius: 6,
     borderBottomLeftRadius: 12
+  },
+  agentContent: { maxWidth: '85%', gap: 4 },
+  buttonBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingLeft: 4
+  },
+  copyButton: {
+    opacity: 0.4,
+    padding: 2
   },
   thinking: { alignItems: 'flex-start' },
   thinkingLink: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 2 },

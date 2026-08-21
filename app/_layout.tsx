@@ -17,6 +17,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context'
 import { ConnectionProvider, useBackend } from '@/state/ConnectionProvider'
 import { useAgents, useSelectedAgentOrNull } from '@/state/agents'
 import { useNotificationRouting } from '@/state/notification-routing'
+import { useNotificationTap } from '@/state/notification-tap'
 import { useSessions } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
 import { Sidebar } from '@/ui/components/Sidebar'
@@ -164,7 +165,14 @@ function AppSidebar() {
  * provider would change the agent under a tree that is not listening.
  */
 function NotificationRouting() {
+  const agent = useSelectedAgentOrNull()
+  const backend = useBackend()
+  
+  // Route notification taps to the right session
   useNotificationRouting()
+  
+  // Listen for agent events and show local notifications when app is backgrounded
+  useNotificationTap(backend, agent)
 
   return null
 }
