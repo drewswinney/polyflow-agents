@@ -14,6 +14,12 @@ import { Text } from './Text'
  * Stop lives here, in the composer, while streaming; it is deliberately not in
  * the overflow menu (§7.2). A fourth state covers disconnection: the button
  * shows a clock and the message queues in the outbox instead (§7.16).
+ *
+ * A draft outranks the stream. Streaming used to win the slot outright, so
+ * typing your next message while the agent worked left you holding a Stop
+ * button — the one press you did not mean — and no way to send without
+ * waiting for the turn to end. Text in the box is an unambiguous intent to
+ * send it, so Stop yields the slot until the box is empty again.
  */
 export function Composer({
   streaming,
@@ -40,6 +46,7 @@ export function Composer({
   const [draft, setDraft] = useState('')
 
   const typing = draft.trim().length > 0
+  const action: ActionState = typing ? (offline ? 'queue' : 'send') : streaming ? 'stop' : 'idle'
 
   const submit = () => {
     if (!typing) return
@@ -103,21 +110,25 @@ export function Composer({
         </View>
 
         <ActionButton
-          state={streaming ? 'stop' : offline && typing ? 'queue' : typing ? 'send' : 'idle'}
+          state={action}
           gradient={gradient}
-          onPress={streaming ? onStop : submit}
+          // Driven by the state it renders, not by `streaming` a second time,
+          // so the icon and what pressing it does cannot drift apart.
+          onPress={action === 'stop' ? onStop : submit}
         />
       </View>
     </Animated.View>
   )
 }
 
+type ActionState = 'idle' | 'send' | 'stop' | 'queue'
+
 function ActionButton({
   state,
   gradient,
   onPress
 }: {
-  state: 'idle' | 'send' | 'stop' | 'queue'
+  state: ActionState
   gradient: ReturnType<typeof useGradient>
   onPress: () => void
 }) {
