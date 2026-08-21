@@ -7,30 +7,48 @@
  * outbox when offline, streaming tail — and a second caller would bypass all
  * three, so the message would vanish from the transcript until a reload and
  * would be dropped outright while disconnected.
+ *
+ * **A message carries the session it is for.** It used to be a bare string, and
+ * whichever chat screen was mounted and loaded took it — which is not
+ * necessarily the one it was written for. Home hands its first message over
+ * *before* the new session's screen exists, so a chat still on the stack
+ * beneath home took every one of them: the new session opened empty and the
+ * previous session answered a message meant for it. Addressed, only the
+ * intended screen can take it, however many are mounted.
  */
 
 import { create } from 'zustand'
 
+import type { SessionId } from '@/domain'
+
+interface PendingMessage {
+  sessionId: SessionId
+  text: string
+}
+
 interface ChatInboxState {
-  pending: string | null
-  submit: (text: string) => void
-  take: () => string | null
+  pending: PendingMessage | null
+  submit: (sessionId: SessionId, text: string) => void
+  /** The message, but only if it was addressed to this session. */
+  take: (sessionId: SessionId) => string | null
 }
 
 export const useChatInbox = create<ChatInboxState>((set, get) => ({
   pending: null,
 
-  submit(text) {
+  submit(sessionId, text) {
     const trimmed = text.trim()
 
-    if (trimmed) set({ pending: trimmed })
+    if (trimmed) set({ pending: { sessionId, text: trimmed } })
   },
 
-  take() {
+  take(sessionId) {
     const { pending } = get()
 
-    if (pending) set({ pending: null })
+    if (!pending || pending.sessionId !== sessionId) return null
 
-    return pending
+    set({ pending: null })
+
+    return pending.text
   }
 }))

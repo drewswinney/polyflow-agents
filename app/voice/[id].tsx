@@ -105,7 +105,7 @@ export default function VoiceScreen() {
   }
 
   const send = () => {
-    submit(transcript)
+    submit(id, transcript)
     router.back()
   }
 
