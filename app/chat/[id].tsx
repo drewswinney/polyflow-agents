@@ -209,38 +209,20 @@ export default function ChatScreen() {
   // goes out through chat's own send path rather than the producing screen's, so
   // it gets the optimistic bubble and the offline outbox like anything typed.
   //
+  // Only the message addressed to *this* session: more than one chat screen is
+  // routinely mounted, and an unaddressed message went to whichever of them was
+  // loaded first rather than to the session it was written for (see
+  // `chat-inbox`).
+  //
   // Not until the transcript has loaded: the load overwrites `entries`, so a
   // send that beats it in would have its own bubble wiped off the screen.
   useEffect(() => {
-    console.log('[Chat] Effect running:', { pendingMessage, streamLoading })
-    
-    // Only proceed when we have a message AND loading is complete
-    if (!pendingMessage) {
-      console.log('[Chat] No pending message')
-      return
-    }
-    
-    if (streamLoading) {
-      console.log('[Chat] Still loading, waiting...')
-      return
-    }
+    if (pendingMessage?.sessionId !== id || streamLoading) return
 
-    console.log('[Chat] Sending pending message:', pendingMessage)
-    
-    // Extract the message text before consuming it
-    const textToTake = pendingMessage
-    
-    // Consume the message from the inbox
-    takeMessage()
-    
-    console.log('[Chat] Calling streamSend with:', textToTake)
+    const text = takeMessage(id)
 
-    // Send it through the stream
-    if (textToTake) {
-      streamSend(textToTake)
-      console.log('[Chat] Message sent!')
-    }
-  }, [pendingMessage, takeMessage, streamLoading, streamSend])
+    if (text) streamSend(text)
+  }, [pendingMessage, takeMessage, streamLoading, streamSend, id])
 
   const renderItem = useCallback(
     ({ item }: { item: TranscriptEntry }) => (

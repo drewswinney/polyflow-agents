@@ -51,10 +51,18 @@ export default function NewSessionScreen() {
 
     createSession.mutate(undefined, {
       onSuccess: id => {
-        submitMessage(text)
-        // Replaced, not pushed: going back from the session you just started
-        // should leave you here, not at a second copy of this screen.
-        router.replace(`/chat/${id}`)
+        // Addressed to the session just created, so no other chat screen can
+        // take it — the message is handed over before its screen exists, and
+        // an unaddressed one went to whichever chat was already mounted and
+        // loaded (see `chat-inbox`).
+        submitMessage(id, text)
+
+        // Pushed, not replaced. Home is the stack's root and the drawer
+        // returns to it with `navigate` (§7.17), which can only *return* to a
+        // screen that is still on the stack: replacing home took it off, so
+        // "New session" pushed a second copy of home on top of the session it
+        // had just started, leaving that chat mounted underneath.
+        router.push(`/chat/${id}`)
       }
     })
   }

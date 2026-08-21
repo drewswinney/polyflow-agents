@@ -729,10 +729,19 @@ telling the agent to do something — costs no navigation.
 **The session is created by the first message, not by arriving here.** Opening
 the app is not intent to start anything, and a session created on launch is one
 that has to be cleaned up on the host. On send, the app calls `createSession`,
-hands the text to chat through the same inbox voice uses (§7.9) and *replaces*
-itself with `/chat/:id` — so backing out of a session you just started leaves you
-at home rather than at a second copy of it. Chat owns the one send path, which is
-why the first message is handed over rather than sent here (§5.4).
+hands the text to chat through the same inbox voice uses (§7.9) and *pushes*
+`/chat/:id` — so backing out of a session you just started leaves you at home.
+Chat owns the one send path, which is why the first message is handed over
+rather than sent here (§5.4).
+
+Pushed rather than replaced, because home is the stack's root and the drawer
+returns to it with `navigate` (§7.17) — which can only return to a screen still
+on the stack. Replacing home took it off, so "New session" pushed a *second*
+home on top of the session it had just started, leaving that chat mounted and
+listening underneath. The message the inbox carries is addressed to its session
+for the same reason: more than one chat screen can be mounted, and an
+unaddressed message goes to whichever one is loaded, not to the one it was
+written for.
 
 No mic on this screen: dictation records into a session, and there is not one
 yet.
