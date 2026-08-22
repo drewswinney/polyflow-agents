@@ -5,10 +5,13 @@ import { useTheme } from '../ThemeProvider'
 import { Icon } from './Icon'
 
 /**
- * Floating scroll-to-bottom button that appears when user manually scrolls up.
- * Pinned to the bottom of the transcript, centered horizontally, so it floats
- * just above the composer. Small on purpose — the transcript underneath it is
- * what you are reading. `hitSlop` keeps the touch target at 52pt.
+ * Hands following back.
+ *
+ * Shown only while the transcript is in manual, where it is the one way out:
+ * tapping takes the view to the end and puts it back to following arrivals
+ * there. Pinned to the bottom of the transcript and centered, so it floats just
+ * above the composer. Small on purpose — the transcript underneath it is what
+ * you are reading — with `hitSlop` holding the touch target at 52pt.
  */
 export const ScrollToBottomButton = memo(function ScrollToBottomButton({ onPress }: { onPress: () => void }) {
   const theme = useTheme()
@@ -16,7 +19,7 @@ export const ScrollToBottomButton = memo(function ScrollToBottomButton({ onPress
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel="Scroll to latest messages"
+      accessibilityLabel="Jump to the latest message and follow new ones"
       onPress={onPress}
       hitSlop={{ top: 11, bottom: 11, left: 11, right: 11 }}
       style={({ pressed }) => [
