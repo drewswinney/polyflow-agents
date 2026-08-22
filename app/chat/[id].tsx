@@ -374,7 +374,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     bottom: '100%',
     alignSelf: 'center',
-    marginBottom: 12,
+    marginBottom: 20,
     pointerEvents: 'box-none',
   },
 })

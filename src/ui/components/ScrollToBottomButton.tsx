@@ -20,27 +20,22 @@ export const ScrollToBottomButton = memo(function ScrollToBottomButton({ onPress
       style={({ pressed }) => [
         styles.button,
         { backgroundColor: theme.color.surface, borderColor: theme.color.border },
-        theme.shadow.popover,
         pressed && styles.pressed,
       ]}
     >
-      <Icon name="chevron-down" size={20} color={theme.color.primary} />
+      <Icon name="chevron-down" size={16} color={theme.color.primary} />
     </Pressable>
   )
 })
 
 const styles = StyleSheet.create({
   button: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 4,
-    elevation: 3,
   },
   pressed: {
     opacity: 0.7,
