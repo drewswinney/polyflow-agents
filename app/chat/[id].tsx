@@ -341,22 +341,20 @@ export default function ChatScreen() {
           <ApprovalNudge onPress={() => listRef.current?.scrollToEnd({ animated: true })} />
         ) : null}
 
-        <View style={styles.composerWrapper}>
-          {scrolledAway && placed ? (
-            <View style={styles.scrollButtonContainer}>
-              <ScrollToBottomButton onPress={() => listRef.current?.scrollToEnd({ animated: true })} />
-            </View>
-          ) : null}
+        {scrolledAway && placed ? (
+          <View style={styles.scrollButtonContainer}>
+            <ScrollToBottomButton onPress={() => listRef.current?.scrollToEnd({ animated: true })} />
+          </View>
+        ) : null}
 
-          <Composer
-            streaming={running}
-            offline={state !== 'open'}
-            queued={stream.outbox.length}
-            onSend={stream.send}
-            onStop={stream.cancel}
-            onVoice={backend?.capabilities.media.audioIn ? () => router.push(`/voice/${id}`) : undefined}
-          />
-        </View>
+        <Composer
+          streaming={running}
+          offline={state !== 'open'}
+          queued={stream.outbox.length}
+          onSend={stream.send}
+          onStop={stream.cancel}
+          onVoice={backend?.capabilities.media.audioIn ? () => router.push(`/voice/${id}`) : undefined}
+        />
       </KeyboardInset>
     </View>
   )
@@ -372,13 +370,8 @@ const styles = StyleSheet.create({
   header: { gap: 10, paddingBottom: 6 },
   entry: { paddingVertical: 7 },
   approval: { paddingTop: 7 },
-  composerWrapper: {
-    alignItems: 'center',
-  },
   scrollButtonContainer: {
-    height: 12,
-    width: '100%',
-    justifyContent: 'flex-end',
+    marginTop: -12,
     alignItems: 'center',
     pointerEvents: 'box-none',
   },
