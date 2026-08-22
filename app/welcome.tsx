@@ -25,6 +25,10 @@ export default function WelcomeScreen() {
   const gradient = useGradient()
   const insets = useSafeAreaInsets()
   const agents = useAgents(state => state.agents)
+  // Falling back to an empty registry was honest when it meant re-pairing one
+  // host. It is not now that one bad read can drop several servers at once, so
+  // the first-run screen — where you land when that happens — says so.
+  const hydrationError = useAgents(state => state.hydrationError)
 
   // The only way in is the first-run redirect, which stops applying the moment
   // an agent exists — so arriving here with one means going back out.
@@ -64,7 +68,13 @@ export default function WelcomeScreen() {
       </ScrollView>
 
       <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 12) + 12 }]}>
-        <Pressable accessibilityRole="button" onPress={() => router.push('/agents/new')}>
+        {hydrationError ? (
+          <Text variant="secondary" color={theme.color.error700} style={styles.footnote}>
+            {`Saved servers could not be read, so this is starting empty: ${hydrationError}`}
+          </Text>
+        ) : null}
+
+        <Pressable accessibilityRole="button" onPress={() => router.push('/servers/new')}>
           <LinearGradient
             colors={gradient.colors}
             start={gradient.start}

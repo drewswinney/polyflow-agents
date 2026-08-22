@@ -2,6 +2,10 @@
  * Credentials live in the Keychain / Android Keystore, never in AsyncStorage or
  * Zustand-persisted state (§5.2).
  *
+ * Keyed by **server**, not agent: both a credential and a push registration are
+ * facts about a host, and several agents can share one. Keying push by agent
+ * registered the same device twice against a single host.
+ *
  * A credential is not always a token. A self-hosted Hermes on a non-loopback
  * bind authenticates with a username and password (§5.3), so this stores a
  * tagged union rather than a string — and the *whole* credential goes to the
@@ -15,23 +19,29 @@ import * as SecureStore from 'expo-secure-store'
  * `-` and `_` only. A `:` separator (the obvious choice, and the one this used
  * at first) throws on every read *and* write, so the store was unusable rather
  * than merely wrong. Hence the dot.
+ *
+ * Both prefixes still say `agent`, and both are now keyed by **server** id
+ * (§5.2). The words are stale and the keys are not: renaming them would strand
+ * every credential already in a keychain behind a name nothing reads, for a
+ * cosmetic gain. The `agents/v1` → `v2` migration reuses each old agent id as
+ * its server id precisely so these keys keep resolving.
  */
 const CREDENTIAL_PREFIX = 'agent-credential.'
 const PUSH_PREFIX = 'agent-push.'
 
-/** Agent ids are app-generated and already safe, but a key must never throw. */
-function credentialKey(agentId: string): string {
-  const safe = agentId.replace(/[^\w.-]/g, '_')
+/** Server ids are app-generated and already safe, but a key must never throw. */
+function credentialKey(serverId: string): string {
+  const safe = serverId.replace(/[^\w.-]/g, '_')
 
-  if (!safe) throw new Error('An agent id cannot be empty.')
+  if (!safe) throw new Error('A server id cannot be empty.')
 
   return `${CREDENTIAL_PREFIX}${safe}`
 }
 
-function pushKey(agentId: string): string {
-  const safe = agentId.replace(/[^\w.-]/g, '_')
+function pushKey(serverId: string): string {
+  const safe = serverId.replace(/[^\w.-]/g, '_')
 
-  if (!safe) throw new Error('An agent id cannot be empty.')
+  if (!safe) throw new Error('A server id cannot be empty.')
 
   return `${PUSH_PREFIX}${safe}`
 }
@@ -49,14 +59,14 @@ export interface PushRegistrationConfig {
   secret: string
 }
 
-export async function savePushConfig(agentId: string, config: PushRegistrationConfig): Promise<void> {
-  await SecureStore.setItemAsync(pushKey(agentId), JSON.stringify(config), {
+export async function savePushConfig(serverId: string, config: PushRegistrationConfig): Promise<void> {
+  await SecureStore.setItemAsync(pushKey(serverId), JSON.stringify(config), {
     keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY
   })
 }
 
-export async function readPushConfig(agentId: string): Promise<PushRegistrationConfig | null> {
-  const raw = await SecureStore.getItemAsync(pushKey(agentId))
+export async function readPushConfig(serverId: string): Promise<PushRegistrationConfig | null> {
+  const raw = await SecureStore.getItemAsync(pushKey(serverId))
 
   if (!raw) return null
 
@@ -67,22 +77,22 @@ export async function readPushConfig(agentId: string): Promise<PushRegistrationC
   }
 }
 
-export async function forgetPushConfig(agentId: string): Promise<void> {
-  await SecureStore.deleteItemAsync(pushKey(agentId))
+export async function forgetPushConfig(serverId: string): Promise<void> {
+  await SecureStore.deleteItemAsync(pushKey(serverId))
 }
 
 export type AgentCredential =
   | { kind: 'token'; token: string }
   | { kind: 'password'; provider: string; username: string; password: string }
 
-export async function saveAgentCredential(agentId: string, credential: AgentCredential): Promise<void> {
-  await SecureStore.setItemAsync(credentialKey(agentId), JSON.stringify(credential), {
+export async function saveAgentCredential(serverId: string, credential: AgentCredential): Promise<void> {
+  await SecureStore.setItemAsync(credentialKey(serverId), JSON.stringify(credential), {
     keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY
   })
 }
 
-export async function readAgentCredential(agentId: string): Promise<AgentCredential | null> {
-  const raw = await SecureStore.getItemAsync(credentialKey(agentId))
+export async function readAgentCredential(serverId: string): Promise<AgentCredential | null> {
+  const raw = await SecureStore.getItemAsync(credentialKey(serverId))
 
   if (!raw) return null
 
@@ -102,6 +112,6 @@ export async function readAgentCredential(agentId: string): Promise<AgentCredent
  * revoke (§5.3), so removing it here stops *this* phone without invalidating
  * anything server-side.
  */
-export async function forgetAgentCredential(agentId: string): Promise<void> {
-  await SecureStore.deleteItemAsync(credentialKey(agentId))
+export async function forgetAgentCredential(serverId: string): Promise<void> {
+  await SecureStore.deleteItemAsync(credentialKey(serverId))
 }

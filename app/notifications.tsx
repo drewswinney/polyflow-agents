@@ -4,7 +4,7 @@ import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { readPushConfig, savePushConfig } from '@/platform/secure-store'
-import { useSelectedAgent } from '@/state/agents'
+import { useSelectedAgent, useSelectedServer } from '@/state/agents'
 import { useNotificationPrefs } from '@/state/notification-prefs'
 import { usePushConfigRevision, usePushRegistration, type PushStatus } from '@/state/push-sync'
 import { Card, Divider } from '@/ui/components/Card'
@@ -30,7 +30,8 @@ export default function NotificationsScreen() {
   const insets = useSafeAreaInsets()
   const prefs = useNotificationPrefs()
   const agent = useSelectedAgent()
-  const status = usePushRegistration(agent)
+  const server = useSelectedServer()
+  const status = usePushRegistration(server, agent)
 
   useEffect(() => {
     void prefs.hydrate()
@@ -92,7 +93,7 @@ export default function NotificationsScreen() {
           </Card>
         </View>
 
-        <PushSetup agentId={agent.id} status={status} />
+        <PushSetup serverId={server.id} status={status} />
 
         <Card style={styles.noticeCard}>
           <View style={styles.noticeHead}>
@@ -117,7 +118,7 @@ export default function NotificationsScreen() {
  * end to end, and the host's own setup (`host/handheld-push/README.md`) is
  * where the URL and secret come from.
  */
-function PushSetup({ agentId, status }: { agentId: string; status: PushStatus }) {
+function PushSetup({ serverId, status }: { serverId: string; status: PushStatus }) {
   const theme = useTheme()
   const bump = usePushConfigRevision(state => state.bump)
   const [baseUrl, setBaseUrl] = useState('')
@@ -127,7 +128,7 @@ function PushSetup({ agentId, status }: { agentId: string; status: PushStatus })
   useEffect(() => {
     let cancelled = false
 
-    void readPushConfig(agentId).then(config => {
+    void readPushConfig(serverId).then(config => {
       if (cancelled) return
 
       setBaseUrl(config?.baseUrl ?? '')
@@ -140,12 +141,12 @@ function PushSetup({ agentId, status }: { agentId: string; status: PushStatus })
     return () => {
       cancelled = true
     }
-  }, [agentId])
+  }, [serverId])
 
   const save = async () => {
-    const existing = await readPushConfig(agentId)
+    const existing = await readPushConfig(serverId)
 
-    await savePushConfig(agentId, {
+    await savePushConfig(serverId, {
       baseUrl: baseUrl.trim(),
       secret: secret.trim() || existing?.secret || ''
     })

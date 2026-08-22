@@ -1,15 +1,16 @@
 /**
  * Harness-agnostic domain models.
  *
- * Nothing Hermes-shaped may appear here or above (architecture §3, §4.2).
+ * Nothing Hermes-shaped may appear here or above (architecture §3, §4.3).
  * Backends normalise into these types at their boundary; the UI never sees a
  * `snake_case` field or a Hermes event name.
  */
 
 export type AgentId = string
+export type ServerId = string
 export type SessionId = string
 
-/** The kinds of harness an Agent can be backed by (§4). */
+/** The kinds of harness a Server can be running (§4). */
 export type AgentKind = 'hermes' | 'other'
 
 /** Coarse reachability, as drawn on the agent pill (design §Global chrome). */
@@ -28,15 +29,19 @@ export type AgentConnection = 'connected' | 'idle' | 'offline'
 export type AuthMode = 'token' | 'oauth' | 'password'
 
 /**
- * The single user-facing noun (§5.2). The harness is a *property* of an agent,
- * never a concept the user meets.
+ * A host the phone can reach: an address, a credential, one socket (§5.2).
+ *
+ * Not a noun the user meets under this name — what they see is the agents on
+ * it. The harness is a property of the *connection*, which is why `kind` lives
+ * here rather than on `Agent`, and so does reachability: every agent on an
+ * unreachable host is unreachable together, because it is one socket that is
+ * down.
  */
-export interface Agent {
-  id: AgentId
+export interface Server {
+  id: ServerId
+  /** Heads this server's group in the switcher, e.g. `home hermes`. */
   displayName: string
   kind: AgentKind
-  /** One distinct glyph per agent; keys into the icon set, not a font name. */
-  icon: AgentIconName
   /** `host:port`, e.g. `hermes.tailnet.ts.net:9119`. */
   host: string
   authMode: AuthMode
@@ -51,15 +56,65 @@ export interface Agent {
    * answer this correctly.
    */
   secure?: boolean
-  /** Hermes multi-profile support; undefined → primary profile. */
-  profile?: string
-  /** Optional per-agent accent override; falls back to the base palette. */
-  accent?: AgentAccent
+  /** Version reported by the host when it was added; shown on Settings. */
+  version?: string
   connection: AgentConnection
   /** Last measured round trip, milliseconds. Undefined until first probe. */
   latencyMs?: number
   /** Seconds the host reports being up. Undefined when unknown. */
   uptimeSeconds?: number
+}
+
+/**
+ * The single user-facing noun (§5.2): one identity on one server.
+ *
+ * A Hermes profile is an agent — its own model, provider, skills and memory —
+ * so one server routinely carries several. The harness stays a property of the
+ * server, never a concept the user meets.
+ */
+export interface Agent {
+  id: AgentId
+  serverId: ServerId
+  displayName: string
+  /** One distinct glyph per agent; keys into the icon set, not a font name. */
+  icon: AgentIconName
+  /**
+   * The backend's own selector for this identity, opaque above the §4 seam.
+   *
+   * Hermes stores a profile name here, an OpenAI-compatible host a model id,
+   * and a server that hosts exactly one identity stores null. Nothing at this
+   * layer or above may read it: a field named `profile` would be precisely the
+   * Hermes leak §4.3 forbids, and the next harness will not have profiles.
+   */
+  scope: string | null
+  /** One line of provenance from discovery, e.g. `claude-opus-4 · 12 skills`. */
+  hint?: string
+  /** Optional per-agent accent override; falls back to the base palette. */
+  accent?: AgentAccent
+  /**
+   * Set when the last reconciliation no longer found this identity on its
+   * server (§5.2a). Kept rather than deleted: selection, caches and
+   * notification routing all hang off an agent id, and dropping the row
+   * silently loses things a person would notice going.
+   */
+  missing?: boolean
+}
+
+/**
+ * One identity as a server reports it (§4.2).
+ *
+ * Produced by `discoverAgents` at the REST layer, before any socket exists, and
+ * turned into an `Agent` by onboarding or by reconciliation.
+ */
+export interface AgentIdentity {
+  /** Opaque selector; null when the server hosts exactly one identity. */
+  scope: string | null
+  /** What to name the agent, e.g. `research` or `gpt-4o-mini`. */
+  label: string
+  /** One prebuilt line of detail for the picker row. */
+  hint?: string
+  /** Pre-selects this row, and wins when a name has to be chosen. */
+  isDefault: boolean
 }
 
 /**

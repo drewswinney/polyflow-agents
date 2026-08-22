@@ -5,7 +5,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { SessionSummary } from '@/domain'
 import { useBackend } from '@/state/ConnectionProvider'
-import { useAgents, useSelectedAgent } from '@/state/agents'
+import { useAgents, useSelectedAgent, useSelectedServerOrNull } from '@/state/agents'
 import { useSessions, useSessionSearch } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
 import { AgentPill } from '@/ui/components/AgentPill'
@@ -33,8 +33,11 @@ export default function SessionsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const agent = useSelectedAgent()
+  const server = useSelectedServerOrNull()
+  const servers = useAgents(state => state.servers)
   const agents = useAgents(state => state.agents)
   const select = useAgents(state => state.select)
+  const dismissAgent = useAgents(state => state.dismissAgent)
   const backend = useBackend()
   const openSidebar = useSidebar(store => store.show)
 
@@ -66,7 +69,14 @@ export default function SessionsScreen() {
         <ScreenHeader
           title="Sessions"
           onMenu={openSidebar}
-          center={<AgentPill agent={agent} open={switcherOpen} onPress={() => setSwitcherOpen(true)} />}
+          center={
+            <AgentPill
+              agent={agent}
+              connection={server?.connection ?? 'offline'}
+              open={switcherOpen}
+              onPress={() => setSwitcherOpen(true)}
+            />
+          }
           right={
             <IconButton
               name="magnifying-glass"
@@ -127,11 +137,13 @@ export default function SessionsScreen() {
       </ScrollView>
 
       <AgentSwitcher
+        servers={servers}
         agents={agents}
         selectedId={agent.id}
         visible={switcherOpen}
         onSelect={select}
-        onAddAgent={() => router.push('/agents/new')}
+        onDismissAgent={id => void dismissAgent(id)}
+        onAddServer={() => router.push('/servers/new')}
         onDismiss={() => setSwitcherOpen(false)}
       />
     </View>

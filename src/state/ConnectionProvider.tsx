@@ -1,6 +1,6 @@
 import { createContext, type ReactNode, useContext, useEffect, useMemo } from 'react'
 
-import type { Agent, AgentBackend, AgentConnection, ConnectionState } from '@/domain'
+import type { Agent, AgentBackend, AgentConnection, ConnectionState, Server } from '@/domain'
 
 import { useAgents } from './agents'
 import { useConnection } from './connection'
@@ -35,24 +35,32 @@ const FaultContext = createContext<ConnectionFault>({ error: null, attempt: 0 })
  * Mounted once at the root so the single live socket (§5.2) survives navigation
  * between tabs and into a chat, instead of being re-dialled per screen.
  */
-export function ConnectionProvider({ agent, children }: { agent: Agent | null; children: ReactNode }) {
-  const connection = useConnection(agent)
+export function ConnectionProvider({
+  server,
+  agent,
+  children
+}: {
+  server: Server | null
+  agent: Agent | null
+  children: ReactNode
+}) {
+  const connection = useConnection(server, agent)
 
-  // The status dot on the agent pill reads `agent.connection`, which nothing
-  // was writing: the store had `setConnection` from the start and no caller, so
-  // the dot showed whatever the agent was seeded with no matter what the socket
-  // was doing. The live state is the only thing that knows, so it is the thing
-  // that writes it.
+  // The status dot reads the *server's* connection, which nothing was writing:
+  // the store had `setConnection` from the start and no caller, so the dot
+  // showed whatever the row was seeded with no matter what the socket was
+  // doing. The live state is the only thing that knows, so it is the thing that
+  // writes it — onto the server, because the socket is the server's (§5.2).
   const setConnection = useAgents(state => state.setConnection)
 
-  // Keyed on the id, not the agent object: writing the status replaces that
+  // Keyed on the id, not the server object: writing the status replaces that
   // row, so depending on the object means depending on something this effect
   // itself changes.
-  const agentId = agent?.id
+  const serverId = server?.id
 
   useEffect(() => {
-    if (agentId) setConnection(agentId, describeConnection(connection.state))
-  }, [agentId, connection.state, setConnection])
+    if (serverId) setConnection(serverId, describeConnection(connection.state))
+  }, [serverId, connection.state, setConnection])
 
   // Split at the provider rather than at the consumer: a context value is only
   // as stable as its identity, so the pieces have to be handed out separately
@@ -76,7 +84,7 @@ export function ConnectionProvider({ agent, children }: { agent: Agent | null; c
 }
 
 /**
- * Socket state as the agent list talks about it.
+ * Socket state as the switcher talks about it.
  *
  * `connecting` counts as idle rather than offline: it is the normal state a
  * second after a switch, and flashing every agent orange on the way up would

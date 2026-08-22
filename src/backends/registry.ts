@@ -7,38 +7,50 @@
  * for a non-selected agent can only arrive by push — is §10.2's problem.
  */
 
-import type { Agent, AgentBackend } from '@/domain'
+import type { Agent, AgentBackend, Server } from '@/domain'
 import type { AgentCredential } from '@/platform/secure-store'
 
 import { HermesBackend } from './hermes'
 import { MockBackend } from './mock'
+import { MOCK_HOST } from './mock-host'
 import { OpenAiCompatBackend } from './openai-compat'
 
 export { HermesBackend, HERMES_CAPABILITIES } from './hermes'
 export { MockBackend, MOCK_CAPABILITIES } from './mock'
 export { OpenAiCompatBackend, OPENAI_COMPAT_CAPABILITIES } from './openai-compat'
 
-/** Agents whose host is this sentinel run against the in-process mock. */
-export const MOCK_HOST = 'mock.local'
+/** Servers whose host is this sentinel run against the in-process mock. */
+export { MOCK_HOST }
 
-export function createBackend(agent: Agent, credential: AgentCredential): AgentBackend {
-  if (agent.host === MOCK_HOST) {
+/**
+ * Where the server's address meets the agent's scope.
+ *
+ * The split is the point: everything about *reaching* the host comes from the
+ * server, and the one thing that says which identity on it we are talking to is
+ * `agent.scope` — opaque everywhere above this line, spent here as whatever the
+ * harness actually wanted (§5.2).
+ */
+export function createBackend(server: Server, agent: Agent, credential: AgentCredential): AgentBackend {
+  if (server.host === MOCK_HOST) {
     return new MockBackend()
   }
 
-  if (agent.kind === 'other') {
+  if (server.kind === 'other') {
     return new OpenAiCompatBackend({
-      host: agent.host,
+      host: server.host,
       token: credential.kind === 'token' ? credential.token : '',
-      model: 'gpt-4o-mini'
+      // An OpenAI-compatible host has no agent objects, so the identity the
+      // user picked *is* a model. A server added before discovery could list
+      // one carries no scope, and the backend falls back to its own default.
+      ...(agent.scope ? { model: agent.scope } : {})
     })
   }
 
   return new HermesBackend({
-    host: agent.host,
-    profile: agent.profile ?? null,
-    authMode: agent.authMode,
-    ...(agent.secure === undefined ? {} : { secure: agent.secure }),
+    host: server.host,
+    profile: agent.scope,
+    authMode: server.authMode,
+    ...(server.secure === undefined ? {} : { secure: server.secure }),
     ...(credential.kind === 'token'
       ? { token: credential.token }
       : {
@@ -53,13 +65,20 @@ export function createBackend(agent: Agent, credential: AgentCredential): AgentB
 
 let current: { agentId: string; backend: AgentBackend } | null = null
 
-/** The single live backend. Switching agents disconnects the previous one. */
-export function activateBackend(agent: Agent, credential: AgentCredential): AgentBackend {
+/**
+ * The single live backend. Switching agents disconnects the previous one.
+ *
+ * Keyed by agent rather than server even though the socket is the server's:
+ * two agents on one host differ only by scope, and `HermesBackend` fixes its
+ * scope at construction. Sharing one socket between them is the cheap
+ * optimisation §5.2 rule 2 leaves on the table.
+ */
+export function activateBackend(server: Server, agent: Agent, credential: AgentCredential): AgentBackend {
   if (current?.agentId === agent.id) return current.backend
 
   current?.backend.disconnect()
 
-  const backend = createBackend(agent, credential)
+  const backend = createBackend(server, agent, credential)
   current = { agentId: agent.id, backend }
 
   return backend

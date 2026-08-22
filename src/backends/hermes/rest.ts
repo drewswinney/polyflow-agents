@@ -24,6 +24,7 @@ import type {
   ModelInfoResponse,
   ModelOptionsResponse,
   PaginatedSessions,
+  ProfilesResponse,
   SessionInfo,
   SessionMessagesResponse,
   SessionSearchResponse,
@@ -335,6 +336,17 @@ export class HermesRest {
    * Which auth providers the host offers. Public — no credential needed — so
    * this is how the app discovers what to ask the user for before it has one.
    */
+  /**
+   * The identities this host carries (§4.2).
+   *
+   * Public shape, but not a public endpoint — it needs the credential, which is
+   * why discovery runs after authentication rather than alongside the
+   * reachability probe.
+   */
+  profiles(): Promise<ProfilesResponse> {
+    return this.request<ProfilesResponse>('/api/profiles')
+  }
+
   async authProviders(): Promise<AuthProviderInfo[]> {
     const result = await this.request<{ providers?: Array<{ name: string; display_name: string; supports_password?: boolean }> }>(
       '/api/auth/providers',

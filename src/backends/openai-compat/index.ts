@@ -23,7 +23,7 @@ import {
 export const OPENAI_COMPAT_CAPABILITIES: Capabilities = {
   sessions: { search: false, rename: true, pin: true },
   settings: { schemaDriven: false, model: true, providers: false },
-  extras: { cron: false, skills: false, mcp: false, profiles: false },
+  extras: { cron: false, skills: false, mcp: false },
   approvals: { requests: false, policy: false },
   logs: { events: true },
   media: { images: true, audioIn: false, audioOut: false }
@@ -39,7 +39,8 @@ class NotImplemented extends Error {
 export interface OpenAiCompatConfig {
   host: string
   token: string
-  model: string
+  /** The identity the user picked, when the host could name one (§4.2). */
+  model?: string
 }
 
 export class OpenAiCompatBackend implements AgentBackend {

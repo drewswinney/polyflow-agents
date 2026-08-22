@@ -11,7 +11,7 @@
 export interface Capabilities {
   sessions: { search: boolean; rename: boolean; pin: boolean }
   settings: { schemaDriven: boolean; model: boolean; providers: boolean }
-  extras: { cron: boolean; skills: boolean; mcp: boolean; profiles: boolean }
+  extras: { cron: boolean; skills: boolean; mcp: boolean }
   approvals: { requests: boolean; policy: boolean }
   logs: { events: boolean }
   media: { images: boolean; audioIn: boolean; audioOut: boolean }
@@ -21,7 +21,7 @@ export interface Capabilities {
 export const NO_CAPABILITIES: Capabilities = {
   sessions: { search: false, rename: false, pin: false },
   settings: { schemaDriven: false, model: false, providers: false },
-  extras: { cron: false, skills: false, mcp: false, profiles: false },
+  extras: { cron: false, skills: false, mcp: false },
   approvals: { requests: false, policy: false },
   logs: { events: false },
   media: { images: false, audioIn: false, audioOut: false }

@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 
 import { useBackend, useConnectionState } from '@/state/ConnectionProvider'
-import { useAgents, useSelectedAgent, useSelectedAgentOrNull } from '@/state/agents'
+import { useAgents, useSelectedAgent, useSelectedAgentOrNull, useSelectedServerOrNull } from '@/state/agents'
 import { useChatInbox } from '@/state/chat-inbox'
 import { useCreateSession } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
@@ -34,8 +34,11 @@ export default function NewSessionScreen() {
   // above them would change the hook order between renders.
   const maybeAgent = useSelectedAgentOrNull()
   const agent = useSelectedAgent()
+  const server = useSelectedServerOrNull()
+  const servers = useAgents(state => state.servers)
   const agents = useAgents(state => state.agents)
   const select = useAgents(state => state.select)
+  const dismissAgent = useAgents(state => state.dismissAgent)
   const backend = useBackend()
   const state = useConnectionState()
   const openSidebar = useSidebar(store => store.show)
@@ -72,7 +75,14 @@ export default function NewSessionScreen() {
       <ScreenHeader
         title="New session"
         onMenu={openSidebar}
-        center={<AgentPill agent={agent} open={switcherOpen} onPress={() => setSwitcherOpen(true)} />}
+        center={
+            <AgentPill
+              agent={agent}
+              connection={server?.connection ?? 'offline'}
+              open={switcherOpen}
+              onPress={() => setSwitcherOpen(true)}
+            />
+          }
       />
 
       <KeyboardInset style={styles.flex}>
@@ -105,11 +115,13 @@ export default function NewSessionScreen() {
       </KeyboardInset>
 
       <AgentSwitcher
+        servers={servers}
         agents={agents}
         selectedId={agent.id}
         visible={switcherOpen}
         onSelect={select}
-        onAddAgent={() => router.push('/agents/new')}
+        onDismissAgent={id => void dismissAgent(id)}
+        onAddServer={() => router.push('/servers/new')}
         onDismiss={() => setSwitcherOpen(false)}
       />
     </View>
