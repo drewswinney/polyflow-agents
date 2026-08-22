@@ -281,7 +281,48 @@ sessions plus prompt and little else. The governing rule, taken from the design:
 > Absent capabilities are stated once, never rendered as blank tiles — and never
 > shown disabled.
 
-### 4.2 Anti-goals for this layer
+### 4.2 Agent discovery
+
+Onboarding connects a **server** and asks it what it hosts (§7.8). The backend
+answers with one or more identities. *One* is a normal answer, not a degraded
+one.
+
+```ts
+interface AgentIdentity {
+  scope: string | null   // opaque selector the backend mints and later spends
+  label: string          // "research", "gpt-4o-mini"
+  hint?: string          // "claude-opus-4 · 12 skills" — one line, prebuilt
+  isDefault: boolean
+}
+
+discoverAgents(server, credential): Promise<AgentIdentity[]>
+```
+
+This runs at the **REST layer, before any socket**. Onboarding holds a host and
+a credential but no agent, so it cannot reach through `AgentBackend` — which
+takes an agent to construct.
+
+What each source actually gives, checked 2026-08-22:
+
+| Source | Yields | Notes |
+|---|---|---|
+| Hermes `/api/profiles` | N | `ProfileInfo` carries model, provider, skill count |
+| OpenAI-compatible `/v1/models` | N | universal; the model *is* the identity |
+| A2A agent card | exactly 1 | richest metadata, no fan-out |
+| OpenAI Assistants `/v1/assistants` | — | sunset 26 Aug 2026; not implemented |
+
+**A2A has no multi-agent list.** One card describes one agent, and the spec
+names registries and catalogs only as out-of-scope concerns. So the contract
+must not assume fan-out, and §7.8's picker auto-skips a single result rather
+than showing a one-checkbox screen. The card's own path moved to
+`/.well-known/agent-card.json` in v0.3 and the old `/.well-known/agent.json` is
+still widely deployed, so a client that adds A2A probes both.
+
+Discovery only ever *adds*. A 404, an empty list or a parse failure still yields
+one agent — the server itself — which is exactly what the app did before this
+existed.
+
+### 4.3 Anti-goals for this layer
 
 - No leaking `snake_case` Hermes fields into components. Normalise at the boundary.
 - No `if (backend instanceof HermesBackend)` anywhere in UI or State.
@@ -311,45 +352,89 @@ Tailscale removes that entire failure class for the cost of one install.
 SSH stays in the picture for **host administration** (starting `hermes serve`,
 reading logs), not as the app's data path.
 
-### 5.2 The Agent is the unit
+### 5.2 Server and Agent
 
-**Agent** is the single user-facing noun. It owns the backend kind, the
-connection and the profile, so the harness is a *property* of an agent rather
-than a concept the user ever meets.
+Two nouns, and only one of them is the unit of work.
+
+A **Server** is a host the phone can reach — an address, a credential, one
+socket. An **Agent** is an identity on that server, and it stays the only noun
+the user meets. The harness remains a property of the connection rather than a
+concept anyone is shown.
+
+Hermes forced the split. One `hermes serve` hosts many **profiles**, and a
+profile *is* an agent: own model, provider, skills, memory. While server and
+agent were the same record, two profiles on one host could not both exist.
 
 ```ts
-interface Agent {
+interface Server {
   id: string
   displayName: string           // "home hermes", "garage pi"
   kind: 'hermes' | 'other'      // never shown in UI as a label
-  icon: string                  // one distinct glyph per agent
   host: string                  // hermes.tailnet.ts.net:9119
-  authMode: 'token' | 'oauth'
-  profile?: string              // Hermes multi-profile support
+  authMode: 'token' | 'oauth' | 'password'
+  secure?: boolean
   connection: 'connected' | 'idle' | 'offline'
-  capabilities: Capabilities
+}
+
+interface Agent {
+  id: string
+  serverId: string
+  displayName: string           // from introspection, not typed by hand
+  icon: string                  // one distinct glyph per agent
+  scope: string | null          // backend-minted selector, opaque above §4
+  accent?: AgentAccent
+  missing?: boolean             // last introspection no longer listed it
 }
 ```
+
+**`scope` is deliberately opaque.** Hermes puts a profile name in it, an
+OpenAI-compatible host a model id, an A2A card nothing at all. Nothing above the
+backend boundary reads it — the same discipline `SessionUpdate` applies to
+Hermes event names (§4). A field named `profile` would have been precisely the
+leak §4.3 forbids.
 
 ```
 Phone (Tailscale)  ──── WSS/HTTPS ────►  hermes host (Tailscale)
                                           hermes serve
                                           bound to tailnet addr :9119
+                                          ├── profile: personal   → Agent
+                                          └── profile: research   → Agent
 ```
 
-Three rules follow, and all three are drawn in the design:
+Four rules follow:
 
-1. **Sessions are agent-scoped.** Session IDs are only unique within a backend, so
-   the sessions list, search, activity and settings all filter by
-   `selectedAgentId`. This is the part that is genuinely painful to retrofit.
-2. **One live socket at a time.** Holding a socket per agent costs battery and
-   loses to background limits anyway. Connect lazily on switch. The consequence:
-   background completion for *non-selected* agents can only arrive by push, which
-   is why §10.2 picks the server-side relay.
+1. **Sessions are agent-scoped.** Session ids are only unique within a backend
+   *and* a scope, so sessions, search and settings all filter by
+   `selectedAgentId`. Hermes scopes its session endpoints by profile already,
+   so this is now literally true rather than approximately.
+2. **One live socket at a time, and it belongs to the server.** Holding a socket
+   per agent costs battery and loses to background limits anyway. Agents sharing
+   a server could share one socket; they do not yet — switching between them
+   redials. Correct, mildly wasteful, and cheap to fix later because
+   `HermesBackend` treats its config as immutable today.
 3. **Nothing merges across agents.** No combined approval queue, no combined spend.
+4. **Connection state belongs to the server.** Every agent under an unreachable
+   host dims together, because it is one socket that is down — not each row
+   guessing separately.
 
-Secrets go in `expo-secure-store` (Keychain / Android Keystore), never in
-AsyncStorage or Zustand-persisted state.
+Credentials and push registration are keyed by **server**, not agent, and go to
+`expo-secure-store` (Keychain / Android Keystore), never AsyncStorage or
+Zustand-persisted state. Both are per-host facts: keying push by agent would
+register the same device twice against one host.
+
+### 5.2a Reconciliation
+
+An introspected agent can disappear — a profile deleted, a model dropped from
+`/v1/models`. Local state hangs off an agent (selection, caches, notification
+routing), so deleting one silently loses things a person would notice going.
+
+On each successful connect the server re-introspects. New identities are added.
+Missing ones are **marked, not removed**: they stay listed, dimmed, reading *no
+longer on this host*, and carry the one per-agent destructive action that
+survives — a dismiss.
+
+That is the asterisk on "you remove servers, not agents". You cannot delete a
+live agent. You can stop being shown a dead one.
 
 ### 5.2b Cleartext to a self-hosted host
 
@@ -580,13 +665,18 @@ behind the same interface — contained, not architectural.
 
 ### 7.4 Settings
 
-Sections: **Connection**, **Agent** (model & providers, skills, MCP servers, cron),
-**This phone** (notifications, logs & usage), **About**.
+Sections: **Server** (host, version, reachability, Reconnect, Remove), **Agent**
+(model & providers, skills, MCP servers, cron), **This phone** (notifications,
+logs & usage), **About**.
 
 Rendered from `/api/config/schema` (§2.3) and gated on `capabilities` (§4.1). A
 non-Hermes agent shows only Model and Tools, plus a card naming what it doesn't
-report and a destructive "Remove this agent" row. Destructive actions require
-explicit confirmation.
+report. Destructive actions require explicit confirmation.
+
+The destructive row removes the **server**, and its confirmation names the blast
+radius — removing a host with three agents says so, because the row you pressed
+was reached from one of them. Per-agent removal exists only for agents already
+marked missing (§5.2a).
 
 ### 7.5 Activity — removed
 
@@ -640,9 +730,21 @@ query term highlighted, followed by an all-sessions list. Cancel collapses back.
 
 ### 7.8 Pairing / onboarding
 
-Two steps. Manual enrolment only: host:port, masked pairing token with an eye
-toggle, display name. The design leads with a QR scanner and names `hermes pair`;
-neither exists (§2.6), so the manual path is promoted to primary until it does.
+**Connect a server; the agents arrive by themselves.** Three steps: host:port,
+then the credential the host asks for, then a list of what was found on it.
+
+The third step is what makes this easy — the person does the part only they can
+do (name a host, authenticate) and the app does the part they cannot (know what
+is on it). Discovered agents come pre-selected, because someone with three
+profiles wants all three; the step is a prune, not a pick. A single result skips
+the step entirely (§4.2), so an OpenAI-compatible host or an A2A card never
+shows a one-checkbox screen.
+
+Display name is no longer typed. Names come from introspection, and the field
+that used to gate the Save button is gone.
+
+Manual enrolment only. The design leads with a QR scanner and names `hermes
+pair`; neither exists (§2.6), so the manual path stays primary until they do.
 
 ### 7.9 Voice — push-to-talk
 
@@ -681,19 +783,30 @@ the push relay in §10.2.
 
 ### 7.13 Agent switcher
 
-Popover from the centered header pill. Rows show status dot, icon, name and a
-kind/state token (`hermes · 28ms`, `hermes · idle 3d`, `openai-agents`,
-`hermes · offline`), with a check on the current agent and an "Add an agent" row.
-Offline agents stay listed and dimmed rather than disappearing. Selecting one
-re-scopes the entire app (§5.2).
+Popover from the centered header pill, **grouped by server**. Each group is
+headed by the server's name and its state token (`hermes · 28ms`,
+`hermes · idle`, `hermes · offline`); rows under it show status dot, icon and
+agent name, with a check on the current agent. A "Connect a server" row closes
+the list.
 
-### 7.14 Add an agent
+Reachability is drawn once per group rather than once per row, because it is one
+socket (§5.2 rule 4). Offline servers stay listed and dimmed rather than
+disappearing — a host you cannot reach is still a host you own. Agents marked
+missing (§5.2a) sit dimmed under their server with a dismiss.
+
+Selecting an agent re-scopes the entire app (§5.2).
+
+### 7.14 Connect a server
 
 **Kind first**, because it determines everything after: "Another Hermes" (full
 support) or "Something else" (any agent speaking OpenAI-compatible streaming).
-Then host:port, token, display name. Reachability is probed before pairing;
-offline hosts can still be saved. Opening line sets the model: *"Agents stay
-separate. Sessions, settings, and history never mix between them."*
+Then host:port, then the credential the probe says the host wants, then the
+discovered agents (§7.8). Reachability is probed before pairing; an offline host
+can still be saved, in which case discovery is deferred to the first successful
+connect and the server starts with a single agent standing for itself.
+
+Opening line sets the model: *"Agents stay separate. Sessions, settings, and
+history never mix between them."*
 
 ### 7.15 Logs & events
 
@@ -927,9 +1040,14 @@ Before the app can connect to `10.0.0.68`:
    The baseline Polyflow accent is used when an agent declares none — what the
    per-agent palettes should actually be is a design decision, not one made in
    code.
-2. Do we need Hermes multi-profile support in v1, or is one profile per agent enough?
+2. ~~Do we need Hermes multi-profile support in v1?~~ **Answered: yes, and as
+   discovery rather than a second noun.** A profile is an agent, so the fix was
+   to split Server from Agent (§5.2) and introspect (§4.2) — not to expose
+   "profile" in the UI, which would have been a Hermes leak in the domain.
 3. Is the OpenAI-compatible backend a v1 deliverable, or does v1 ship Hermes-only
-   with the seam proven by `MockBackend`?
+   with the seam proven by `MockBackend`? Discovery (§4.2) now depends on it for
+   its second implementation — `/v1/models` is the only introspection a
+   non-Hermes host reliably offers — so the seam is exercised either way.
 4. Not yet designed (from the handoff): the resumed state after a drop, an expired
    approval, full-payload log detail, and notification-taps that must switch agents.
 
