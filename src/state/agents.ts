@@ -14,7 +14,7 @@ import { create } from 'zustand'
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { Agent, AgentConnection, AgentIconName, AgentId, AgentIdentity, Server, ServerId } from '@/domain'
-import { sessionsKey } from './queries'
+import { agentScopeKey } from './queries'
 
 const STORAGE_KEY = 'agents/v2'
 /** Read once, on first hydrate after the upgrade, and then never written. */
@@ -357,17 +357,20 @@ export function useConnectionOf(agent: Agent | null): AgentConnection {
 /**
  * Hook for selecting an agent and refreshing dependent queries.
  *
- * When switching agents, the React Query cache for sessions must be invalidated
- * so fresh data loads for the new agent (§5.2). This wraps the select action
- * with query invalidation.
+ * Selecting re-scopes the whole app (§5.2), so the cache is dropped wholesale
+ * rather than per agent: invalidating only the incoming agent's key left the
+ * sidebar and the sessions list showing rows that were fetched for the agent
+ * you just left, because those are the entries that are cached and mounted.
+ * The prefix match covers every agent, and the drop happens *before* the
+ * selection so the screens that re-render on it read a cache with nothing
+ * stale left in it.
  */
 export function useSelectAgent() {
   const queryClient = useQueryClient()
   const select = useAgents(state => state.select)
 
   return (id: AgentId) => {
-    // Invalidate sessions cache so fresh data loads for the newly selected agent
-    queryClient.invalidateQueries({ queryKey: sessionsKey(id) })
+    queryClient.invalidateQueries({ queryKey: agentScopeKey })
     select(id)
   }
 }

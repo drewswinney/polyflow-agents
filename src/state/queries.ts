@@ -11,6 +11,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { AgentBackend, AgentId } from '@/domain'
 
+/**
+ * The prefix every agent-scoped key starts with.
+ *
+ * For the one case that has to reach past a single agent: switching. React
+ * Query matches keys by prefix, so this invalidates every agent's cache at
+ * once — which is the point, because the rows that were stale belong to the
+ * agent you are *leaving*, not the one you are selecting.
+ */
+export const agentScopeKey = ['agent'] as const
 export const sessionsKey = (agentId: AgentId) => ['agent', agentId, 'sessions'] as const
 export const searchKey = (agentId: AgentId, query: string) => ['agent', agentId, 'search', query] as const
 
