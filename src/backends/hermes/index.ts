@@ -116,7 +116,7 @@ const LOGIN_REUSE_MS = 300_000
 export const HERMES_CAPABILITIES: Capabilities = {
   sessions: { search: true, rename: true, pin: true },
   settings: { schemaDriven: true, model: true, providers: true },
-  extras: { cron: true, skills: true, mcp: true, profiles: true },
+  extras: { cron: true, skills: true, mcp: true },
   approvals: { requests: true, policy: true },
   logs: { events: true },
   // Audio is request/response REST, not a duplex channel — push-to-talk only (§2.6, §7.9).

@@ -12,9 +12,10 @@ import NetInfo from '@react-native-community/netinfo'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppState, type AppStateStatus } from 'react-native'
 
+import { discoverAgents } from '@/backends/discovery'
 import { probeScheme } from '@/backends/hermes'
 import { activateBackend, MOCK_HOST, releaseBackend } from '@/backends/registry'
-import type { Agent, AgentBackend, ConnectionState } from '@/domain'
+import type { Agent, AgentBackend, ConnectionState, Server } from '@/domain'
 import { type AgentCredential, readAgentCredential } from '@/platform/secure-store'
 
 import { useAgents } from './agents'
@@ -35,8 +36,9 @@ export interface Connection {
  * Mounted once, at the root, so the socket survives navigation between tabs and
  * into a chat rather than being torn down and re-dialled per screen.
  */
-export function useConnection(agent: Agent | null): Connection {
-  const patchAgent = useAgents(state => state.patch)
+export function useConnection(server: Server | null, agent: Agent | null): Connection {
+  const patchServer = useAgents(state => state.patchServer)
+  const reconcile = useAgents(state => state.reconcile)
   const [backend, setBackend] = useState<AgentBackend | null>(null)
   const [state, setState] = useState<ConnectionState>('idle')
   const [error, setError] = useState<string | null>(null)
@@ -71,19 +73,23 @@ export function useConnection(agent: Agent | null): Connection {
   /**
    * What a redial actually depends on.
    *
-   * Not the agent object: its identity changes whenever *anything* on the
-   * record is written, including the connection status this very effect
-   * causes to be written. Depending on the object therefore means every
-   * connect triggers a disconnect and another connect, forever. Only these
-   * fields change where or how the socket is dialled.
+   * Not the agent or server objects: their identity changes whenever *anything*
+   * on the record is written, including the connection status this very effect
+   * causes to be written. Depending on the object therefore means every connect
+   * triggers a disconnect and another connect, forever. Only these fields
+   * change where or how the socket is dialled — the address and auth from the
+   * server, and the one field that says which identity on it we want.
    */
-  const dialKey = agent
-    ? [agent.id, agent.host, agent.authMode, String(agent.secure ?? ''), agent.profile ?? ''].join('|')
-    : ''
+  const dialKey =
+    agent && server
+      ? [agent.id, agent.scope ?? '', server.id, server.host, server.authMode, String(server.secure ?? '')].join('|')
+      : ''
 
   // Read inside the effect so a status write does not re-run it.
   const agentRef = useRef(agent)
   agentRef.current = agent
+  const serverRef = useRef(server)
+  serverRef.current = server
 
   useEffect(() => {
     let cancelled = false
@@ -94,6 +100,7 @@ export function useConnection(agent: Agent | null): Connection {
       dialing.current = true
 
       const agent = agentRef.current
+      const server = serverRef.current
 
       // 1s floor between automatic dials, doubling per consecutive failure up
       // to 30s. An explicit Reconnect resets the count, because a person asking
@@ -111,7 +118,7 @@ export function useConnection(agent: Agent | null): Connection {
 
       // Nothing to dial before onboarding has run. Idle, not error: an empty
       // registry is a first run, not a failure.
-      if (!agent) {
+      if (!agent || !server) {
         setState('idle')
 
         return
@@ -125,43 +132,45 @@ export function useConnection(agent: Agent | null): Connection {
 
       // The mock needs no credential; a real host without one is a pairing
       // problem, surfaced rather than retried forever.
+      // Keyed by server: a credential is a fact about a host, and every agent
+      // on it authenticates with the same one (§5.2).
       const credential: AgentCredential | null =
-        agent.host === MOCK_HOST ? { kind: 'token', token: 'mock' } : await readAgentCredential(agent.id)
+        server.host === MOCK_HOST ? { kind: 'token', token: 'mock' } : await readAgentCredential(server.id)
 
       if (cancelled) return
 
       if (!credential) {
         setState('error')
-        setError('No credentials stored for this agent. Add it again to re-pair.')
+        setError('No credentials stored for this server. Add it again to re-pair.')
 
         return
       }
 
-      // An agent added while the host was unreachable has no scheme on record,
+      // A server added while the host was unreachable has no scheme on record,
       // and guessing one is how you get a socket that never opens. Probe once,
       // remember the answer.
       //
       // **Never fatal.** The probe is an optimisation, not a gate: it gives up
       // after 5s per scheme where the real connect gets 15s, so letting it veto
       // the attempt means a slow hop refuses a connection that would have
-      // worked. On failure the agent is used exactly as it was and the connect
+      // worked. On failure the server is used exactly as it was and the connect
       // below reports what actually went wrong.
-      let resolved = agent
+      let resolved = server
 
-      if (agent.secure === undefined && agent.host !== MOCK_HOST) {
+      if (server.secure === undefined && server.host !== MOCK_HOST) {
         try {
-          const secure = await probeScheme(agent.host)
+          const secure = await probeScheme(server.host)
 
           if (cancelled) return
 
-          resolved = { ...agent, secure }
-          patchAgent(agent.id, { secure })
+          resolved = { ...server, secure }
+          patchServer(server.id, { secure })
         } catch {
           if (cancelled) return
         }
       }
 
-      const next = activateBackend(resolved, credential)
+      const next = activateBackend(resolved, agent, credential)
 
       if (cancelled) return
 
@@ -176,6 +185,24 @@ export function useConnection(agent: Agent | null): Connection {
         if (!cancelled) {
           failures.current = 0
           setAttempt(0)
+
+          // Re-introspect while we are up and authenticated (§5.2a). New
+          // identities appear, ones the host no longer reports are marked —
+          // never deleted, because selection, caches and notification routing
+          // all hang off an agent id.
+          //
+          // Deliberately after the socket is reported healthy and deliberately
+          // unawaited by anything the UI blocks on: a host that answers the
+          // gateway but not `/api/profiles` still has a working connection, and
+          // `discoverAgents` folds that failure into an empty list.
+          void discoverAgents(resolved, credential).then(discovery => {
+            // An empty list from a *failed* call means "could not ask", not
+            // "nothing here" — marking every agent missing on a flaky request
+            // would empty a working server's group.
+            if (cancelled || discovery.failure || discovery.identities.length === 0) return
+
+            reconcile(resolved.id, discovery.identities)
+          })
         }
       } catch (cause) {
         if (!cancelled) {
@@ -202,7 +229,7 @@ export function useConnection(agent: Agent | null): Connection {
       controller.abort()
       void pending.then(unsubscribe => unsubscribe?.())
     }
-  }, [dialKey, nonce, patchAgent])
+  }, [dialKey, nonce, patchServer, reconcile])
 
   // Switching agents re-scopes the whole app; the previous socket goes with it.
   useEffect(() => releaseBackend, [])

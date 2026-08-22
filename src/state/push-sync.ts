@@ -19,7 +19,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Platform } from 'react-native'
 import { create } from 'zustand'
 
-import type { Agent } from '@/domain'
+import type { Agent, Server } from '@/domain'
 import { getPushToken } from '@/platform/notifications'
 import { registerDevice } from '@/platform/push-registration'
 import { readPushConfig } from '@/platform/secure-store'
@@ -53,7 +53,7 @@ export type PushStatus =
  * failure mode this whole subsystem exists to avoid, so it is reported even
  * though it is never thrown.
  */
-export function usePushRegistration(agent: Agent): PushStatus {
+export function usePushRegistration(server: Server, agent: Agent): PushStatus {
   const [status, setStatus] = useState<PushStatus>({ state: 'unconfigured' })
 
   const prefs = useNotificationPrefs()
@@ -74,7 +74,9 @@ export function usePushRegistration(agent: Agent): PushStatus {
     let cancelled = false
 
     const run = async () => {
-      const config = await readPushConfig(agent.id)
+      // Where to register is the *server's* — one host, one relay, one
+      // registration, however many agents sit behind it (§5.2).
+      const config = await readPushConfig(server.id)
 
       if (cancelled) return
 
@@ -96,13 +98,16 @@ export function usePushRegistration(agent: Agent): PushStatus {
         return
       }
 
-      const attempt = `${agent.id}|${token}|${signature}`
+      const attempt = `${server.id}|${agent.id}|${token}|${signature}`
 
       if (attempt === lastSent.current) return
 
       setStatus({ state: 'registering' })
 
       const result = await registerDevice(config, token, {
+        // Still the *agent*, not the server: this comes back on every push so a
+        // tap can re-scope the app before opening the session, and the app is
+        // scoped to an agent (§5.2). Only the endpoint is per-host.
         agentId: agent.id,
         platform: Platform.OS,
         label: agent.displayName,
@@ -135,7 +140,7 @@ export function usePushRegistration(agent: Agent): PushStatus {
     return () => {
       cancelled = true
     }
-  }, [agent.id, agent.displayName, prefs, signature, revision])
+  }, [server.id, agent.id, agent.displayName, prefs, signature, revision])
 
   return status
 }

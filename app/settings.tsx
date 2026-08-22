@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { missingCapabilityLabels } from '@/domain'
 import { forgetAgentCredential, forgetPushConfig } from '@/platform/secure-store'
 import { useBackend, useConnectionState, useReconnect } from '@/state/ConnectionProvider'
-import { useAgents, useSelectedAgent, useSelectedAgentOrNull } from '@/state/agents'
+import { useAgents, useSelectedAgent, useSelectedAgentOrNull, useSelectedServerOrNull } from '@/state/agents'
 import { useSidebar } from '@/state/sidebar'
 import { AgentPill } from '@/ui/components/AgentPill'
 import { AgentSwitcher } from '@/ui/components/AgentSwitcher'
@@ -36,9 +36,16 @@ export default function SettingsScreen() {
   // line past it uses.
   const maybeAgent = useSelectedAgentOrNull()
   const agent = useSelectedAgent()
+  const server = useSelectedServerOrNull()
+  const servers = useAgents(state => state.servers)
   const agents = useAgents(state => state.agents)
   const select = useAgents(state => state.select)
-  const removeAgent = useAgents(state => state.remove)
+  const dismissAgent = useAgents(state => state.dismissAgent)
+  const removeServer = useAgents(state => state.removeServer)
+  // Every agent this one removal would take with it, which is what its
+  // confirmation has to name: the row was reached from a single agent, and
+  // nothing on the way here said the host had three (§7.4).
+  const onThisServer = useAgents(state => state.agents.filter(candidate => candidate.serverId === server?.id))
   const backend = useBackend()
   const state = useConnectionState()
   const reconnect = useReconnect()
@@ -46,30 +53,40 @@ export default function SettingsScreen() {
   const [switcherOpen, setSwitcherOpen] = useState(false)
 
   // Home is the app's one gate on an empty registry: it sends you to the
-  // introduction, and that is where removing the last agent should land.
-  if (!maybeAgent) return <Redirect href="/" />
+  // introduction, and that is where removing the last server should land.
+  // Narrowed past this point for the same reason `agent` is: an agent without
+  // its server is not a state the registry can be in.
+  if (!maybeAgent || !server) return <Redirect href="/" />
 
-  const forgetAgent = async () => {
-    const id = agent.id
+  const forgetServer = async () => {
+    const id = server.id
 
     // Secrets first. The registry row is what makes them findable, so dropping
-    // it before them is what strands a credential in the keychain.
+    // it before them is what strands a credential in the keychain. Both are
+    // keyed by server: one host, one credential, one push registration (§5.2).
     await forgetAgentCredential(id)
     await forgetPushConfig(id)
-    await removeAgent(id)
+    await removeServer(id)
 
     router.replace('/')
   }
 
-  const confirmForget = () =>
+  const confirmForget = () => {
+    // Naming the count is the whole point. You reached this row from one agent,
+    // and on a host with three the damage is three times what the button looks
+    // like it does.
+    const count = onThisServer.length
+    const scope = count > 1 ? `all ${count} agents on it` : 'the agent on it'
+
     Alert.alert(
-      `Remove ${agent.displayName}?`,
-      'This phone forgets its address and its credential. Nothing on the host changes — sessions there keep running, and pairing again picks them back up.',
+      `Remove ${server.displayName}?`,
+      `This phone forgets its address, its credential and ${scope}. Nothing on the host changes — sessions there keep running, and pairing again picks them back up.`,
       [
         { text: 'Cancel', style: 'cancel' },
-        { text: 'Remove', style: 'destructive', onPress: () => void forgetAgent() }
+        { text: 'Remove', style: 'destructive', onPress: () => void forgetServer() }
       ]
     )
+  }
 
   const capabilities = backend?.capabilities
   const missing = capabilities ? missingCapabilityLabels(capabilities) : []
@@ -114,7 +131,14 @@ export default function SettingsScreen() {
       <ScreenHeader
         title="Settings"
         onMenu={openSidebar}
-        center={<AgentPill agent={agent} open={switcherOpen} onPress={() => setSwitcherOpen(true)} />}
+        center={
+            <AgentPill
+              agent={agent}
+              connection={server?.connection ?? 'offline'}
+              open={switcherOpen}
+              onPress={() => setSwitcherOpen(true)}
+            />
+          }
       />
 
       <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
@@ -124,8 +148,10 @@ export default function SettingsScreen() {
               <AgentGlyph name={agent.icon} size={16} />
             </View>
             <View style={styles.connectionText}>
-              <Text variant="rowLabelStrong">{agent.displayName}</Text>
-              <Text variant="monoSmall">{agent.host}</Text>
+              <Text variant="rowLabelStrong">{server.displayName}</Text>
+              <Text variant="monoSmall">
+                {server.version ? `${server.host} · ${server.kind} ${server.version}` : server.host}
+              </Text>
             </View>
             <StateChip state={state} />
           </View>
@@ -142,7 +168,7 @@ export default function SettingsScreen() {
         {agentRows.length ? (
           <View style={styles.group}>
             <Text variant="sectionHeader" style={styles.groupLabel}>
-              Agent
+              {agent.displayName}
             </Text>
             <Card>
               {agentRows.map((row, index) => (
@@ -168,16 +194,24 @@ export default function SettingsScreen() {
 
         <View style={styles.group}>
           <Text variant="sectionHeader" style={styles.groupLabel}>
-            Pairing
+            Server
           </Text>
           <Card>
+            {/* The server, not the agent. An agent is a thing the host reports,
+                so removing one here would leave a row the next connect restores
+                (§5.2a) — what you can actually forget is the host. */}
             <Pressable accessibilityRole="button" onPress={confirmForget} style={styles.row}>
               <View style={[styles.rowTile, { backgroundColor: theme.color.error50 }]}>
                 <Icon name="trash" size={13} color={theme.color.error700} />
               </View>
               <Text variant="rowLabel" color={theme.color.error700} style={styles.rowLabel}>
-                {`Remove ${agent.displayName}`}
+                {`Remove ${server.displayName}`}
               </Text>
+              {onThisServer.length > 1 ? (
+                <Text variant="monoSmall" color={theme.color.gray400}>
+                  {`${onThisServer.length} agents`}
+                </Text>
+              ) : null}
             </Pressable>
           </Card>
         </View>
@@ -205,11 +239,13 @@ export default function SettingsScreen() {
       </ScrollView>
 
       <AgentSwitcher
+        servers={servers}
         agents={agents}
         selectedId={agent.id}
         visible={switcherOpen}
         onSelect={select}
-        onAddAgent={() => router.push('/agents/new')}
+        onDismissAgent={id => void dismissAgent(id)}
+        onAddServer={() => router.push('/servers/new')}
         onDismiss={() => setSwitcherOpen(false)}
       />
     </View>

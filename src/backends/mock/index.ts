@@ -36,7 +36,7 @@ import {
 export const MOCK_CAPABILITIES: Capabilities = {
   sessions: { search: true, rename: true, pin: true },
   settings: { schemaDriven: true, model: true, providers: false },
-  extras: { cron: true, skills: true, mcp: true, profiles: false },
+  extras: { cron: true, skills: true, mcp: true },
   approvals: { requests: true, policy: true },
   logs: { events: true },
   // Push-to-talk is exercisable against the mock; speech synthesis is not, and

@@ -1,7 +1,7 @@
 /**
  * Hermes REST shapes → domain models.
  *
- * Everything `snake_case` stops here (§4.2). Timestamps: Hermes reports seconds
+ * Everything `snake_case` stops here (§4.3). Timestamps: Hermes reports seconds
  * (float) on session rows and message rows; the domain uses milliseconds.
  */
 
@@ -176,7 +176,7 @@ export function toTranscriptEntries(messages: SessionMessage[]): TranscriptEntry
  * `@image:<path>` line per image — the same directive form the desktop client
  * renders from. Left in the text it reads as a wall of host paths under every
  * photo you ever sent, so it is lifted out here, at the boundary where
- * everything else Hermes-shaped stops (§4.2).
+ * everything else Hermes-shaped stops (§4.3).
  *
  * Only the basename survives. The path is the host's business, and the
  * basename is what this device files its own copy of the image under.

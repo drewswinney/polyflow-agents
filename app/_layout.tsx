@@ -15,7 +15,7 @@ import { View } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
 import { ConnectionProvider, useBackend } from '@/state/ConnectionProvider'
-import { useAgents, useSelectedAgentOrNull } from '@/state/agents'
+import { useAgents, useSelectedAgentOrNull, useSelectedServerOrNull } from '@/state/agents'
 import { useNotificationRouting } from '@/state/notification-routing'
 import { useNotificationTap } from '@/state/notification-tap'
 import { useSessions } from '@/state/queries'
@@ -75,6 +75,7 @@ export default function RootLayout() {
   // Nullable here and only here: with no fixture agent, a fresh install has an
   // empty registry until onboarding runs.
   const agent = useSelectedAgentOrNull()
+  const server = useSelectedServerOrNull()
 
   useEffect(() => {
     void hydrate()
@@ -164,7 +165,7 @@ export default function RootLayout() {
       <QueryClientProvider client={queryClient}>
         {/* Accent follows the selected agent, so a glance says which one you are in. */}
         <ThemeProvider accent={agent?.accent}>
-          <ConnectionProvider agent={agent}>
+          <ConnectionProvider server={server} agent={agent}>
             <StatusBar style="dark" />
             <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: NEUTRAL.bg } }}>
               <Stack.Screen name="index" />
@@ -179,7 +180,7 @@ export default function RootLayout() {
               <Stack.Screen name="config" />
               <Stack.Screen name="notifications" />
               <Stack.Screen name="voice/[id]" />
-              <Stack.Screen name="agents/new" options={{ presentation: 'modal' }} />
+              <Stack.Screen name="servers/new" options={{ presentation: 'modal' }} />
             </Stack>
 
             {/* Mounted beside the router, not inside a screen, so the same

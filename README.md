@@ -26,9 +26,18 @@ something to run before any host prep exists. The mock streams tokens, opens a
 tool card, raises a blocking approval and settles — the whole Chat path without
 a server.
 
-To point it at a real agent, use **Add an agent** in the switcher popover: host,
-port and a pairing token approved on the host with `hermes pairing approve`.
-Tokens go to the Keychain / Android Keystore, never to AsyncStorage.
+To point it at a real agent, use **Connect a server** in the switcher popover:
+host, port, and whatever credential the host says it wants — the form probes
+`/api/status` and `/api/auth/providers` rather than assuming a bearer token.
+Secrets go to the Keychain / Android Keystore, never to AsyncStorage.
+
+The last step asks the host what it *hosts*. One `hermes serve` can run several
+profiles, and a profile is an agent — its own model, provider, skills and
+memory — so the agents come from `/api/profiles` rather than being typed in. A
+non-Hermes host is asked `/v1/models` instead, and a host that reports one
+identity skips the picker. A host that will not answer still yields one agent,
+so discovery can only ever add. Servers are what you remove; agents that vanish
+server-side are marked, not deleted (architecture §4.2, §5.2a).
 
 ## Checks
 
@@ -36,12 +45,21 @@ Tokens go to the Keychain / Android Keystore, never to AsyncStorage.
 npm run typecheck     # includes the vendored upstream types
 npm run check:m0      # the M0 gate, without needing a host
 npm run check:images  # image attachments, without needing a host
+npm run check:discovery  # agent discovery + the v1→v2 registry migration
 npm run spike:m0      # the M0 gate against a live `hermes serve`
 ```
 
 `check:m0` is the one that matters in CI. It drives the *vendored, unmodified*
 upstream gateway client through a fake socket and asserts that real-shaped
 Hermes frames normalise into the domain's `SessionUpdate` union.
+
+`check:discovery` covers the two things about connecting a server that types
+cannot. A host that *refuses* to list its agents reports an empty list, and so
+does a host that genuinely has none — read the first as the second and every
+agent on a working server gets marked missing the moment one request fails. And
+the `agents/v1` → `v2` migration has to keep each old agent id as its new
+server id, because that is the key its credential sits under in the keychain;
+minting a fresh one typechecks perfectly and silently loses the password.
 
 `check:images` covers the one thing about sending a picture that types cannot:
 `image.attach_bytes` queues a file *on the session* and the next `prompt.submit`

@@ -4,8 +4,9 @@ import { useCallback, useRef, useState } from 'react'
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
+import { type Discovery, discoverAgents, identitiesOrSelf } from '@/backends/discovery'
 import { HermesRest, probeScheme } from '@/backends/hermes'
-import type { Agent, AgentKind, AuthMode } from '@/domain'
+import type { AgentIdentity, AgentKind, AuthMode, Server } from '@/domain'
 import { type AgentCredential, saveAgentCredential } from '@/platform/secure-store'
 import { useAgents } from '@/state/agents'
 import { Card } from '@/ui/components/Card'
@@ -17,7 +18,7 @@ import { KeyboardInset } from '@/ui/keyboard'
 import { useGradient, useTheme } from '@/ui/ThemeProvider'
 
 /**
- * Add an agent (§7.14).
+ * Connect a server (§7.14).
  *
  * Kind comes first because it determines everything after it. Then the host —
  * and then the app **asks the host what it wants** rather than assuming.
@@ -29,12 +30,19 @@ import { useGradient, useTheme } from '@/ui/ThemeProvider'
  * `/api/auth/providers` are both public precisely so a client can find this out
  * before it has a credential, which also gives the design's "reachability is
  * checked before pairing" for free.
+ *
+ * The last step asks the host what it *hosts* (§4.2). The person does the part
+ * only they can do — name an address, authenticate — and the app does the part
+ * they cannot, which is know what identities are on the other side. A host that
+ * reports exactly one skips the picker entirely rather than showing a
+ * one-checkbox screen; a host that will not answer still yields one agent, so
+ * discovery can only ever add.
  */
-export default function AddAgentScreen() {
+export default function AddServerScreen() {
   const theme = useTheme()
   const gradient = useGradient()
   const insets = useSafeAreaInsets()
-  const add = useAgents(state => state.add)
+  const addServer = useAgents(state => state.addServer)
   const scroller = useRef<ScrollView>(null)
 
   /**
@@ -60,6 +68,19 @@ export default function AddAgentScreen() {
   const [kind, setKind] = useState<AgentKind>('hermes')
   const [host, setHost] = useState('')
   const [displayName, setDisplayName] = useState('')
+
+  /**
+   * What the host said it carries, once asked. Null until it has been.
+   *
+   * Holding the whole `Discovery` rather than just the list keeps the
+   * difference between *"this host has one agent"* and *"this host would not
+   * tell us"* — which read identically in a bare array and mean opposite things
+   * to someone deciding whether the screen worked.
+   */
+  const [discovery, setDiscovery] = useState<Discovery | null>(null)
+  const [identities, setIdentities] = useState<AgentIdentity[]>([])
+  /** Scopes the user has left ticked. Keyed by `scope ?? ''` — null is a scope. */
+  const [chosen, setChosen] = useState<Set<string>>(new Set())
 
   const [probe, setProbe] = useState<Probe>({ status: 'idle' })
   const [username, setUsername] = useState('')
@@ -102,30 +123,29 @@ export default function AddAgentScreen() {
   const needsPassword = authMode === 'password'
 
   const credentialReady = needsPassword ? username.trim() && password.trim() : token.trim()
-  const ready = Boolean(host.trim() && displayName.trim() && credentialReady) && !saving
+  // Display name no longer gates this. It used to, and it was a chore standing
+  // between someone and a working app for a string the host can supply itself.
+  const ready = Boolean(host.trim() && credentialReady) && !saving
 
-  const save = async () => {
-    if (!ready) return
+  /** Falls back to the address, which is a worse name and never a wrong one. */
+  const serverName = displayName.trim() || host.trim()
 
-    setSaving(true)
-    setSaveError(null)
+  const buildServer = (): Server => ({
+    id: `server-${Date.now().toString(36)}`,
+    displayName: serverName,
+    kind,
+    host: host.trim(),
+    authMode,
+    ...(needsPassword ? { username: username.trim() } : {}),
+    ...(probe.status === 'reachable' && probe.providerName ? { authProvider: probe.providerName } : {}),
+    ...(probe.status === 'reachable' ? { secure: probe.secure, version: probe.version } : {}),
+    // Reachability was checked above, but an offline host can still be saved:
+    // the connection attempt on selection is what sets this for real.
+    connection: probe.status === 'reachable' ? 'idle' : 'offline'
+  })
 
-    const agent: Agent = {
-      id: `agent-${Date.now().toString(36)}`,
-      displayName: displayName.trim(),
-      kind,
-      icon: kind === 'hermes' ? 'server' : 'cloud',
-      host: host.trim(),
-      authMode,
-      ...(needsPassword ? { username: username.trim() } : {}),
-      ...(probe.status === 'reachable' && probe.providerName ? { authProvider: probe.providerName } : {}),
-      ...(probe.status === 'reachable' ? { secure: probe.secure } : {}),
-      // Reachability was checked above, but an offline host can still be saved:
-      // the connection attempt on selection is what sets this for real.
-      connection: probe.status === 'reachable' ? 'idle' : 'offline'
-    }
-
-    const credential: AgentCredential = needsPassword
+  const buildCredential = (): AgentCredential =>
+    needsPassword
       ? {
           kind: 'password',
           provider: (probe.status === 'reachable' && probe.providerName) || 'basic',
@@ -134,23 +154,93 @@ export default function AddAgentScreen() {
         }
       : { kind: 'token', token: token.trim() }
 
+  const commit = async (server: Server, credential: AgentCredential, chosenIdentities: AgentIdentity[]) => {
+    // Secret first: the registry row is what makes it findable, so writing the
+    // row before the credential is what strands an agent that cannot connect.
+    await saveAgentCredential(server.id, credential)
+    await addServer(server, chosenIdentities)
+    // `replace`, not `back`: this screen is also the first-run destination,
+    // where there is no history to return to and `back()` is a no-op that
+    // leaves you staring at the form you just submitted.
+    router.replace('/')
+  }
+
+  /**
+   * Authenticate, ask what is there, and only stop to ask if there is a choice.
+   *
+   * One identity — an OpenAI-compatible host with a single model, an A2A card,
+   * a Hermes with only its default profile — goes straight in. A host that
+   * *refused* to answer stops, because "we could not ask" and "there is one
+   * here" deserve different words even though both end with one agent.
+   */
+  const connect = async () => {
+    if (!ready) return
+
+    setSaving(true)
+    setSaveError(null)
+
+    const server = buildServer()
+    const credential = buildCredential()
+
     try {
-      await saveAgentCredential(agent.id, credential)
-      await add(agent)
-      // `replace`, not `back`: this screen is also the first-run destination,
-      // where there is no history to return to and `back()` is a no-op that
-      // leaves you staring at the form you just submitted.
-      router.replace('/')
+      const found = await discoverAgents(
+        { kind, host: server.host, authMode, ...(server.secure === undefined ? {} : { secure: server.secure }) },
+        credential
+      )
+      const list = identitiesOrSelf(found, serverName)
+
+      if (!found.failure && list.length <= 1) {
+        await commit(server, credential, list)
+
+        return
+      }
+
+      setDiscovery(found)
+      setIdentities(list)
+      // Pre-selected, not pre-empty: someone with three profiles wants three
+      // agents, so the step is a prune rather than a pick.
+      setChosen(new Set(list.map(identityKey)))
+      setSaving(false)
     } catch (cause) {
       setSaveError(cause instanceof Error ? cause.message : String(cause))
       setSaving(false)
     }
   }
 
+  const addChosen = async () => {
+    const picked = identities.filter(identity => chosen.has(identityKey(identity)))
+
+    if (picked.length === 0 || saving) return
+
+    setSaving(true)
+    setSaveError(null)
+
+    try {
+      await commit(buildServer(), buildCredential(), picked)
+    } catch (cause) {
+      setSaveError(cause instanceof Error ? cause.message : String(cause))
+      setSaving(false)
+    }
+  }
+
+  const toggle = (identity: AgentIdentity) =>
+    setChosen(current => {
+      const next = new Set(current)
+      const key = identityKey(identity)
+
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+
+      return next
+    })
+
+  const picking = discovery !== null
+  const primaryReady = picking ? chosen.size > 0 && !saving : ready
+
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
       <ScreenHeader
-        title="Add an agent"
+        title="Connect a server"
         // Nothing to go back to on first run, and a chevron that does nothing is
         // worse than no chevron.
         onBack={canGoBack ? () => router.back() : undefined}
@@ -276,12 +366,44 @@ export default function AddAgentScreen() {
           )}
 
           <Field
-            label="Display name"
+            label="Display name (optional)"
             value={displayName}
             onChange={setDisplayName}
-            placeholder="home hermes"
+            placeholder={host.trim() || 'home hermes'}
             onReveal={revealField}
           />
+
+          {picking ? (
+            <Card style={styles.probeCard}>
+              <View style={styles.probeHead}>
+                <Icon
+                  name={discovery?.failure ? 'circle-exclamation' : 'circle-check'}
+                  size={14}
+                  color={discovery?.failure ? theme.color.warning700 : theme.color.success700}
+                />
+                <Text variant="rowLabelStrong">
+                  {discovery?.failure
+                    ? 'Could not list what is on this host'
+                    : `Found ${identities.length} agents`}
+                </Text>
+              </View>
+
+              <Text variant="secondary">
+                {discovery?.failure
+                  ? 'It answered, but not with a list of agents. Adding it as a single agent — nothing is lost, and the list is checked again every time it connects.'
+                  : 'Sessions, settings and history never mix between them. Untick any you do not want.'}
+              </Text>
+
+              {identities.map(identity => (
+                <IdentityRow
+                  key={identityKey(identity)}
+                  identity={identity}
+                  checked={chosen.has(identityKey(identity))}
+                  onToggle={() => toggle(identity)}
+                />
+              ))}
+            </Card>
+          ) : null}
 
           {saveError ? (
             <Text variant="secondary" color={theme.color.error700}>
@@ -293,21 +415,68 @@ export default function AddAgentScreen() {
             Credentials go to this phone&apos;s keychain and are sent only to this host.
           </Text>
 
-          <Pressable accessibilityRole="button" disabled={!ready} onPress={() => void save()}>
+          <Pressable
+            accessibilityRole="button"
+            disabled={!primaryReady}
+            onPress={() => void (picking ? addChosen() : connect())}
+          >
             <LinearGradient
-              colors={ready ? gradient.colors : [theme.color.bgSubtle, theme.color.bgSubtle]}
+              colors={primaryReady ? gradient.colors : [theme.color.bgSubtle, theme.color.bgSubtle]}
               start={gradient.start}
               end={gradient.end}
               style={[styles.primary, { borderRadius: theme.radius.control }]}
             >
-              <Text variant="rowLabelStrong" color={ready ? '#ffffff' : theme.color.gray400}>
-                Pair and connect
-              </Text>
+              {saving ? (
+                <ActivityIndicator color={primaryReady ? '#ffffff' : theme.color.gray400} />
+              ) : (
+                <Text variant="rowLabelStrong" color={primaryReady ? '#ffffff' : theme.color.gray400}>
+                  {picking
+                    ? `Add ${chosen.size} ${chosen.size === 1 ? 'agent' : 'agents'}`
+                    : 'Pair and connect'}
+                </Text>
+              )}
             </LinearGradient>
           </Pressable>
         </ScrollView>
       </KeyboardInset>
     </View>
+  )
+}
+
+/** Null is a real scope — the default identity — so it needs its own key. */
+function identityKey(identity: AgentIdentity): string {
+  return identity.scope ?? ''
+}
+
+/** One discovered identity, ticked by default (§7.8). */
+function IdentityRow({
+  identity,
+  checked,
+  onToggle
+}: {
+  identity: AgentIdentity
+  checked: boolean
+  onToggle: () => void
+}) {
+  const theme = useTheme()
+
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked }}
+      onPress={onToggle}
+      style={styles.identityRow}
+    >
+      <Icon
+        name={checked ? 'circle-check' : 'circle'}
+        size={16}
+        color={checked ? theme.color.secondary : theme.color.gray400}
+      />
+      <View style={styles.identityText}>
+        <Text variant="rowLabelStrong">{identity.label}</Text>
+        {identity.hint ? <Text variant="monoSmall">{identity.hint}</Text> : null}
+      </View>
+    </Pressable>
   )
 }
 
@@ -434,6 +603,8 @@ const styles = StyleSheet.create({
   body: { paddingHorizontal: 16, paddingTop: 14, gap: 13 },
   kindCard: { flexDirection: 'row', alignItems: 'center', gap: 11, padding: 14 },
   kindText: { flex: 1, minWidth: 0, gap: 2 },
+  identityRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 6 },
+  identityText: { flex: 1, minWidth: 0, gap: 1 },
   field: { gap: 6 },
   input: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 12, borderWidth: 1 },
   inputText: { flex: 1, fontSize: 14 },

@@ -6,7 +6,7 @@ import { ActivityIndicator, Keyboard, Platform, StyleSheet, View } from 'react-n
 
 import type { TranscriptEntry } from '@/domain'
 import { useBackend, useConnectionState } from '@/state/ConnectionProvider'
-import { useSelectedAgent } from '@/state/agents'
+import { useSelectedServer } from '@/state/agents'
 import { useSidebar } from '@/state/sidebar'
 import { useSessionStream } from '@/state/session-stream'
 import { useIsStreaming } from '@/state/stream-tail'
@@ -35,7 +35,9 @@ import { useTheme } from '@/ui/ThemeProvider'
  */
 export default function ChatScreen() {
   const theme = useTheme()
-  const agent = useSelectedAgent()
+  // The approval sentence names the *host* the command would run on (§7.6),
+  // which is the server's rather than the agent's — several agents share one.
+  const server = useSelectedServer()
   const { id } = useLocalSearchParams<{ id: string }>()
   const backend = useBackend()
   const state = useConnectionState()
@@ -272,7 +274,7 @@ export default function ChatScreen() {
                     <View style={styles.approval}>
                       <ApprovalCard
                         request={stream.approval}
-                        hostName={agent.host}
+                        hostName={server.host}
                         onRespond={stream.respondToApproval}
                       />
                     </View>

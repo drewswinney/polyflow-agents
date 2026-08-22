@@ -1,6 +1,6 @@
 import { Pressable, StyleSheet, View } from 'react-native'
 
-import type { Agent } from '@/domain'
+import type { Agent, AgentConnection } from '@/domain'
 
 import { useTheme } from '../ThemeProvider'
 import { AgentGlyph, Icon } from './Icon'
@@ -11,14 +11,27 @@ import { Text } from './Text'
  * sits absolutely centered in the header, riding above the title's optical
  * centre. Sub-screens do not show it — the agent is established by how you got
  * there (design §Global chrome).
+ *
+ * Reachability is passed in rather than read off the agent: it belongs to the
+ * server (§5.2 rule 4), because it is one socket serving every agent on a host.
  */
-export function AgentPill({ agent, open, onPress }: { agent: Agent; open: boolean; onPress: () => void }) {
+export function AgentPill({
+  agent,
+  connection,
+  open,
+  onPress
+}: {
+  agent: Agent
+  connection: AgentConnection
+  open: boolean
+  onPress: () => void
+}) {
   const theme = useTheme()
 
   const dotColor =
-    agent.connection === 'connected'
+    connection === 'connected'
       ? theme.color.successDot
-      : agent.connection === 'idle'
+      : connection === 'idle'
         ? theme.color.gray400
         : theme.color.warning700
 

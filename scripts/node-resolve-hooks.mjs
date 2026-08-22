@@ -17,12 +17,26 @@ const ALIASES = [
 /**
  * Expo packages a check must not load, and what it gets instead.
  *
+ * AsyncStorage is here because the agent registry persists through it, and a
+ * check that migrates a stored `agents/v1` registry needs to *seed* one — so
+ * the stub is a real in-memory map rather than a thrower, and exports it.
+ *
  * `expo-file-system` is here because the Hermes backend reads an image off disk
  * with it. A check drives that path with `data:` URLs, which never reach the
  * file system — so the stub exists to satisfy the import, and throws if it is
  * ever actually called, rather than pretending to have read a file.
  */
 const STUBS = {
+  '@react-native-async-storage/async-storage': `
+    /** Exported so a check can seed a registry before hydrating one. */
+    export const __store = new Map()
+
+    export default {
+      getItem: key => Promise.resolve(__store.has(key) ? __store.get(key) : null),
+      setItem: (key, value) => { __store.set(key, value); return Promise.resolve() },
+      removeItem: key => { __store.delete(key); return Promise.resolve() }
+    }
+  `,
   'expo-file-system': `
     export class File {
       constructor(uri) { this.uri = uri }
