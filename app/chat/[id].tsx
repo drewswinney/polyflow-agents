@@ -374,5 +374,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 12,
+    backgroundColor: 'transparent',
+    pointerEvents: 'box-none',
   },
 })
