@@ -3,7 +3,7 @@ import { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 
 import { useBackend, useConnectionState } from '@/state/ConnectionProvider'
-import { useAgents, useSelectedAgent, useSelectedAgentOrNull, useSelectedServerOrNull } from '@/state/agents'
+import { useAgents, useSelectedAgent, useSelectedAgentOrNull, useSelectedServerOrNull, useSelectAgent } from '@/state/agents'
 import { useChatInbox } from '@/state/chat-inbox'
 import { useCreateSession } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
@@ -37,7 +37,7 @@ export default function NewSessionScreen() {
   const server = useSelectedServerOrNull()
   const servers = useAgents(state => state.servers)
   const agents = useAgents(state => state.agents)
-  const select = useAgents(state => state.select)
+  const selectAgent = useSelectAgent()
   const dismissAgent = useAgents(state => state.dismissAgent)
   const backend = useBackend()
   const state = useConnectionState()
@@ -119,7 +119,7 @@ export default function NewSessionScreen() {
         agents={agents}
         selectedId={agent.id}
         visible={switcherOpen}
-        onSelect={select}
+        onSelect={selectAgent}
         onDismissAgent={id => void dismissAgent(id)}
         onAddServer={() => router.push('/servers/new')}
         onDismiss={() => setSwitcherOpen(false)}

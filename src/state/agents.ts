@@ -11,8 +11,10 @@
 
 import AsyncStorage from '@react-native-async-storage/async-storage'
 import { create } from 'zustand'
+import { useQueryClient } from '@tanstack/react-query'
 
 import type { Agent, AgentConnection, AgentIconName, AgentId, AgentIdentity, Server, ServerId } from '@/domain'
+import { sessionsKey } from './queries'
 
 const STORAGE_KEY = 'agents/v2'
 /** Read once, on first hydrate after the upgrade, and then never written. */
@@ -350,4 +352,22 @@ export function useSelectedServer(): Server {
 /** Reachability, which is the server's (§5.2 rule 4), read for one agent. */
 export function useConnectionOf(agent: Agent | null): AgentConnection {
   return useAgents(state => state.servers.find(server => server.id === agent?.serverId)?.connection ?? 'offline')
+}
+
+/**
+ * Hook for selecting an agent and refreshing dependent queries.
+ *
+ * When switching agents, the React Query cache for sessions must be invalidated
+ * so fresh data loads for the new agent (§5.2). This wraps the select action
+ * with query invalidation.
+ */
+export function useSelectAgent() {
+  const queryClient = useQueryClient()
+  const select = useAgents(state => state.select)
+
+  return (id: AgentId) => {
+    // Invalidate sessions cache so fresh data loads for the newly selected agent
+    queryClient.invalidateQueries({ queryKey: sessionsKey(id) })
+    select(id)
+  }
 }
