@@ -153,8 +153,7 @@ main reason the design and this document disagree anywhere.
 | Design element | Reality | Resolution |
 |---|---|---|
 | Voice mode: `realtime · 180ms round trip`, barge-in | Audio is three request/response REST endpoints — `/api/audio/transcribe`, `/api/audio/speak`, `/api/audio/elevenlabs/voices`. No duplex channel exists | **Descoped to push-to-talk** (§7.9) |
-| Activity: CPU / memory / disk tiles | No `/api/monitoring`, `/metrics`, `/system` or `/host` endpoint. `hermes monitoring` is OTLP export to an operator endpoint, explicitly "content-free by construction" | **Tiles dropped**; ship what is backed (§7.5) |
-| Approval countdown, `expires 4:52` | `expires_at` appears only on OAuth types (`OAuthProviderStatus`, `OAuthPollResponse`). Approval requests carry no TTL | **No countdown** until the API grows one (§7.6) |
+| Approval countdown, `expires 4:52` | No `expires_at` on the wire — it appears only on OAuth types (`OAuthProviderStatus`, `OAuthPollResponse`). But the host *does* enforce one: `approvals.timeout`, default **300s**, read by `tools/approval.py::_get_approval_timeout()` and part of `DEFAULT_CONFIG`, so it is visible through `/api/config/schema` | **Countdown is buildable** off receipt time + the configured timeout (§7.6); not yet built |
 | QR pairing, `hermes pair` | `hermes pairing` is `list / approve / revoke / clear-pending`. No `pair` subcommand, no token issuance, no QR flow | **Manual host + token only** (§7.8) |
 
 ---
@@ -262,8 +261,8 @@ mid-turn the app must not guess whether a tool completed (§5.4, §7.16).
 
 Not every harness has cron jobs, skills or MCP servers. The backend declares what
 it supports and the UI omits what isn't there. The design draws this explicitly —
-a non-Hermes agent's Settings lists what it *doesn't* report as chips, and
-Activity explains the absence in a card rather than rendering blank tiles.
+a non-Hermes agent's Settings lists what it *doesn't* report as chips rather
+than rendering blank rows.
 
 ```ts
 interface Capabilities {
@@ -271,7 +270,7 @@ interface Capabilities {
   settings: { schemaDriven: boolean; model: boolean; providers: boolean }
   extras:   { cron: boolean; skills: boolean; mcp: boolean; profiles: boolean }
   approvals:{ requests: boolean; policy: boolean }
-  activity: { spend: boolean; events: boolean }
+  logs:     { events: boolean }
   media:    { images: boolean; audioIn: boolean; audioOut: boolean }
 }
 ```
@@ -352,6 +351,26 @@ Three rules follow, and all three are drawn in the design:
 Secrets go in `expo-secure-store` (Keychain / Android Keystore), never in
 AsyncStorage or Zustand-persisted state.
 
+### 5.2b Cleartext to a self-hosted host
+
+`hermes serve` speaks **plain HTTP** (§2.5), and both platforms block cleartext by
+default — iOS through App Transport Security, Android since API 28. The failure
+is silent and asymmetric in a way that is worth writing down, because it reads as
+"the host is down" when the host is fine: the `https` half of `probeScheme()`
+leaves the phone and lands as a TLS handshake on a plaintext port (uvicorn logs
+`Invalid HTTP request received`), while the `http` half never leaves the device
+at all, so the server log shows contact but no request.
+
+So the app declares `NSAllowsArbitraryLoads` and `usesCleartextTraffic`. That is
+a real reduction in transport security and is accepted for one reason: the agent
+is reached over a **WireGuard tunnel** (Tailscale) or an authenticated tunnel,
+and the alternative — terminating TLS on the host — is host work (§11) that
+Hermes does not do for you. If the host ever serves HTTPS, both exceptions
+should be narrowed or dropped.
+
+The same applies to the notification webhook endpoint (`docs/push-relay.md` §5),
+which is plaintext on its own port.
+
 ### 5.3 Auth flow
 
 Hermes offers three shapes; we support two:
@@ -361,16 +380,60 @@ Hermes offers three shapes; we support two:
    minted via `POST /api/auth/ws-ticket`, TTL **30 seconds**, consumed on upgrade.
 3. *(Not used)* the process-lifetime internal credential — server-spawned children only.
 
+### 5.3.1 What the host actually does
+
+Reading the server corrected shape 1. **Bearer tokens are not a general auth
+mode.** `hermes_cli/dashboard_auth/token_auth.py` only accepts a bearer token on
+routes explicitly registered with `register_token_route()`, and the only caller
+that registers one today is the `drain` plugin. Every `/api/*` route the app
+needs is gated on a **session**, not a token, so "paste a token" — which §7.8
+made the whole enrolment story — authenticates nothing on a stock install.
+
+What a self-hosted, non-loopback Hermes really runs is the built-in
+username/password provider (`HERMES_DASHBOARD_BASIC_AUTH_USERNAME` /
+`_PASSWORD`). `--insecure` cannot bypass it: it is a documented no-op since the
+June 2026 hardening. So the real flow is:
+
+```
+POST /auth/password-login  { provider, username, password }   → sets session cookies
+GET  /api/…                                                    → cookie, or Bearer <access token>
+POST /api/auth/ws-ticket                                       → { ticket, ttl_seconds: 30 }
+WSS  /api/ws?ticket=…                                          → single-use, consumed on upgrade
+```
+
+Three details that matter:
+
+- The access token is set as a **cookie** and never returned in the body, so the
+  client sends `credentials: 'include'` and lets the platform cookie store hold
+  it, rather than keeping a token in app memory.
+- **The ticket path is not OAuth-specific.** Any session-authenticated client
+  needs it, because a WebSocket upgrade cannot carry an `Authorization` header.
+  Password auth uses exactly the same mint-then-dial contract, and the 30-second
+  TTL binds just as hard.
+- `/api/auth/providers` and `/auth/password-login` are both public
+  (`_GATE_PUBLIC_PREFIXES`), which is what lets the app **ask the host what it
+  wants** before it has any credential. Add-an-agent probes `/api/status` and
+  that endpoint, so enrolment adapts to the host instead of assuming, and the
+  design's "reachability is checked before pairing" comes free.
+
+RFC 8252 native-app login (system browser + loopback + PKCE) exists at
+`/auth/native/authorize`, but the password provider declines it — that path is
+for OAuth providers such as Nous Portal. It is the natural third auth mode if a
+portal-backed agent ever needs supporting.
+
 The 30-second TTL has a hard design consequence: **mint the ticket immediately
 before opening the socket, never cache it, and re-mint on every reconnect.**
 A phone that wakes from background after an hour has a stale everything; the
 reconnect path must be mint-then-dial, in that order. `resolveGatewayWsUrl()` in
 `@hermes/shared` already implements exactly this — another argument for vendoring.
 
-Device enrolment uses `hermes pairing`: the user runs `hermes pairing approve` on
-the host, and `hermes pairing revoke` gives a real "lost my phone" story. Note
-that there is **no QR flow and no token-issuance command** (§2.6) — enrolment is
-host + token, typed (§7.8).
+`hermes pairing` is **not** device enrolment for this app — it manages DM pairing
+codes for messaging-platform users (Discord, Telegram), which is a different
+concept that happens to share the word. There is no QR flow and no
+token-issuance command (§2.6), and no per-device revocation for a phone client:
+revoking access means changing the dashboard password, which logs every device
+out. A per-device credential is a real gap, and the right shape for it is the
+token-route seam the `drain` plugin already uses.
 
 ### 5.4 Reconnect
 
@@ -400,29 +463,31 @@ client that replays from the last event it saw:
 agent-handheld/
 ├── app/                        # expo-router routes
 │   ├── (tabs)/
-│   │   ├── sessions.tsx
+│   │   ├── index.tsx           sessions (+ in-place search)
 │   │   ├── activity.tsx
-│   │   └── settings/
+│   │   └── settings.tsx
 │   ├── chat/[id].tsx
-│   └── onboarding/
+│   └── agents/new.tsx
 ├── src/
 │   ├── domain/                 ★ AgentBackend, Agent, models, capabilities
 │   ├── backends/
-│   │   ├── hermes/             REST client, WS client, event mapping
+│   │   ├── hermes/             REST client, gateway wiring, event mapping
+│   │   │   └── adapters/       wrappers over vendored code (never patches)
 │   │   ├── openai-compat/
-│   │   └── mock/
-│   ├── state/                  TanStack Query hooks, Zustand stores
+│   │   ├── mock/
+│   │   └── registry.ts         the one live backend (§5.2)
+│   ├── state/                  TanStack Query hooks, Zustand stores, stream tail
 │   ├── ui/                     components, theme tokens
-│   └── platform/               notifications, secure storage, haptics
+│   └── platform/               secure storage, RN polyfills
 ├── vendor/hermes/              vendored upstream TS (see §9)
+├── scripts/                    upstream sync, M0 checks
 └── docs/
     ├── architecture.md         this file
     └── design/                 visual handoff (README, canvas, screen map)
 ```
 
-The directory should be renamed from `agent-handheld-ios` → `agent-handheld`,
-matching `docs/design/github.md`, which already records the repo as
-`drewswinney/agent-handheld`. That remote does not exist yet.
+The directory and the remote are both `agent-handheld`, matching
+`docs/design/github.md`. `main` is the default branch.
 
 ---
 
@@ -433,17 +498,18 @@ Identical information architecture on both platforms; only the chrome differs.
 sizes, spacing and touch targets. This section covers **behaviour and API
 backing**; it deliberately does not duplicate the tokens.
 
-Three tabs: **Sessions · Activity · Settings**. Everything else is a sub-screen
-reached by a back chevron.
+Home is **New session** (§7.18). Navigation is a **slide-out sidebar** (§7.17),
+opened from the hamburger at the top-left of home, Sessions, Settings and chat —
+the four screens you move *between* rather than *into*. Everything else is a
+sub-screen reached by a back chevron.
 
 | # | Screen | Kind | Backed by |
 |---|---|---|---|
-| 7.1 | Sessions | tab | `/api/sessions` |
-| 7.2 | Chat | sub | `/api/ws`, `prompt.submit`, `process.kill` |
+| 7.1 | Sessions | top-level | `/api/sessions` |
+| 7.2 | Chat | sub | `/api/ws`, `prompt.submit`, `image.attach_bytes`, `process.kill` |
 | 7.3 | *(streaming performance)* | — | — |
-| 7.4 | Settings | tab | `/api/config/schema`, `/api/model/*` |
-| 7.5 | Activity | tab | `/api/analytics/usage`, `/api/logs` |
-| 7.6 | Approval sheet | modal | `approval.request` → `approval.respond` |
+| 7.4 | Settings | top-level | `/api/config/schema`, `/api/model/*` |
+| 7.6 | Approval card | in-transcript | `approval.request` → `approval.respond` |
 | 7.7 | Search | in-place | `/api/sessions/search` |
 | 7.8 | Pairing / onboarding | sub | `hermes pairing approve` (manual) |
 | 7.9 | Voice (push-to-talk) | sub | `/api/audio/transcribe`, `/api/audio/speak` |
@@ -454,6 +520,8 @@ reached by a back chevron.
 | 7.14 | Add an agent | sub | local + reachability probe |
 | 7.15 | Logs & events | sub | `/api/logs` |
 | 7.16 | Connection lost | state | — |
+| 7.17 | Sidebar | overlay | `/api/sessions` |
+| 7.18 | New session | home | `/api/sessions` (on first send) |
 
 ### 7.1 Sessions
 
@@ -478,11 +546,22 @@ The core screen and the one that earns the app.
 - **Tool calls as first-class cards** — name, argument summary, duration, status,
   collapsible output. Do not render tool traffic as chat text; on a phone it
   drowns the conversation
-- Composer: text, attachment, push-to-talk mic (§7.9)
+- Composer: text, attachment, push-to-talk mic (§7.9). An attachment is an image
+  from the library or the camera, downscaled and re-encoded on the phone, then
+  uploaded with `image.attach_bytes` *before* the `prompt.submit` that consumes
+  it. Gated on `capabilities.media.images`, so the clip is absent — not disabled
+  — against an agent that cannot take one (§4.1)
 - One 48px action slot with three states — disabled → send → **stop**. Cancel
   (`process.kill`) lives in the composer while streaming, *not* in the overflow menu
 - Overflow menu: rename session, switch model, view raw events
 - Usage/cost readout from `session.usage`
+
+Chat carries the **hamburger**, not a back chevron: it is where home lands you
+after the first message (§7.18), so it is a place you navigate away from through
+the sidebar rather than back out of. The stack is untouched — the Android back
+button and the iOS edge-swipe still pop it — only the chevron is gone. Its title
+keeps the smaller type: the session's own name is not a screen name and should
+not be set like one.
 
 ### 7.3 Streaming performance
 
@@ -509,25 +588,49 @@ non-Hermes agent shows only Model and Tools, plus a card naming what it doesn't
 report and a destructive "Remove this agent" row. Destructive actions require
 explicit confirmation.
 
-### 7.5 Activity
+### 7.5 Activity — removed
 
-Spend today against cap (`/api/analytics/usage`), uptime and round-trip latency
-(measured client-side), a dependency-down alert row, and an **event stream** of
-`tool.result` / `approval.granted` / `cron.fired` / `session.resumed` rows.
+The designed Activity tab is **cut**. Its 2×2 grid wanted CPU, memory and disk,
+none of which any endpoint backs (§2.6), leaving spend-today and turns-today as
+the only tiles with anything behind them — not a tab's worth of screen. Its
+event stream duplicated **Logs & events** (§7.15), which is reached from Settings
+and shows the same rows with payload detail. With the tab gone, `/api/analytics
+/usage` is no longer called and `capabilities.activity` collapses to
+`capabilities.logs.events`.
 
-The design's 2×2 grid also shows CPU, memory and disk. **Those three are cut** —
-no endpoint backs them (§2.6). Applying the design's own rule, the absence is
-stated once rather than rendered as blank tiles. If host metrics become
-worthwhile later, they need a companion service on the VM, not a Hermes change.
+### 7.6 Approval card
 
-### 7.6 Approval sheet
+**In the transcript, not over it.** The design draws a blocking bottom sheet over
+a dimmed transcript; the app ships an inline card instead. An approval halts
+*one* session — the host's wait is keyed by session (`human_wait_window(session_key)`)
+— so a modal blocks you from every other agent and session to no purpose, and its
+Android back button had to mean *deny*, which is a destructive default for a
+gesture people use to go back.
 
-Blocking bottom sheet over a dimmed transcript. Shield icon, plain-language
-consequence sentence naming the host, the exact command in a mono code block,
-then three outcomes: **Allow once** / **Always allow** / **Deny** →
-`approval.respond`. The held tool card shows `held`.
+Same content, same three outcomes: shield icon, plain-language consequence
+sentence naming the host, the exact command in a mono code block, then **Allow
+once** / **Always allow** / **Deny** → `approval.respond`. The held tool card
+still shows `held`.
 
-No expiry countdown (§2.6). If the API grows a TTL, the countdown is additive.
+What makes leaving safe rather than negligent:
+
+- **A countdown**, because the request expires. The event carries no `expires_at`,
+  but the host denies when `approvals.timeout` elapses (default 300s, §2.6). The
+  app reads that from config once per connection and anchors the deadline to
+  arrival — it cannot know when the host started waiting, and erring late would
+  show time that is already gone. No timeout reported means **no countdown**,
+  never an assumed one.
+- **An expired state.** Past the deadline the card stops offering buttons that
+  would only bounce, and says the host denied it.
+- **A bar above the composer** when the card is scrolled out of view, which
+  scrolls back to it rather than answering in place. A one-tap Allow you cannot
+  read the command from is the habit an approval prompt exists to prevent.
+- **The blocked marker on every list that leads back**: the session row's
+  "Waiting on your answer" strip (§7.1), and the chat header's `blocked on you`.
+
+Out-of-app delivery is the notification path's job ([`push-relay.md`](push-relay.md)),
+and it is what makes walking away a real option rather than a way to lose the
+request.
 
 ### 7.7 Search
 
@@ -604,6 +707,49 @@ Warning banner with retry countdown, a dashed **stream-cut marker** in the
 transcript, in-flight tool cards showing `unknown`, and a composer that queues the
 draft ("1 message queued — sends on reconnect"). See §5.4.
 
+### 7.17 Sidebar
+
+The app's primary navigation, in place of the bottom tab bar it replaced. Slides
+in from the left over a scrim, opened by the hamburger in each top-level header
+and dismissed by the scrim or the Android back button.
+
+It carries the two things reached for constantly — **New session**, which is
+home, and the eight most recent sessions — plus rows for **Sessions** and
+**Settings**. It
+deliberately does not try to be the sessions list: recency grouping, the blocked
+strip and search all stay on the Sessions screen (§7.1, §7.7), one row away. A
+drawer that reimplements the list ends up a worse list.
+
+Mounted once beside the router rather than inside a screen, so one instance
+serves every screen, and navigating to a top-level destination uses `navigate`
+rather than `push` — the drawer returns to a screen already on the stack instead
+of stacking a second copy of it.
+
+### 7.18 New session
+
+The app opens on an empty composer rather than a list, so the common case —
+telling the agent to do something — costs no navigation.
+
+**The session is created by the first message, not by arriving here.** Opening
+the app is not intent to start anything, and a session created on launch is one
+that has to be cleaned up on the host. On send, the app calls `createSession`,
+hands the text to chat through the same inbox voice uses (§7.9) and *pushes*
+`/chat/:id` — so backing out of a session you just started leaves you at home.
+Chat owns the one send path, which is why the first message is handed over
+rather than sent here (§5.4).
+
+Pushed rather than replaced, because home is the stack's root and the drawer
+returns to it with `navigate` (§7.17) — which can only return to a screen still
+on the stack. Replacing home took it off, so "New session" pushed a *second*
+home on top of the session it had just started, leaving that chat mounted and
+listening underneath. The message the inbox carries is addressed to its session
+for the same reason: more than one chat screen can be mounted, and an
+unaddressed message goes to whichever one is loaded, not to the one it was
+written for.
+
+No mic on this screen: dictation records into a session, and there is not one
+yet.
+
 ---
 
 ## 8. Design system
@@ -648,10 +794,43 @@ The payoff of the TypeScript choice — but only if managed deliberately.
 - CI typechecks against the vendored types, so an upstream break surfaces as a
   red build, not a runtime crash in the user's hand
 
-Known adaptation points: `hermes.ts` imports `@/global` (`HermesConnection`) and
-`@/store/transcript-tail`, both Electron-renderer concepts. These get mobile
-shims. `WebSocketLike` is typed as the DOM `WebSocket`, which React Native
-provides — likely compatible as-is, to be confirmed in the spike (§13).
+### 9.1 What M0 actually found
+
+The spike is done, and it corrected this section in three places. All three are
+recorded in `vendor/hermes/UPSTREAM.md`.
+
+**`hermes.ts` is not vendorable — it is the Electron bridge.** The plan above
+assumed all three paths would be vendored *and compiled*. Reading it changed
+that: every REST call goes through `window.hermesDesktop.api(...)`, and its
+connection descriptor comes from `window.hermesDesktop.getConnection()`. It is
+not an HTTP client with an Electron dependency; it is the IPC bridge itself, so
+on a phone there is nothing in it to run. `src/backends/hermes/rest.ts` is our
+own client instead, typed against the vendored types. The file is still vendored
+under `vendor/hermes/reference/`, excluded from the build, so `sync-upstream`
+can diff endpoint shapes against it — the "diff instead of re-port" argument
+holds; only the mechanism changed.
+
+The **types** are where the value actually was: 1,500 lines that change with
+every API addition, kept in sync for free.
+
+**Two React Native gaps in the vendored gateway client**, both real, both
+shimmed in `src/platform/polyfills.ts` rather than patched in `vendor/`:
+
+| Gap | Where | Effect if unshimmed |
+|---|---|---|
+| `URL` is a stub — no `protocol` | `connect()` validates with `new URL(wsUrl)` | Every connect throws *"requires a ws:// or wss:// URL string"* against a valid URL |
+| `DOMException` is not a global | `request()` rejects an abort with `new DOMException(…)` | An abort throws `ReferenceError` instead of rejecting |
+
+`WebSocketLike` is typed as the DOM `WebSocket`; React Native provides one with
+`addEventListener` and `WebSocket.OPEN`. **Confirmed compatible as-is** — no shim.
+
+**Upstream's `index.ts` cannot be the entry point.** Modules behind that barrel
+import siblings as `./billing-policy.js` (NodeNext convention); Metro resolves
+`.js` literally and the bundle fails. The barrel also drags in billing, charge
+settlement, cron triggers and skins, none of which a phone client touches.
+`src/backends/hermes/adapters/shared.ts` re-exports the three modules we use —
+all three have no imports at all — and `tsconfig` maps `@hermes/shared` to it, so
+call sites still read as if they import the upstream package.
 
 ---
 
@@ -674,15 +853,21 @@ The feature that makes a phone client meaningfully different from the desktop ap
 `approval.request` and `background.complete` (§2.4) are the triggers: the agent
 is blocked on you, or it finished while you were away.
 
-This requires a small server-side piece — Hermes has no push support today. **Use
-a relay on the host** that watches the event stream and posts to Expo's push
-service. Two facts from this document force that choice over reusing the
-messaging gateway:
+This requires a piece on the host — Hermes has no push support today. **Ship it as
+a Hermes plugin**, not as a service beside `hermes serve`: the app's own sessions
+already run inside the gateway (`Platform.API_SERVER`), so their approvals fire
+`pre_approval_request` in-process, where a plugin hook is already listening. The
+full inventory, event coverage and open questions are in
+[`push-relay.md`](push-relay.md).
+
+Two constraints survive from the earlier sidecar design and still shape it:
 
 - Only one agent holds a live socket (§5.2), so notifications for *other* agents
-  cannot come from the app at all
+  cannot come from the app at all — which is why delivery belongs on the host,
+  wherever it runs
 - The lock-screen **Allow / Deny** chips (§7.12) must round-trip
-  `approval.respond`, which needs a real endpoint, not a chat message
+  `approval.respond`, which needs a real endpoint, not a chat message. Plugin
+  hooks are observers and cannot answer an approval
 
 Until it exists, the app can only surface these while foregrounded — acceptable
 for v1, but it should be v1.1.
@@ -725,13 +910,23 @@ Before the app can connect to `10.0.0.68`:
 | Hermes API is undocumented and may change | Medium | It's the desktop app's own API — breaking it breaks their product too |
 | No push support in Hermes today | Medium | §10.2, deferred to v1.1 |
 | Four designed features have no API (§2.6) | Medium | Descoped in §7.5, §7.6, §7.8, §7.9 |
-| Design is light-mode only | Medium | Decide before M3; retrofitting a dark palette is expensive (§8) |
+| ~~Design is light-mode only~~ | Low | Every colour goes through theme tokens, so dark mode is a palette swap (§12 q1) |
 | Exact WS RPC params unverified | Low | Read from `hermes.ts`; confirm in spike |
 | No local Xcode | Low | EAS cloud builds (§10.1) |
 
 **Open questions**
 
-1. Dark mode in v1, or light-only and accept the retrofit cost later?
+1. ~~Dark mode in v1, or light-only and accept the retrofit cost later?~~
+   **Deferred, cheaply.** The app ships the light palette exactly as drawn, but
+   every colour resolves through `src/ui/theme.ts` and a provider — no component
+   names a hex value. Dark mode becomes a second palette rather than a refactor,
+   so the retrofit cost the risk table warned about is largely paid off already.
+
+   The provider also resolves **accent per agent**: `Agent.accent` overrides the
+   six accent tokens, so a glance at any screen can say which agent you are in.
+   The baseline Polyflow accent is used when an agent declares none — what the
+   per-agent palettes should actually be is a design decision, not one made in
+   code.
 2. Do we need Hermes multi-profile support in v1, or is one profile per agent enough?
 3. Is the OpenAI-compatible backend a v1 deliverable, or does v1 ship Hermes-only
    with the seam proven by `MockBackend`?
@@ -742,16 +937,23 @@ Before the app can connect to `10.0.0.68`:
 
 ## 13. Milestones
 
-| M | Deliverable | Proves |
-|---|---|---|
-| **M0** | Spike: vendor `@hermes/shared`, connect to `/api/ws` from Expo, print events | The whole thesis — that upstream TS runs unmodified on RN |
-| **M1** | Host prep (§11) + pairing/onboarding (§7.8) | Real remote connection over Tailscale |
-| **M2** | Sessions list + read-only transcript + search | REST layer, normalisation, agent scoping |
-| **M3** | Live chat: streaming, tool cards, approvals, cancel, reconnect | The core product |
-| **M4** | Settings from `/api/config/schema` + capability gating | G2, and the seam holding up |
-| **M5** | Activity, logs, agent switcher, add-agent | G6 |
-| **M6** | Android parity pass + EAS pipeline for both | G5 |
-| **M7** | Push relay + notification actions | G1 on a phone, properly |
+| M | Deliverable | Proves | Status |
+|---|---|---|---|
+| **M0** | Spike: vendor `@hermes/shared`, connect to `/api/ws`, print events | The whole thesis — that upstream TS runs unmodified on RN | **done** (§9.1) |
+| **M1** | Host prep (§11) + pairing/onboarding (§7.8) | Real remote connection over Tailscale | host prep is the owner's; the app side ships in M5's add-agent |
+| **M2** | Sessions list + read-only transcript + search | REST layer, normalisation, agent scoping | **done** |
+| **M3** | Live chat: streaming, tool cards, approvals, cancel, reconnect | The core product | **done** |
+| **M4** | Settings from `/api/config/schema` + capability gating | G2, and the seam holding up | **done** — the settings form is generated from the server's own schema |
+| **M5** | Logs, agent switcher, add-agent | G6 | **done** — the live event stream with payload detail, tools & integrations, switcher, add-agent (Activity itself was later cut, §7.5) |
+| **M6** | Android parity pass + EAS pipeline for both | G5 | both platforms bundle; `eas.json` carries development / preview / production profiles |
+| **M7** | Push relay + notification actions | G1 on a phone, properly | **blocked on host work** — the app half ships as local notifications; the relay's contract is specified in [`push-relay.md`](push-relay.md) |
 
-**M0 is the gate.** It is a day of work and it validates or kills the stack
-choice before anything is built on top of it. Do not skip it.
+**M0 was the gate**, and it held: the vendored client runs outside Electron, with
+two small shims and one correction to how much of it is vendorable (§9.1).
+`npm run check:m0` keeps that honest in CI without needing a host — it drives the
+vendored client through a fake socket and asserts the event normalisation.
+
+M2 and M3 are built against `MockBackend`, whose scripted turn exercises every
+branch Chat has to survive: streaming, a thinking block, a settling tool call, a
+blocking approval, usage ticks and cancellation. Pointing the same screens at a
+real host is a matter of §11 host prep and a pairing token — no app changes.

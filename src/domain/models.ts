@@ -1,0 +1,328 @@
+/**
+ * Harness-agnostic domain models.
+ *
+ * Nothing Hermes-shaped may appear here or above (architecture §3, §4.2).
+ * Backends normalise into these types at their boundary; the UI never sees a
+ * `snake_case` field or a Hermes event name.
+ */
+
+export type AgentId = string
+export type SessionId = string
+
+/** The kinds of harness an Agent can be backed by (§4). */
+export type AgentKind = 'hermes' | 'other'
+
+/** Coarse reachability, as drawn on the agent pill (design §Global chrome). */
+export type AgentConnection = 'connected' | 'idle' | 'offline'
+
+/**
+ * How the app authenticates against the host (§5.3).
+ *
+ * `password` is the one §5.3 did not anticipate and the one a self-hosted
+ * Hermes actually uses. A non-loopback bind requires an auth provider, and the
+ * built-in provider is username/password: the app posts credentials to
+ * `/auth/password-login`, the server mints a session, and the WebSocket is then
+ * dialled with a short-lived ticket. There is no paste-a-bearer-token path
+ * unless a token-only provider is configured.
+ */
+export type AuthMode = 'token' | 'oauth' | 'password'
+
+/**
+ * The single user-facing noun (§5.2). The harness is a *property* of an agent,
+ * never a concept the user meets.
+ */
+export interface Agent {
+  id: AgentId
+  displayName: string
+  kind: AgentKind
+  /** One distinct glyph per agent; keys into the icon set, not a font name. */
+  icon: AgentIconName
+  /** `host:port`, e.g. `hermes.tailnet.ts.net:9119`. */
+  host: string
+  authMode: AuthMode
+  /** Set for `password` auth. The secret itself lives in the keychain. */
+  username?: string
+  /** Which auth provider on the host to authenticate against, e.g. `basic`. */
+  authProvider?: string
+  /**
+   * Whether the host speaks TLS. Resolved by probing at add time rather than
+   * inferred from the address: `hermes serve` speaks plain HTTP, and a tailnet
+   * address is neither loopback nor public, so no rule about the address can
+   * answer this correctly.
+   */
+  secure?: boolean
+  /** Hermes multi-profile support; undefined → primary profile. */
+  profile?: string
+  /** Optional per-agent accent override; falls back to the base palette. */
+  accent?: AgentAccent
+  connection: AgentConnection
+  /** Last measured round trip, milliseconds. Undefined until first probe. */
+  latencyMs?: number
+  /** Seconds the host reports being up. Undefined when unknown. */
+  uptimeSeconds?: number
+}
+
+/**
+ * Per-agent accent, so a glance at any screen says which agent you are in.
+ * The baseline palette is used when an agent declares none.
+ */
+export interface AgentAccent {
+  /** Gradient start / links. */
+  primary: string
+  /** Gradient end / active tab / agent glyph. */
+  secondary: string
+  /** Text on tinted surfaces. */
+  secondaryDeep: string
+  /** Focused borders, dashed outlines. */
+  secondaryMuted: string
+  /** Icon tiles, selected rows. */
+  secondaryTint: string
+  /** The strong icon-tile tint. */
+  secondaryTintStrong: string
+}
+
+export type AgentIconName = 'home' | 'car' | 'flask' | 'cloud' | 'server' | 'terminal'
+
+export interface SessionSummary {
+  id: SessionId
+  title: string
+  /** One-line preview of the last message; empty for a fresh session. */
+  preview: string
+  /** Epoch milliseconds. */
+  updatedAt: number
+  pinned: boolean
+  unread: boolean
+  model: string | null
+  messageCount: number
+  /** Set when the agent is halted waiting on the user in this session. */
+  blockedOn: BlockedReason | null
+}
+
+export type BlockedReason = 'approval' | 'clarify' | 'sudo' | 'secret'
+
+export interface SessionQuery {
+  limit?: number
+  offset?: number
+  /** Free-text search; backends without search ignore it (see Capabilities). */
+  q?: string
+}
+
+export type MessageRole = 'user' | 'agent' | 'system'
+
+export interface ContentBlock {
+  kind: 'text' | 'image'
+  text?: string
+  /** Data URL or file URI for images. */
+  uri?: string
+  /** Image media type, e.g. `image/jpeg`. Set on `image` blocks. */
+  mimeType?: string
+  /** Filename hint. The host uses it to pick an extension when magic bytes are ambiguous. */
+  name?: string
+}
+
+/**
+ * An image on a settled user message.
+ *
+ * `name` is the filename the *host* stored, which is the only durable handle:
+ * a reloaded transcript carries `@image:<host path>` refs and nothing else, and
+ * the host serves no endpoint to read those bytes back. `uri` is this device's
+ * own copy of the same picture, kept so a reopened session still shows it —
+ * absent when the cache has been cleared, which renders as a name-only chip.
+ */
+export interface MessageImage {
+  name: string
+  uri?: string
+}
+
+/** A rendered transcript entry. Tool calls are their own entry kind. */
+export type TranscriptEntry =
+  | {
+      kind: 'message'
+      id: string
+      role: MessageRole
+      text: string
+      at: number
+      streaming?: boolean
+      /** Images the user sent with this message. Never set on agent rows. */
+      images?: MessageImage[]
+    }
+  | { kind: 'thinking'; id: string; text: string; at: number; durationMs?: number; streaming?: boolean }
+  | { kind: 'tool'; id: string; call: ToolCall }
+  | { kind: 'stream_cut'; id: string; at: number }
+
+export interface SessionTranscript {
+  sessionId: SessionId
+  title: string
+  model: string | null
+  entries: TranscriptEntry[]
+  usage: Usage | null
+  /**
+   * An approval still blocking this session, recovered on load.
+   *
+   * The live `approval.request` event fires once. A phone that was closed when
+   * it fired — the case notifications exist for — never sees it, so opening the
+   * session from a notification would show a halted agent and no way to answer.
+   * Hermes returns the outstanding prompt on resume for exactly this reason.
+   */
+  pendingApproval: PermissionRequest | null
+  /** A question still blocking this session, recovered on load. Same reason. */
+  pendingClarify: ClarifyRequest | null
+}
+
+/**
+ * `unknown` is first-class, not an error: when a socket drops mid-turn the app
+ * must not guess whether a tool completed (§4, §5.4, §7.16).
+ */
+export type ToolStatus = 'pending' | 'running' | 'ok' | 'error' | 'unknown'
+
+export interface ToolCall {
+  id: string
+  name: string
+  /** Short argument summary for the card header, already truncated. */
+  summary: string
+  status: ToolStatus
+  /** Present once the call finishes, or while it streams progress. */
+  output?: string
+  startedAt: number
+  durationMs?: number
+  /** True while the call is held behind an approval. */
+  held?: boolean
+}
+
+export interface PermissionRequest {
+  id: string
+  sessionId: SessionId
+  /** Tool the agent wants to run, e.g. `shell`. */
+  tool: string
+  /** The exact command, shown verbatim in a code block. */
+  command: string
+  /** Plain-language consequence sentence naming the host. */
+  description: string
+  sudo: boolean
+  /** False when the backend will not honour a permanent allow. */
+  allowPermanent: boolean
+  /** Epoch ms. Hermes carries no TTL today (§2.6); null until the API grows one. */
+  expiresAt: number | null
+}
+
+export type PermissionOutcome = 'allow_once' | 'allow_always' | 'deny'
+
+export interface ClarifyRequest {
+  id: string
+  sessionId: SessionId
+  question: string
+  /** Offered answers. Empty when the agent wants free text. */
+  choices: string[]
+  /** Whether more than one choice may be picked. */
+  multiSelect: boolean
+}
+
+export interface Usage {
+  inputTokens: number
+  outputTokens: number
+  /** Context window occupancy, tokens. */
+  contextTokens?: number
+  costUsd?: number
+}
+
+export type StopReason = 'end_turn' | 'cancelled' | 'error' | 'max_tokens'
+
+export interface AgentError {
+  message: string
+  /** Machine-readable where the backend gives one, e.g. `ECONNREFUSED`. */
+  code?: string
+  retryable: boolean
+}
+
+export interface NewSessionOptions {
+  title?: string
+  model?: string
+  /** Working directory on the host, when the harness has a notion of one. */
+  cwd?: string
+}
+
+/** A logged event row, as shown on Logs & events (§7.15). */
+export interface EventRecord {
+  id: string
+  at: number
+  name: string
+  detail: string
+  status: 'ok' | 'error' | 'info'
+  /** The session that raised it, when there was one. Lets a notification open it. */
+  sessionId?: SessionId
+  /** Full payload, pretty-printed on expansion. */
+  payload?: unknown
+}
+
+/**
+ * An MCP server as the API describes it.
+ *
+ * `/api/mcp/servers` reports configuration, not reachability — health needs an
+ * explicit `POST /api/mcp/servers/{name}/test`. So this models what is known
+ * (`on` / `off` and the tools it declares) rather than the design's
+ * "unreachable, retrying", which would be a guess.
+ */
+export interface McpServerStatus {
+  name: string
+  enabled: boolean
+  transport: string
+  toolCount: number
+  /** Null when the backend has not reported a tool list yet. */
+  tools: string[] | null
+}
+
+export interface SkillSummary {
+  name: string
+  category: string
+  description: string
+  enabled: boolean
+  /** 'agent' = learned locally, 'bundled' = ships with the harness, 'hub' = installed. */
+  provenance: 'agent' | 'bundled' | 'hub' | 'unknown'
+}
+
+export interface ModelOption {
+  /** The model id as the harness names it, e.g. `sonnet-4.5`. */
+  id: string
+  provider: string
+  selected: boolean
+}
+
+/**
+ * The approval policy, as one decision with one control (§7.10).
+ *
+ * These map onto Hermes's `approvals.mode` config key — `off` / `smart` /
+ * `manual` — which is why there are exactly three: the design's segmented
+ * control and the backend's enum happen to agree, and inventing a fourth
+ * option would have nothing to write to.
+ */
+export type ApprovalPolicy = 'nothing' | 'destructive' | 'every_tool'
+
+/**
+ * One setting, as the *server* describes it (§2.3).
+ *
+ * This is the highest-leverage decision in the app: the Settings UI renders
+ * from the schema the backend publishes rather than hardcoding a form per
+ * setting, so the app does not need a release every time Hermes adds a toggle.
+ */
+export interface ConfigField {
+  key: string
+  category: string
+  description: string
+  type: 'boolean' | 'list' | 'number' | 'select' | 'string' | 'text'
+  /** Only meaningful for `select`. */
+  options: string[]
+  /** Current value, always as a string — that is how `config.set` takes it. */
+  value: string
+}
+
+export interface CronJobSummary {
+  id: string
+  name: string
+  /** Human-readable schedule, e.g. `every day at 03:15`. */
+  schedule: string
+  enabled: boolean
+  nextRunAt: number | null
+  lastRunAt: number | null
+  lastError: string | null
+  model: string | null
+}
