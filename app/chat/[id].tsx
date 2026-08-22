@@ -371,10 +371,12 @@ const styles = StyleSheet.create({
   entry: { paddingVertical: 7 },
   approval: { paddingTop: 7 },
   scrollButtonContainer: {
+    position: 'absolute',
+    bottom: 12,
+    left: 0,
+    right: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    backgroundColor: 'transparent',
     pointerEvents: 'box-none',
   },
 })
