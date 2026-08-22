@@ -16,6 +16,7 @@ import { ClarifyCard } from '@/ui/components/ClarifyCard'
 import { Composer } from '@/ui/components/Composer'
 import { IconButton } from '@/ui/components/IconButton'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScrollToBottomButton } from '@/ui/components/ScrollToBottomButton'
 import { StreamingTail } from '@/ui/components/StreamingTail'
 import { Text } from '@/ui/components/Text'
 import { TranscriptEntryView } from '@/ui/components/TranscriptEntryView'
@@ -340,6 +341,12 @@ export default function ChatScreen() {
           <ApprovalNudge onPress={() => listRef.current?.scrollToEnd({ animated: true })} />
         ) : null}
 
+        {scrolledAway && placed ? (
+          <View style={styles.scrollButtonContainer}>
+            <ScrollToBottomButton onPress={() => listRef.current?.scrollToEnd({ animated: true })} />
+          </View>
+        ) : null}
+
         <Composer
           streaming={running}
           offline={state !== 'open'}
@@ -362,5 +369,12 @@ const styles = StyleSheet.create({
   list: { paddingHorizontal: 16, paddingVertical: 16 },
   header: { gap: 10, paddingBottom: 6 },
   entry: { paddingVertical: 7 },
-  approval: { paddingTop: 7 }
+  approval: { paddingTop: 7 },
+  scrollButtonContainer: {
+    position: 'absolute',
+    bottom: 12,
+    left: '50%',
+    transform: [{ translateX: -22 }],
+    zIndex: 10,
+  },
 })
