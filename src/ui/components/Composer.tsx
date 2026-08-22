@@ -137,8 +137,15 @@ export function Composer({
               accessibilityRole="button"
               accessibilityLabel="Attach an image"
               accessibilityState={{ disabled: picking }}
+              disabled={picking}
               onPress={chooseSource}
-              hitSlop={10}
+              // Grown to clear 44 without moving the glyph: a 15px icon is a
+              // 15px target, and the misses read as a dead button rather than
+              // as a miss. Kept inside the pill's own 48px box on every side,
+              // because Android does not deliver a touch that lands outside
+              // the parent's bounds however much slop is asked for.
+              hitSlop={{ top: 16, bottom: 16, left: 13, right: 12 }}
+              style={({ pressed }) => ({ opacity: pressed || picking ? 0.5 : 1 })}
             >
               <Icon name="paperclip" size={15} color={theme.color.gray400} />
             </Pressable>
