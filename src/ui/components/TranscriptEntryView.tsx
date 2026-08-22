@@ -194,7 +194,11 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 6,
     borderBottomLeftRadius: 12
   },
-  agentContent: { maxWidth: '85%', gap: 4 },
+  // Full width, unlike the user's bubble beside it. A bubble is a shape and
+  // wants a margin to read as one; the agent's reply is not a bubble but the
+  // page itself, and capping it only bought a ragged right edge and an empty
+  // gutter on a screen that has none to spare.
+  agentContent: { gap: 4 },
   buttonBar: {
     flexDirection: 'row',
     alignItems: 'center',
