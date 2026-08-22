@@ -26,7 +26,8 @@
     "lint": "expo lint",
     "sync:upstream": "./scripts/sync-upstream.sh",
     "spike:m0": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/m0-spike.mts",
-    "check:m0": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/m0-offline-check.mts"
+    "check:m0": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/m0-offline-check.mts",
+    "check:images": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/node-resolve.mjs scripts/images-offline-check.mts"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "~0.4.2",
@@ -47,6 +48,8 @@
     "expo-file-system": "~19.0.24",
     "expo-font": "~14.0.12",
     "expo-haptics": "~15.0.8",
+    "expo-image-manipulator": "~14.0.8",
+    "expo-image-picker": "~17.0.11",
     "expo-linear-gradient": "~15.0.8",
     "expo-linking": "~8.0.12",
     "expo-notifications": "~0.32.17",

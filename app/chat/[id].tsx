@@ -347,6 +347,7 @@ export default function ChatScreen() {
           onSend={stream.send}
           onStop={stream.cancel}
           onVoice={backend?.capabilities.media.audioIn ? () => router.push(`/voice/${id}`) : undefined}
+          canAttach={backend?.capabilities.media.images ?? false}
         />
       </KeyboardInset>
     </View>
