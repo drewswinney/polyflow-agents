@@ -3,10 +3,10 @@ import { useState } from 'react'
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { missingCapabilityLabels } from '@/domain'
+import { missingCapabilityLabels, NO_CAPABILITIES } from '@/domain'
 import { forgetAgentCredential, forgetPushConfig } from '@/platform/secure-store'
 import { useBackend, useConnectionState, useReconnect } from '@/state/ConnectionProvider'
-import { useAgents, useSelectedAgent, useSelectedAgentOrNull, useSelectedServerOrNull } from '@/state/agents'
+import { useAgents, useSelectedAgent, useSelectedAgentOrNull, useSelectedServerOrNull, useSelectAgent } from '@/state/agents'
 import { useSidebar } from '@/state/sidebar'
 import { AgentPill } from '@/ui/components/AgentPill'
 import { AgentSwitcher } from '@/ui/components/AgentSwitcher'
@@ -39,7 +39,7 @@ export default function SettingsScreen() {
   const server = useSelectedServerOrNull()
   const servers = useAgents(state => state.servers)
   const agents = useAgents(state => state.agents)
-  const select = useAgents(state => state.select)
+  const selectAgent = useSelectAgent()
   const dismissAgent = useAgents(state => state.dismissAgent)
   const removeServer = useAgents(state => state.removeServer)
   // Every agent this one removal would take with it, which is what its
@@ -88,8 +88,8 @@ export default function SettingsScreen() {
     )
   }
 
-  const capabilities = backend?.capabilities
-  const missing = capabilities ? missingCapabilityLabels(capabilities) : []
+  const capabilities = backend?.capabilities ?? NO_CAPABILITIES
+  const missing = missingCapabilityLabels(capabilities)
 
   // A row appears because the backend reports that surface *and* there is a
   // screen behind it. A row that navigates nowhere is worse than an absent one —
@@ -243,7 +243,7 @@ export default function SettingsScreen() {
         agents={agents}
         selectedId={agent.id}
         visible={switcherOpen}
-        onSelect={select}
+        onSelect={selectAgent}
         onDismissAgent={id => void dismissAgent(id)}
         onAddServer={() => router.push('/servers/new')}
         onDismiss={() => setSwitcherOpen(false)}
