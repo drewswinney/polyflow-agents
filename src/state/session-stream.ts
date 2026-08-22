@@ -17,6 +17,8 @@ import type {
   AgentBackend,
   ClarifyRequest,
   ConnectionState,
+  ContentBlock,
+  MessageImage,
   PermissionOutcome,
   PermissionRequest,
   SessionId,
@@ -26,8 +28,16 @@ import type {
   TranscriptEntry,
   Usage
 } from '@/domain'
+import type { PickedImage } from '@/platform/image-attachments'
 
+import { cacheSentImage, cachedImageUri } from './attachment-cache'
 import { createStreamTail, type StreamTail } from './stream-tail'
+
+/** A message waiting on a reconnect, images and all. */
+interface Outgoing {
+  text: string
+  images: PickedImage[]
+}
 
 export interface SessionStream {
   /** Settled entries only. The streaming tail renders separately (§7.3). */
@@ -39,11 +49,11 @@ export interface SessionStream {
   usage: Usage | null
   approval: PermissionRequest | null
   clarify: ClarifyRequest | null
-  /** Messages typed while disconnected; they send on reconnect. */
-  outbox: string[]
+  /** Messages composed while disconnected; they send on reconnect. */
+  outbox: Outgoing[]
   /** True from the first token until the turn ends, tool runs included. */
   turnActive: boolean
-  send: (text: string) => void
+  send: (text: string, images?: PickedImage[]) => void
   cancel: () => void
   respondToApproval: (outcome: PermissionOutcome) => void
   respondToClarify: (answer: string) => void
@@ -62,7 +72,7 @@ export function useSessionStream(
   const [usage, setUsage] = useState<Usage | null>(null)
   const [approval, setApproval] = useState<PermissionRequest | null>(null)
   const [clarify, setClarify] = useState<ClarifyRequest | null>(null)
-  const [outbox, setOutbox] = useState<string[]>([])
+  const [outbox, setOutbox] = useState<Outgoing[]>([])
   /**
    * Whether a turn is still running, including while a tool executes and no
    * tokens are arriving.
@@ -113,7 +123,9 @@ export function useSessionStream(
         // resumable (§5.4) — and handing the list a new array of identical rows
         // makes it re-key and jump to the top, throwing away wherever you were
         // reading for no gain.
-        setEntries(current => (sameEntries(current, loaded.entries) ? current : loaded.entries))
+        const restored = withCachedImages(sessionId, loaded.entries)
+
+        setEntries(current => (sameEntries(current, restored) ? current : restored))
         setUsage(loaded.usage)
         setLoadError(null)
 
@@ -271,30 +283,43 @@ export function useSessionStream(
     const queued = outbox
     setOutbox([])
 
-    for (const text of queued) {
-      void backend.prompt(sessionId, [{ kind: 'text', text }])
+    for (const message of queued) {
+      void dispatch(backend, sessionId, message, setEntries)
     }
   }, [connectionState, backend, sessionId, outbox])
 
   const send = useCallback(
-    (text: string) => {
+    (text: string, images: PickedImage[] = []) => {
       const trimmed = text.trim()
 
-      if (!trimmed) return
+      // An image on its own is a message. Only a genuinely empty composer is not.
+      if (!trimmed && images.length === 0) return
 
       const at = Date.now()
+      const message: Outgoing = { text: trimmed, images }
+
       setEntries(current => [
         ...current,
-        { kind: 'message', id: `user-${at}`, role: 'user', text: trimmed, at }
+        {
+          kind: 'message',
+          id: entryIdFor(message, at),
+          role: 'user',
+          text: trimmed,
+          at,
+          // Shown from the picked file straight away. The names are provisional
+          // until the agent answers with what it filed them under — see
+          // `dispatch`, which rewrites them in place.
+          ...(images.length ? { images: images.map(image => ({ name: image.name, uri: image.uri })) } : {})
+        }
       ])
 
       if (!backend || connectionState !== 'open') {
-        setOutbox(current => [...current, trimmed])
+        setOutbox(current => [...current, message])
 
         return
       }
 
-      void backend.prompt(sessionId, [{ kind: 'text', text: trimmed }])
+      void dispatch(backend, sessionId, message, setEntries)
     },
     [backend, connectionState, sessionId]
   )
@@ -348,6 +373,80 @@ export function useSessionStream(
 }
 
 /**
+ * A stable id for the bubble a message is drawn in, so the reply from `prompt`
+ * can find the row it belongs to after an await.
+ *
+ * Indexing would not do: a turn that lands while this one is in flight shifts
+ * every position after it.
+ */
+function entryIdFor(message: Outgoing, at: number): string {
+  return `user-${at}-${message.images.length}`
+}
+
+/**
+ * Send a message and file its images under the names the agent gave them.
+ *
+ * The renaming is the reason this is not a bare `prompt()` call. What the phone
+ * called an image is not what the transcript will call it on the next load, so
+ * the local copy is filed under the *agent's* name — and the bubble already on
+ * screen is relabelled to match, so the row survives the reload it is about to
+ * be replaced by.
+ */
+async function dispatch(
+  backend: AgentBackend,
+  sessionId: SessionId,
+  message: Outgoing,
+  setEntries: (update: (current: TranscriptEntry[]) => TranscriptEntry[]) => void
+): Promise<void> {
+  const content: ContentBlock[] = [
+    ...(message.text ? [{ kind: 'text' as const, text: message.text }] : []),
+    ...message.images.map(image => ({
+      kind: 'image' as const,
+      uri: image.uri,
+      mimeType: image.mimeType,
+      name: image.name
+    }))
+  ]
+
+  const result = await backend.prompt(sessionId, content)
+
+  if (!result.images.length) return
+
+  // Keyed by where the image came from, because that is the one field both
+  // sides of the round trip agree on.
+  const filed = new Map(
+    result.images.map(stored => [
+      stored.sourceUri,
+      { name: stored.name, uri: cacheSentImage(sessionId, stored.name, stored.sourceUri) ?? stored.sourceUri }
+    ])
+  )
+
+  setEntries(current =>
+    current.map(entry =>
+      entry.kind === 'message' && entry.images?.length
+        ? { ...entry, images: entry.images.map(image => (image.uri ? (filed.get(image.uri) ?? image) : image)) }
+        : entry
+    )
+  )
+}
+
+/**
+ * Point a loaded transcript's images at this device's copies.
+ *
+ * A reloaded turn carries the names the host stored and nothing else — there is
+ * no endpoint to fetch the bytes back — so a name that matches a cached file is
+ * the only way the picture reappears. One that does not stays name-only, which
+ * renders as a chip rather than a broken image.
+ */
+function withCachedImages(sessionId: SessionId, entries: TranscriptEntry[]): TranscriptEntry[] {
+  return entries.map(entry =>
+    entry.kind === 'message' && entry.images?.length
+      ? { ...entry, images: entry.images.map(image => ({ ...image, uri: image.uri ?? cachedImageUri(sessionId, image.name) })) }
+      : entry
+  )
+}
+
+/**
  * Whether a reload produced the transcript that is already on screen.
  *
  * Compares what an entry *says*, not the id it says it under. Ids are not
@@ -371,7 +470,9 @@ function sameEntries(current: TranscriptEntry[], next: TranscriptEntry[]): boole
 function saysTheSame(a: TranscriptEntry | undefined, b: TranscriptEntry | undefined): boolean {
   if (!a || !b || a.kind !== b.kind) return false
 
-  if (a.kind === 'message' && b.kind === 'message') return a.role === b.role && a.text === b.text
+  if (a.kind === 'message' && b.kind === 'message') {
+    return a.role === b.role && a.text === b.text && sameImages(a.images, b.images)
+  }
   if (a.kind === 'thinking' && b.kind === 'thinking') return a.text === b.text
   if (a.kind === 'tool' && b.kind === 'tool') {
     return a.call.id === b.call.id && a.call.status === b.call.status && a.call.output === b.call.output
@@ -380,6 +481,20 @@ function saysTheSame(a: TranscriptEntry | undefined, b: TranscriptEntry | undefi
   // A stream cut is local — the host has no such row — so two of them at the
   // same index is as close to equal as this gets.
   return a.kind === b.kind
+}
+
+/**
+ * Compared by name and by whether a picture is on hand.
+ *
+ * The second half matters: a reload that resolved a local copy for a row drawn
+ * without one is a real change — the difference between a chip and the image —
+ * and reporting it as equal would keep the chip on screen.
+ */
+function sameImages(a: MessageImage[] | undefined, b: MessageImage[] | undefined): boolean {
+  if (!a?.length && !b?.length) return true
+  if (a?.length !== b?.length) return false
+
+  return (a ?? []).every((image, index) => image.name === b?.[index].name && !!image.uri === !!b?.[index].uri)
 }
 
 function upsertTool(entries: TranscriptEntry[], call: ToolCall): TranscriptEntry[] {

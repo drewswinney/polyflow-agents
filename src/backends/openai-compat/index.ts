@@ -15,6 +15,7 @@ import {
   createObservable,
   type EventRecord,
   type Observable,
+  type PromptResult,
   type SessionUpdate,
   type Unsubscribe
 } from '@/domain'
@@ -85,7 +86,7 @@ export class OpenAiCompatBackend implements AgentBackend {
     return []
   }
 
-  async prompt(): Promise<void> {
+  async prompt(): Promise<PromptResult> {
     throw new NotImplemented('prompt')
   }
 

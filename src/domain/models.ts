@@ -114,11 +114,38 @@ export interface ContentBlock {
   text?: string
   /** Data URL or file URI for images. */
   uri?: string
+  /** Image media type, e.g. `image/jpeg`. Set on `image` blocks. */
+  mimeType?: string
+  /** Filename hint. The host uses it to pick an extension when magic bytes are ambiguous. */
+  name?: string
+}
+
+/**
+ * An image on a settled user message.
+ *
+ * `name` is the filename the *host* stored, which is the only durable handle:
+ * a reloaded transcript carries `@image:<host path>` refs and nothing else, and
+ * the host serves no endpoint to read those bytes back. `uri` is this device's
+ * own copy of the same picture, kept so a reopened session still shows it —
+ * absent when the cache has been cleared, which renders as a name-only chip.
+ */
+export interface MessageImage {
+  name: string
+  uri?: string
 }
 
 /** A rendered transcript entry. Tool calls are their own entry kind. */
 export type TranscriptEntry =
-  | { kind: 'message'; id: string; role: MessageRole; text: string; at: number; streaming?: boolean }
+  | {
+      kind: 'message'
+      id: string
+      role: MessageRole
+      text: string
+      at: number
+      streaming?: boolean
+      /** Images the user sent with this message. Never set on agent rows. */
+      images?: MessageImage[]
+    }
   | { kind: 'thinking'; id: string; text: string; at: number; durationMs?: number; streaming?: boolean }
   | { kind: 'tool'; id: string; call: ToolCall }
   | { kind: 'stream_cut'; id: string; at: number }

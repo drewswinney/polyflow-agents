@@ -74,7 +74,7 @@ export interface AgentBackend {
   searchSessions(query: string): Promise<SessionSearchHit[]>
 
   // Turns
-  prompt(id: SessionId, content: ContentBlock[]): Promise<void>
+  prompt(id: SessionId, content: ContentBlock[]): Promise<PromptResult>
   cancel(id: SessionId): Promise<void>
 
   // The agent asking us something
@@ -139,6 +139,29 @@ export interface AgentBackend {
   /** Requires `capabilities.media.audioOut`. Returns audio as a data URL. */
   speak(text: string): Promise<{ dataUrl: string; mimeType: string }>
 }
+
+/**
+ * What a submitted turn tells the caller about its images.
+ *
+ * The agent files an attached image under a name of its own choosing, and that
+ * name — not the one the phone picked it as — is the handle the stored
+ * transcript will refer to it by on every later load. Only the backend sees the
+ * renaming happen, so it is the only thing that can report it.
+ */
+export interface PromptResult {
+  /** One entry per image the agent accepted. Empty for a text-only turn. */
+  images: StoredImage[]
+}
+
+export interface StoredImage {
+  /** The name the agent filed it under. */
+  name: string
+  /** The `uri` of the `ContentBlock` it came from, so the caller can pair the two. */
+  sourceUri: string
+}
+
+/** A turn that carried nothing to report. */
+export const NO_IMAGES: PromptResult = { images: [] }
 
 export interface SessionSearchHit {
   sessionId: SessionId

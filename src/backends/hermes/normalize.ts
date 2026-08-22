@@ -7,8 +7,7 @@
 
 import type { SessionInfo, SessionMessage, SessionSearchResult } from '@hermes/types'
 
-import type { SessionSearchHit } from '@/domain'
-import type { SessionSummary, ToolCall, TranscriptEntry } from '@/domain'
+import type { MessageImage, SessionSearchHit, SessionSummary, ToolCall, TranscriptEntry } from '@/domain'
 
 import { coerceText } from './event-map'
 
@@ -148,18 +147,56 @@ export function toTranscriptEntries(messages: SessionMessage[]): TranscriptEntry
       entries.push({ kind: 'thinking', id: `think:${id}`, text: String(reasoning), at })
     }
 
-    const text = coerceText(message.content) || coerceText(message.text)
+    const raw = coerceText(message.content) || coerceText(message.text)
+    const role = message.role === 'user' ? 'user' : 'agent'
+    const { text, images } = role === 'user' ? splitImageRefs(raw) : { text: raw, images: [] }
 
-    if (!text) return
+    // A caption-less image is a real turn with nothing left once its refs are
+    // lifted out. Dropping it on empty text would erase the message that
+    // carried the picture.
+    if (!text && images.length === 0) return
 
     entries.push({
       kind: 'message',
       id,
-      role: message.role === 'user' ? 'user' : 'agent',
+      role,
       text,
-      at
+      at,
+      ...(images.length ? { images } : {})
     })
   })
 
   return entries
+}
+
+/**
+ * Hermes writes `@image:` directives; the domain speaks `MessageImage`.
+ *
+ * A user turn that carried images is persisted as the caption followed by one
+ * `@image:<path>` line per image — the same directive form the desktop client
+ * renders from. Left in the text it reads as a wall of host paths under every
+ * photo you ever sent, so it is lifted out here, at the boundary where
+ * everything else Hermes-shaped stops (§4.2).
+ *
+ * Only the basename survives. The path is the host's business, and the
+ * basename is what this device files its own copy of the image under.
+ */
+const IMAGE_REF = /@image:(?:`([^`]*)`|"([^"]*)"|'([^']*)'|(\S+))/g
+
+export function splitImageRefs(text: string): { text: string; images: MessageImage[] } {
+  if (!text.includes('@image:')) return { text, images: [] }
+
+  const images: MessageImage[] = []
+  const stripped = text.replace(IMAGE_REF, (_match, backtick, double, single, bare) => {
+    const path = backtick ?? double ?? single ?? bare ?? ''
+    const name = String(path).replace(/^.*[/\\]/, '')
+
+    if (name) images.push({ name })
+
+    return ''
+  })
+
+  // Refs are written one per line, so removing them leaves the blank lines they
+  // were on. Collapse those rather than opening a gap under every caption.
+  return { text: stripped.replace(/[ \t]+$/gm, '').replace(/\n{2,}/g, '\n\n').trim(), images }
 }
