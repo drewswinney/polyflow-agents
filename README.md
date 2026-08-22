@@ -33,14 +33,26 @@ Tokens go to the Keychain / Android Keystore, never to AsyncStorage.
 ## Checks
 
 ```bash
-npm run typecheck    # includes the vendored upstream types
-npm run check:m0     # the M0 gate, without needing a host
-npm run spike:m0     # the M0 gate against a live `hermes serve`
+npm run typecheck     # includes the vendored upstream types
+npm run check:m0      # the M0 gate, without needing a host
+npm run check:images  # image attachments, without needing a host
+npm run spike:m0      # the M0 gate against a live `hermes serve`
 ```
 
 `check:m0` is the one that matters in CI. It drives the *vendored, unmodified*
 upstream gateway client through a fake socket and asserts that real-shaped
 Hermes frames normalise into the domain's `SessionUpdate` union.
+
+`check:images` covers the one thing about sending a picture that types cannot:
+`image.attach_bytes` queues a file *on the session* and the next `prompt.submit`
+consumes the queue, so a submit that overtakes an attach does not fail — it
+sends the text alone and leaves the image for the next message to swallow. The
+check drives the real `HermesBackend.prompt()` against a gateway that answers on
+a later tick, so an unawaited attach is caught rather than looking correct.
+
+Both run under plain Node via `scripts/node-resolve.mjs`, which teaches it the
+`@/` and `@hermes/` aliases and stubs the Expo native modules — so a check
+exercises the code that ships rather than a copy of it.
 
 `spike:m0` needs a running backend:
 

@@ -8,6 +8,8 @@
  * mint-then-dial contract the 30-second ticket TTL demands (§5.3).
  */
 
+import { File } from 'expo-file-system'
+
 import {
   buildHermesWebSocketUrl,
   type ConnectionState as GatewayConnectionState,
@@ -29,6 +31,9 @@ import {
   type McpServerStatus,
   type ModelOption,
   type NewSessionOptions,
+  NO_IMAGES,
+  type PromptResult,
+  type StoredImage,
   type ClarifyRequest,
   type PermissionRequest,
   type Observable,
@@ -79,6 +84,24 @@ interface ResumeResult {
  * ceiling rather than the generic default (upstream `hermes.ts`).
  */
 const PROMPT_SUBMIT_TIMEOUT_MS = 1_800_000
+
+/**
+ * How long an image upload may take.
+ *
+ * Generous against the gateway's own 25 MB ceiling on a phone radio, and well
+ * short of the submit timeout: an attach that has not landed is a turn that
+ * must not be sent, so this failing is the useful outcome, not a lost image.
+ */
+const IMAGE_ATTACH_TIMEOUT_MS = 120_000
+
+/**
+ * What an uncaptioned image asks.
+ *
+ * Matches the host's own wording for the same situation
+ * (`_build_image_ref_message`), so a turn reads identically whichever client
+ * sent it.
+ */
+const IMPLIED_IMAGE_PROMPT = 'What do you see in this image?'
 
 /**
  * How long a password login is assumed good for.
@@ -461,18 +484,72 @@ export class HermesBackend implements AgentBackend {
 
   // --- Turns --------------------------------------------------------------
 
-  async prompt(id: SessionId, content: ContentBlock[]): Promise<void> {
+  async prompt(id: SessionId, content: ContentBlock[]): Promise<PromptResult> {
     const text = content
       .filter(block => block.kind === 'text')
       .map(block => block.text ?? '')
       .join('\n')
       .trim()
 
-    if (!text) return
+    const images = content.filter(block => block.kind === 'image' && block.uri)
+
+    if (!text && images.length === 0) return NO_IMAGES
 
     const runtimeId = await this.runtimeIdFor(id)
 
-    await this.gateway.request('prompt.submit', { session_id: runtimeId, text }, PROMPT_SUBMIT_TIMEOUT_MS)
+    // Attach, then submit — in that order, and awaited.
+    //
+    // The gateway has no way to take an image *in* `prompt.submit`. An attach
+    // queues the file on the session and the next submit consumes the queue
+    // (`_enqueue_prompt` claims `attached_images` and clears it), so a submit
+    // that overtakes an attach sends the text alone and leaves the image to
+    // ambush whatever the user types next.
+    const stored: StoredImage[] = []
+
+    for (const block of images) {
+      const name = await this.attachImage(runtimeId, block)
+
+      if (name) stored.push({ name, sourceUri: block.uri as string })
+    }
+
+    await this.gateway.request(
+      'prompt.submit',
+      // An image with no caption is a real message — "what is this?" is implied
+      // — but the host reads an empty `text` as nothing to do. Say the implied
+      // thing rather than dropping a turn the user meant to send.
+      { session_id: runtimeId, text: text || IMPLIED_IMAGE_PROMPT },
+      PROMPT_SUBMIT_TIMEOUT_MS
+    )
+
+    return { images: stored }
+  }
+
+  /**
+   * Upload one image and return the filename the host stored it as.
+   *
+   * `image.attach_bytes` is the remote-client path: the phone's file exists
+   * only on the phone, so the bytes go up base64 and the gateway writes them
+   * into its own images dir. Everything past that — the model's native image
+   * content, the `@image:` ref on the persisted turn — is the same pipeline a
+   * local paste goes through.
+   */
+  private async attachImage(runtimeId: string, block: ContentBlock): Promise<string | null> {
+    const uri = block.uri as string
+    const base64 = uri.startsWith('data:') ? uri.slice(uri.indexOf(',') + 1) : await new File(uri).base64()
+
+    const attached = await this.gateway.request<{ attached?: boolean; path?: string }>(
+      'image.attach_bytes',
+      {
+        session_id: runtimeId,
+        content_base64: base64,
+        ...(block.name ? { filename: block.name } : {})
+      },
+      IMAGE_ATTACH_TIMEOUT_MS
+    )
+
+    if (!attached?.path) return null
+
+    return attached.path.replace(/^.*[/\\]/, '')
   }
 
   async cancel(id: SessionId): Promise<void> {

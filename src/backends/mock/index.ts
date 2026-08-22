@@ -15,6 +15,7 @@ import {
   type ConnectionState,
   createObservable,
   type ContentBlock,
+  type PromptResult,
   type CronJobSummary,
   type EventRecord,
   type McpServerStatus,
@@ -40,7 +41,7 @@ export const MOCK_CAPABILITIES: Capabilities = {
   logs: { events: true },
   // Push-to-talk is exercisable against the mock; speech synthesis is not, and
   // says so rather than returning silence.
-  media: { images: false, audioIn: true, audioOut: false }
+  media: { images: true, audioIn: true, audioOut: false }
 }
 
 const MINUTE = 60_000
@@ -265,7 +266,7 @@ export class MockBackend implements AgentBackend {
       })
   }
 
-  async prompt(id: SessionId, content: ContentBlock[]): Promise<void> {
+  async prompt(id: SessionId, content: ContentBlock[]): Promise<PromptResult> {
     this.cancelled.delete(id)
     const text = content.map(block => block.text ?? '').join(' ').trim()
     const session = this.sessions.find(row => row.id === id)
@@ -277,6 +278,15 @@ export class MockBackend implements AgentBackend {
     }
 
     void this.runTurn(id)
+
+    // The mock has no host to rename anything, so it answers with the names the
+    // caller already knows. That is enough for the transcript-cache path to be
+    // exercised without a server, which is the point of the mock (§4).
+    return {
+      images: content
+        .filter(block => block.kind === 'image' && block.uri)
+        .map(block => ({ name: block.name ?? 'image.jpg', sourceUri: block.uri as string }))
+    }
   }
 
   async cancel(id: SessionId): Promise<void> {

@@ -1,7 +1,9 @@
 import { LinearGradient } from 'expo-linear-gradient'
 import { useState } from 'react'
-import { Pressable, StyleSheet, TextInput, View } from 'react-native'
+import { Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 import Animated from 'react-native-reanimated'
+
+import { PermissionDenied, type PickedImage, type PickSource, pickImages } from '@/platform/image-attachments'
 
 import { useBottomBarPadding } from '../keyboard'
 import { useGradient, useTheme } from '../ThemeProvider'
@@ -27,16 +29,20 @@ export function Composer({
   queued,
   onSend,
   onStop,
-  onVoice
+  onVoice,
+  canAttach = false
 }: {
   streaming: boolean
   offline: boolean
   queued: number
-  onSend: (text: string) => void
+  onSend: (text: string, images: PickedImage[]) => void
   onStop: () => void
   /** Omitted when the agent reports no audio input — the mic is then absent,
    *  not disabled (§4.1). */
   onVoice?: () => void
+  /** False when the agent reports no image support; the clip is then absent,
+   *  not disabled (§4.1). */
+  canAttach?: boolean
 }) {
   const theme = useTheme()
   const gradient = useGradient()
@@ -44,15 +50,48 @@ export function Composer({
   // to the keyboard's top edge while you swipe it away (§7.2).
   const bottomPadding = useBottomBarPadding(10)
   const [draft, setDraft] = useState('')
+  const [images, setImages] = useState<PickedImage[]>([])
+  const [picking, setPicking] = useState(false)
 
   const typing = draft.trim().length > 0
-  const action: ActionState = typing ? (offline ? 'queue' : 'send') : streaming ? 'stop' : 'idle'
+  // A picture with no caption is a message; the send button has to agree, or
+  // the only way to send one would be to type something first.
+  const sendable = typing || images.length > 0
+  const action: ActionState = sendable ? (offline ? 'queue' : 'send') : streaming ? 'stop' : 'idle'
 
   const submit = () => {
-    if (!typing) return
+    if (!sendable) return
 
-    onSend(draft)
+    onSend(draft, images)
     setDraft('')
+    setImages([])
+  }
+
+  const attach = async (source: PickSource) => {
+    setPicking(true)
+
+    try {
+      const picked = await pickImages(source)
+
+      if (picked.length) setImages(current => [...current, ...picked])
+    } catch (cause) {
+      Alert.alert(
+        'Could not attach',
+        cause instanceof PermissionDenied ? cause.message : cause instanceof Error ? cause.message : String(cause)
+      )
+    } finally {
+      setPicking(false)
+    }
+  }
+
+  const chooseSource = () => {
+    if (picking) return
+
+    Alert.alert('Attach an image', undefined, [
+      { text: 'Photo Library', onPress: () => void attach('library') },
+      { text: 'Take Photo', onPress: () => void attach('camera') },
+      { text: 'Cancel', style: 'cancel' }
+    ])
   }
 
   return (
@@ -69,6 +108,18 @@ export function Composer({
         </Text>
       ) : null}
 
+      {images.length > 0 ? (
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
+          {images.map(image => (
+            <Staged
+              key={image.uri}
+              image={image}
+              onRemove={() => setImages(current => current.filter(row => row.uri !== image.uri))}
+            />
+          ))}
+        </ScrollView>
+      ) : null}
+
       <View style={styles.row}>
         <View
           style={[
@@ -81,7 +132,17 @@ export function Composer({
             }
           ]}
         >
-          <Icon name="paperclip" size={15} color={theme.color.gray400} />
+          {canAttach ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Attach an image"
+              accessibilityState={{ disabled: picking }}
+              onPress={chooseSource}
+              hitSlop={10}
+            >
+              <Icon name="paperclip" size={15} color={theme.color.gray400} />
+            </Pressable>
+          ) : null}
           <TextInput
             value={draft}
             onChangeText={setDraft}
@@ -118,6 +179,30 @@ export function Composer({
         />
       </View>
     </Animated.View>
+  )
+}
+
+/** One picked image waiting to be sent, with the way to change your mind. */
+function Staged({ image, onRemove }: { image: PickedImage; onRemove: () => void }) {
+  const theme = useTheme()
+
+  return (
+    <View>
+      <Image
+        source={{ uri: image.uri }}
+        style={[styles.thumb, { borderColor: theme.color.border, borderRadius: theme.radius.control }]}
+        accessibilityLabel={image.name}
+      />
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Remove ${image.name}`}
+        onPress={onRemove}
+        hitSlop={8}
+        style={[styles.remove, { backgroundColor: theme.color.gray800 }]}
+      >
+        <Icon name="xmark" size={9} color="#ffffff" />
+      </Pressable>
+    </View>
   )
 }
 
@@ -173,6 +258,18 @@ function ActionButton({
 const styles = StyleSheet.create({
   wrap: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingTop: 10, gap: 8 },
   queued: { paddingHorizontal: 4 },
+  strip: { flexDirection: 'row', gap: 8, paddingHorizontal: 4, paddingTop: 2, paddingRight: 8 },
+  thumb: { width: 56, height: 56, borderWidth: StyleSheet.hairlineWidth },
+  remove: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
   row: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   field: {
     flex: 1,

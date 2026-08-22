@@ -506,7 +506,7 @@ sub-screen reached by a back chevron.
 | # | Screen | Kind | Backed by |
 |---|---|---|---|
 | 7.1 | Sessions | top-level | `/api/sessions` |
-| 7.2 | Chat | sub | `/api/ws`, `prompt.submit`, `process.kill` |
+| 7.2 | Chat | sub | `/api/ws`, `prompt.submit`, `image.attach_bytes`, `process.kill` |
 | 7.3 | *(streaming performance)* | — | — |
 | 7.4 | Settings | top-level | `/api/config/schema`, `/api/model/*` |
 | 7.6 | Approval card | in-transcript | `approval.request` → `approval.respond` |
@@ -546,7 +546,11 @@ The core screen and the one that earns the app.
 - **Tool calls as first-class cards** — name, argument summary, duration, status,
   collapsible output. Do not render tool traffic as chat text; on a phone it
   drowns the conversation
-- Composer: text, attachment, push-to-talk mic (§7.9)
+- Composer: text, attachment, push-to-talk mic (§7.9). An attachment is an image
+  from the library or the camera, downscaled and re-encoded on the phone, then
+  uploaded with `image.attach_bytes` *before* the `prompt.submit` that consumes
+  it. Gated on `capabilities.media.images`, so the clip is absent — not disabled
+  — against an agent that cannot take one (§4.1)
 - One 48px action slot with three states — disabled → send → **stop**. Cancel
   (`process.kill`) lives in the composer while streaming, *not* in the overflow menu
 - Overflow menu: rename session, switch model, view raw events
