@@ -6,7 +6,6 @@ import Animated from 'react-native-reanimated'
 import { useBottomBarPadding } from '../keyboard'
 import { useGradient, useTheme } from '../ThemeProvider'
 import { Icon } from './Icon'
-import { ScrollToBottomButton } from './ScrollToBottomButton'
 import { Text } from './Text'
 
 /**
@@ -28,9 +27,7 @@ export function Composer({
   queued,
   onSend,
   onStop,
-  onVoice,
-  showScrollButton = false,
-  onScrollToBottom
+  onVoice
 }: {
   streaming: boolean
   offline: boolean
@@ -40,8 +37,6 @@ export function Composer({
   /** Omitted when the agent reports no audio input — the mic is then absent,
    *  not disabled (§4.1). */
   onVoice?: () => void
-  showScrollButton?: boolean
-  onScrollToBottom?: () => void
 }) {
   const theme = useTheme()
   const gradient = useGradient()
@@ -121,10 +116,6 @@ export function Composer({
           // so the icon and what pressing it does cannot drift apart.
           onPress={action === 'stop' ? onStop : submit}
         />
-
-        {showScrollButton && onScrollToBottom ? (
-          <ScrollToBottomButton onPress={onScrollToBottom} />
-        ) : null}
       </View>
     </Animated.View>
   )
@@ -182,7 +173,7 @@ function ActionButton({
 const styles = StyleSheet.create({
   wrap: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingTop: 10, gap: 8 },
   queued: { paddingHorizontal: 4 },
-  row: { flexDirection: 'row', alignItems: 'flex-end', gap: 6 },
+  row: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
   field: {
     flex: 1,
     minHeight: 48,
