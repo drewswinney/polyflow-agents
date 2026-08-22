@@ -334,17 +334,20 @@ export default function ChatScreen() {
                 requestAnimationFrame(() => setPlaced(true))
               }}
             />
+
+            {/* Anchored to the transcript's own bottom edge, which *is* the top
+                of the composer: the list is the flex child above it. Pinning to
+                the screen instead would put the button under the composer. */}
+            {scrolledAway && placed ? (
+              <View style={styles.scrollButtonContainer}>
+                <ScrollToBottomButton onPress={() => listRef.current?.scrollToEnd({ animated: true })} />
+              </View>
+            ) : null}
           </View>
         )}
 
         {(stream.approval || stream.clarify) && scrolledAway ? (
           <ApprovalNudge onPress={() => listRef.current?.scrollToEnd({ animated: true })} />
-        ) : null}
-
-        {scrolledAway && placed ? (
-          <View style={styles.scrollButtonContainer}>
-            <ScrollToBottomButton onPress={() => listRef.current?.scrollToEnd({ animated: true })} />
-          </View>
         ) : null}
 
         <Composer
@@ -372,9 +375,10 @@ const styles = StyleSheet.create({
   approval: { paddingTop: 7 },
   scrollButtonContainer: {
     position: 'absolute',
-    bottom: '100%',
-    alignSelf: 'center',
-    marginBottom: 20,
-    pointerEvents: 'box-none',
-  },
+    left: 0,
+    right: 0,
+    bottom: 20,
+    alignItems: 'center',
+    pointerEvents: 'box-none'
+  }
 })
