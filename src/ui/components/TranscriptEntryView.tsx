@@ -74,7 +74,7 @@ function UserBubble({ text, images }: { text: string; images?: MessageImage[] })
               accessibilityRole="button"
               accessibilityLabel={copied ? 'Copied' : 'Copy message'}
               onPress={handleCopy}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              hitSlop={COPY_HIT_SLOP}
               style={styles.copyButton}
             >
               <Icon name={copied ? 'check' : 'copy'} size={12} color="#9ca3af" />
@@ -140,7 +140,7 @@ function AgentText({ text, role }: { text: string; role: 'agent' | 'system' }) {
             accessibilityRole="button"
             accessibilityLabel={copied ? 'Copied' : 'Copy message'}
             onPress={handleCopy}
-            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            hitSlop={COPY_HIT_SLOP}
             style={styles.copyButton}
           >
             <Icon name={copied ? 'check' : 'copy'} size={12} color={theme.color.secondary} />
@@ -158,7 +158,7 @@ function AgentText({ text, role }: { text: string; role: 'agent' | 'system' }) {
           accessibilityRole="button"
           accessibilityLabel={copied ? 'Copied' : 'Copy message'}
           onPress={handleCopy}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          hitSlop={COPY_HIT_SLOP}
           style={styles.copyButton}
         >
           <Icon name={copied ? 'check' : 'copy'} size={12} color={theme.color.secondary} />
@@ -232,9 +232,28 @@ function StreamCut({ at }: { at: number }) {
   )
 }
 
+/**
+ * Growth room for the copy button, which is small on purpose.
+ *
+ * Deliberately shorter on top than `MESSAGE_GAP`: a slop that reached past the
+ * gap put the button's touch target *inside the message above it*, so a tap
+ * meant for the last line of a reply copied it instead. Below and to the sides
+ * there is nothing to steal from.
+ */
+const COPY_HIT_SLOP = { top: 6, bottom: 10, left: 10, right: 10 }
+
+/**
+ * Between a message and its own button bar.
+ *
+ * Text grows with the reader's text-size setting and this does not, so the gap
+ * has to be one that still reads as a gap at the largest of them — at 4 the bar
+ * arrived crowded against the last line well before the accessibility sizes.
+ */
+const MESSAGE_GAP = 8
+
 const styles = StyleSheet.create({
   userRow: { alignItems: 'flex-end' },
-  userContent: { maxWidth: '80%', gap: 4 },
+  userContent: { maxWidth: '80%', gap: MESSAGE_GAP },
   sentImages: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end' },
   sentImage: { width: 140, height: 140, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth },
   imageChip: {
@@ -254,10 +273,17 @@ const styles = StyleSheet.create({
     borderBottomRightRadius: 6,
     borderBottomLeftRadius: 12
   },
-  agentContent: { maxWidth: '85%', gap: 4 },
+  // Full width, unlike the user's bubble beside it. A bubble is a shape and
+  // wants a margin to read as one; the agent's reply is not a bubble but the
+  // page itself, and capping it only bought a ragged right edge and an empty
+  // gutter on a screen that has none to spare.
+  agentContent: { gap: MESSAGE_GAP },
   buttonBar: {
     flexDirection: 'row',
     alignItems: 'center',
+    // Reserved rather than implied: the row keeps its own height whatever the
+    // icon inside it measures, so nothing above can settle into it.
+    minHeight: 20,
     gap: 4,
     paddingLeft: 4
   },

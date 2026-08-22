@@ -16,6 +16,7 @@ import { ClarifyCard } from '@/ui/components/ClarifyCard'
 import { Composer } from '@/ui/components/Composer'
 import { IconButton } from '@/ui/components/IconButton'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScrollToBottomButton } from '@/ui/components/ScrollToBottomButton'
 import { StreamingTail } from '@/ui/components/StreamingTail'
 import { Text } from '@/ui/components/Text'
 import { TranscriptEntryView } from '@/ui/components/TranscriptEntryView'
@@ -49,19 +50,41 @@ export default function ChatScreen() {
   const running = streaming || stream.turnActive
 
   /**
-   * Whether the transcript is parked at the bottom.
+   * The transcript's two states (§7.3).
    *
-   * Only decides whether a *pending approval* is worth yanking the view to, and
-   * whether the keyboard rising should take the tail with it. A ref, not state,
-   * because it changes on every scroll frame and nothing should re-render.
+   * *Following* is the resting state: the view is parked at the end and stays
+   * there, so a reply arriving while you watch pushes the view down as it lands
+   * and the newest line is always the one on screen.
+   *
+   * *Manual* is what dragging away from the end buys you — nothing may move the
+   * view again until you ask for it back. Arrivals still land, silently, below
+   * the fold.
+   *
+   * A ref, because the decision is read inside scroll and layout callbacks that
+   * run every frame; mirrored to state, because the button that hands following
+   * back renders off it and only the crossing may cost a render.
    */
-  const atBottom = useRef(true)
+  const following = useRef(true)
+  const [manual, setManual] = useState(false)
+
+  const setFollowing = useCallback((next: boolean) => {
+    following.current = next
+    setManual(current => (current === !next ? current : !next))
+  }, [])
 
   /**
-   * Mirrors `atBottom` as state, but only crossing the threshold re-renders —
-   * this drives the pending-approval bar, and nothing else may pay per frame.
+   * Whether a finger is on the transcript.
+   *
+   * Only a drag may break the follow. Pinning the end is itself a scroll, and
+   * it reports a frame or two of not being at the end yet — read as a
+   * departure, a streaming reply would drop itself into manual on its own first
+   * token.
+   *
+   * Cleared when the finger lifts rather than when momentum settles: the frames
+   * that decide have already been read by then, and a flick that coasts back to
+   * the end should be allowed to resume following.
    */
-  const [scrolledAway, setScrolledAway] = useState(false)
+  const dragging = useRef(false)
 
   /**
    * Whether the transcript has found its position yet.
@@ -76,100 +99,55 @@ export default function ChatScreen() {
   const [placed, setPlaced] = useState(false)
 
   /**
-   * Where the incoming turn starts, and whether the view is still holding it.
+   * Pinning the end while following.
    *
-   * A reply is read from its first line. Parking at the bottom of it means
-   * reading a message backwards — the top scrolls away as fast as the bottom
-   * arrives — so the view parks at the top of what just came in and lets the
-   * rest fill the screen beneath it.
-   *
-   * The offset it starts at is simply how tall the transcript was the moment
-   * before, which is what `contentHeight` is here to remember.
+   * Fires on every token, so the scroll is unanimated: an animation restarted
+   * each frame never arrives anywhere, and the distance being covered here is a
+   * line of text.
    */
-  const contentHeight = useRef(0)
-  const anchor = useRef<number | null>(null)
-  const holdAnchor = useRef(false)
-
-  // A turn opens on the first chunk or tool call of a reply, which is the
-  // moment there is something new to read.
-  useEffect(() => {
-    holdAnchor.current = stream.turnActive
-    if (stream.turnActive) anchor.current = null
-  }, [stream.turnActive])
-
-  /**
-   * Re-aim at each new thing, not just at the first.
-   *
-   * The anchor used to be captured once per turn, so a reply that ran long
-   * pinned the view to its opening line and everything after it — the second
-   * paragraph, every tool card, the whole rest of the turn — arrived below the
-   * fold and stayed there. One turn, one glimpse.
-   *
-   * A settled entry appearing is the same event the anchor exists for: a new
-   * thing to read. Clearing it re-arms the capture, so the next growth parks
-   * that entry's top where the reply's first line went. Reading rule unchanged,
-   * applied per item instead of per turn.
-   *
-   * Length, not the array: entries are replaced wholesale on every transcript
-   * load, and re-aiming on a reload that returned the same rows would yank the
-   * view for nothing.
-   */
-  const entryCount = stream.entries.length
-
-  useEffect(() => {
-    // Only while the view still holds the turn. Once a drag has released the
-    // anchor the reader has chosen a position, and new arrivals do not get to
-    // take it back (§7.3).
-    if (holdAnchor.current) anchor.current = null
-  }, [entryCount])
-
-  const onContentSizeChange = useCallback((_width: number, height: number) => {
-    const previous = contentHeight.current
-
-    contentHeight.current = height
-
-    if (!holdAnchor.current) return
-
-    // Captured on the first growth *after* the turn opened, so the message you
-    // sent is already measured into the height being captured.
-    if (anchor.current === null) {
-      anchor.current = previous
-      listRef.current?.scrollToOffset({ offset: previous, animated: true })
-
-      return
-    }
-
-    // Held rather than re-aimed. Until the reply is a screen tall the list
-    // cannot scroll that far and the offset clamps, so each token that arrives
-    // buys a little more of the distance and the first line climbs to the top;
-    // from then on this is the offset it is already at, and the view stops.
-    // Unanimated — an animation here would be re-started every frame.
-    listRef.current?.scrollToOffset({ offset: anchor.current, animated: false })
+  const onContentSizeChange = useCallback(() => {
+    if (following.current) listRef.current?.scrollToEnd({ animated: false })
   }, [])
 
-  // Dragging is taking over: the reader has chosen a position, and nothing may
-  // pull them off it for the rest of the turn.
-  const releaseAnchor = useCallback(() => {
-    holdAnchor.current = false
+  const onScrollBeginDrag = useCallback(() => {
+    dragging.current = true
   }, [])
 
-  const onScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
-    atBottom.current = contentSize.height - (contentOffset.y + layoutMeasurement.height) < 80
-    setScrolledAway(current => (current === !atBottom.current ? current : !atBottom.current))
+  const onScrollEndDrag = useCallback(() => {
+    dragging.current = false
   }, [])
+
+  const onScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
+      const atEnd = contentSize.height - (contentOffset.y + layoutMeasurement.height) < 80
+
+      // Parked at the end *is* following: there is nothing below to have
+      // scrolled away from, and staying manual there would hide the button that
+      // hands following back while arrivals quietly piled up off screen.
+      if (atEnd) setFollowing(true)
+      else if (dragging.current) setFollowing(false)
+    },
+    [setFollowing]
+  )
+
+  /** Back to the end, and back to following it. The button, and the nudge. */
+  const follow = useCallback(() => {
+    setFollowing(true)
+    listRef.current?.scrollToEnd({ animated: true })
+  }, [setFollowing])
 
   // The keyboard coming up shrinks the list by its height, which slides the
   // newest message up behind it. Following it keeps the last thing said in view
   // — animated, so it rises alongside the keyboard rather than after it. The
   // second pass corrects for the frame still shrinking under the first.
   useEffect(() => {
-    const follow = () => {
-      if (atBottom.current) listRef.current?.scrollToEnd({ animated: true })
+    const keepEnd = () => {
+      if (following.current) listRef.current?.scrollToEnd({ animated: true })
     }
 
-    const willShow = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', follow)
-    const didShow = Keyboard.addListener('keyboardDidShow', follow)
+    const willShow = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', keepEnd)
+    const didShow = Keyboard.addListener('keyboardDidShow', keepEnd)
 
     return () => {
       willShow.remove()
@@ -188,17 +166,18 @@ export default function ChatScreen() {
 
   useEffect(() => {
     if (!approvalId || stream.loading || !placed) return
-    if (approvalId !== restoredApprovalId && !atBottom.current) return
+    if (approvalId !== restoredApprovalId && !following.current) return
 
-    // The turn is halted on an answer from you, so it outranks reading position.
-    holdAnchor.current = false
+    // The turn is halted on an answer from you, so it outranks reading position
+    // — and having been carried to the end, the view follows it again.
+    setFollowing(true)
 
     // The footer holding the card is only measured a frame after mount, so an
     // immediate scrollToEnd lands short of it. One frame is enough.
     const timer = setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50)
 
     return () => clearTimeout(timer)
-  }, [approvalId, restoredApprovalId, stream.loading, placed])
+  }, [approvalId, restoredApprovalId, stream.loading, placed, setFollowing])
 
   const pendingMessage = useChatInbox(inbox => inbox.pending)
   const takeMessage = useChatInbox(inbox => inbox.take)
@@ -312,18 +291,20 @@ export default function ChatScreen() {
               scrollEventThrottle={16}
               // Opens already at the last message rather than rendering from the
               // top and animating down to it. Deliberately *without*
-              // `autoscrollToBottomThreshold`: following the bottom is the thing
-              // the anchor above replaces, and the two would fight every frame.
+              // `autoscrollToBottomThreshold`: following the end is what
+              // `onContentSizeChange` above does, and the two would fight every
+              // frame over which of them owns the offset.
               maintainVisibleContentPosition={{ startRenderingFromBottom: true }}
               onContentSizeChange={onContentSizeChange}
-              onScrollBeginDrag={releaseAnchor}
+              onScrollBeginDrag={onScrollBeginDrag}
+              onScrollEndDrag={onScrollEndDrag}
               // Dragging the transcript down takes the keyboard with it, the way
               // it does in Messages. Android has no interactive mode, so the
               // keyboard leaves on the drag instead of tracking the finger.
               keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
               // With the keyboard up, the first tap on an approval button should
               // answer it, not just close the keyboard.
-                keyboardShouldPersistTaps="handled"
+              keyboardShouldPersistTaps="handled"
               // Fired once the first rows are actually laid out. Only then is
               // there an end to scroll to: `startRenderingFromBottom` puts the
               // last *entry* on screen, and the footer holding the streaming
@@ -333,12 +314,23 @@ export default function ChatScreen() {
                 requestAnimationFrame(() => setPlaced(true))
               }}
             />
+
+            {/* Only in manual: in the resting state there is nothing below to
+                be taken back to, and a button pointing at where you already are
+                is chrome over the transcript for nothing.
+
+                Anchored to the transcript's own bottom edge, which *is* the top
+                of the composer: the list is the flex child above it. Pinning to
+                the screen instead would put the button under the composer. */}
+            {manual && placed ? (
+              <View style={styles.scrollButtonContainer}>
+                <ScrollToBottomButton onPress={follow} />
+              </View>
+            ) : null}
           </View>
         )}
 
-        {(stream.approval || stream.clarify) && scrolledAway ? (
-          <ApprovalNudge onPress={() => listRef.current?.scrollToEnd({ animated: true })} />
-        ) : null}
+        {(stream.approval || stream.clarify) && manual ? <ApprovalNudge onPress={follow} /> : null}
 
         <Composer
           streaming={running}
@@ -363,5 +355,13 @@ const styles = StyleSheet.create({
   list: { paddingHorizontal: 16, paddingVertical: 16 },
   header: { gap: 10, paddingBottom: 6 },
   entry: { paddingVertical: 7 },
-  approval: { paddingTop: 7 }
+  approval: { paddingTop: 7 },
+  scrollButtonContainer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 14,
+    alignItems: 'center',
+    pointerEvents: 'box-none'
+  }
 })
