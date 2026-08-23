@@ -45,7 +45,15 @@ export default function SettingsScreen() {
   // Every agent this one removal would take with it, which is what its
   // confirmation has to name: the row was reached from a single agent, and
   // nothing on the way here said the host had three (§7.4).
-  const onThisServer = useAgents(state => state.agents.filter(candidate => candidate.serverId === server?.id))
+  //
+  // Derived from `agents` above rather than selected out of the store. A
+  // selector that builds a new array is a fresh reference on every read, and
+  // zustand v5 hands the selector straight to `useSyncExternalStore`, which
+  // compares snapshots with `Object.is` — so the snapshot never settles and
+  // the screen re-renders until React gives up ("The result of getSnapshot
+  // should be cached to avoid an infinite loop"). Filtering a value the store
+  // already owns keeps the read stable.
+  const onThisServer = agents.filter(candidate => candidate.serverId === server?.id)
   const backend = useBackend()
   const state = useConnectionState()
   const reconnect = useReconnect()
