@@ -1,4 +1,4 @@
-# Agent Handheld
+# Polyflow Agents
 
 A cross-platform (iOS + Android) mobile client for a [Hermes](https://github.com/) agent,
 built so the agent harness behind it can be swapped later.
