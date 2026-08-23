@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "polyflow-agents-push"
-version = "0.2.0"
+version = "0.2.1"
 description = "Push notifications for the Polyflow Agents app — a Hermes plugin"
 readme = "polyflow_agents_push/README.md"
 requires-python = ">=3.10"
@@ -21,11 +21,17 @@ classifiers = [
   "Topic :: Communications :: Chat",
 ]
 
-# Deliberately none. The plugin runs inside Hermes's own processes, so every
-# import it needs is already there, and the push client is stdlib-only by
-# design (`push.py`) — the hooks fire from synchronous agent code and cannot
-# assume an event loop to borrow.
-dependencies = []
+# One, and only for the CLI. The *plugin* is stdlib-only by design: it runs
+# inside Hermes's processes, where every import it needs already exists, and
+# `push.py` stays dependency-free because the hooks fire from synchronous agent
+# code that cannot assume an event loop to borrow. Nothing in that path imports
+# yaml.
+#
+# The installer is a different environment. `uv tool install` isolates it from
+# Hermes, so it cannot import `hermes_cli` to ask whether the plugin is enabled
+# and has to read config.yaml itself — and without a parser, `status` answers
+# "unknown" for every install this README recommends.
+dependencies = ["PyYAML>=6.0"]
 
 [project.urls]
 Homepage = "https://github.com/drewswinney/agent-handheld"

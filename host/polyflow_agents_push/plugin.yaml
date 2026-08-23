@@ -1,7 +1,7 @@
 name: polyflow_agents_push
 label: Polyflow Agents
 kind: platform
-version: 0.2.0
+version: 0.2.1
 description: >
   Push notifications for the Polyflow Agents app. Registers observer hooks for
   approvals, clarify questions and artifacts, a send-only gateway platform so

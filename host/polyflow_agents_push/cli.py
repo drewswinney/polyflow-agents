@@ -28,6 +28,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 # The name Hermes knows this plugin by. It is the `name` in both manifests, the
 # directory this links to, and — because the web server mounts routers under
@@ -73,18 +74,59 @@ def _status_lines() -> list[str]:
     return lines
 
 
-def _enabled() -> bool:
-    """Whether Hermes's allow-list already carries us.
+def _enabled() -> Optional[bool]:
+    """Whether Hermes's allow-list carries us. ``None`` when it cannot be read.
 
-    Read through Hermes rather than by parsing config.yaml: the file may not be
-    where this process assumes, and the allow-list is the loader's own state.
+    Three-valued on purpose. The first draft returned a bool and reported an
+    *unreadable* allow-list as "not enabled" — which is exactly wrong under the
+    install this README recommends: `uv tool install` puts this command in an
+    isolated environment where `hermes_cli` is not importable, so the check
+    always failed and `status` always said "no" about a plugin Hermes had
+    already loaded. A check that cannot run must not answer.
+
+    Hermes's own loader is still asked first, since the allow-list is its state
+    rather than a file's. Reading config.yaml is the fallback for running
+    outside its environment, and a missing YAML parser is the third case: this
+    package has no dependencies, and inventing an answer is worse than
+    admitting there is none.
     """
     try:
         from hermes_cli.plugins_cmd import _get_enabled_set
 
         return PLUGIN_NAME in _get_enabled_set()
     except Exception:
-        return False
+        pass
+
+    config = hermes_home() / "config.yaml"
+
+    try:
+        import yaml
+    except ImportError:
+        return None
+
+    try:
+        with config.open(encoding="utf-8") as handle:
+            data = yaml.safe_load(handle) or {}
+    except Exception:
+        return None
+
+    plugins = data.get("plugins")
+
+    if not isinstance(plugins, dict):
+        return None
+
+    enabled = plugins.get("enabled")
+
+    if not isinstance(enabled, list):
+        return None
+
+    return PLUGIN_NAME in enabled
+
+
+# `None` is "could not check", which is not the same as "no" and must not read
+# like it: the difference is whether someone goes looking for a missing install
+# step or for a broken check.
+_ENABLED_LABEL = {True: "yes", False: "no", None: "unknown (could not read the allow-list)"}
 
 
 def install(*, copy: bool, force: bool, enable: bool) -> int:
@@ -131,7 +173,7 @@ def install(*, copy: bool, force: bool, enable: bool) -> int:
                 f"Run: hermes plugins enable {PLUGIN_NAME}",
                 file=sys.stderr,
             )
-    elif not _enabled():
+    elif _enabled() is False:
         # Worth stating rather than leaving to be discovered: an installed but
         # un-enabled plugin's Python is never imported, so every face is silently
         # absent (GHSA-mcfc-hp25-cjv7).
@@ -189,7 +231,7 @@ def main(argv: list[str] | None = None) -> int:
     for line in _status_lines():
         print(line)
 
-    print(f"enabled:   {'yes' if _enabled() else 'no'}")
+    print(f"enabled:   {_ENABLED_LABEL[_enabled()]}")
 
     return 0
 
