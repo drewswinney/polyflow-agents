@@ -27,16 +27,47 @@ being asked.
 ## Install
 
 ```bash
-pip install polyflow-agents-push
-polyflow_agents_push install --enable
+uv tool install polyflow-agents-push
+polyflow_agents_push install --copy --enable
 ```
 
 Then restart `hermes serve` (hooks and the registration routes) and, if you want
 cron delivery, the messaging gateway.
 
-`install` links the installed package into `~/.hermes/plugins/polyflow_agents_push`, so
-`pip install -U` is the whole upgrade. `--copy` copies instead, for hosts where
-site-packages and the plugin directory are not on one filesystem. `polyflow_agents_push status` says where it landed and whether Hermes has it enabled.
+**uv rather than pip, because a Hermes host usually has no pip.** Hermes builds
+its own venv with `uv` and uv does not install pip into it, so
+`.../venv/bin/pip` does not exist; a modern system Python is likely
+PEP 668-managed on top of that. uv ships with Hermes (`~/.hermes/bin/uv`), so it
+is the installer that is definitely present. Plain `pip install
+polyflow-agents-push` works anywhere pip does — nothing here needs uv
+specifically.
+
+`uv tool install` is the right verb rather than `uv pip install --python <the
+Hermes venv>`: this package exists to provide a command, and nothing about the
+plugin needs to live in Hermes's own environment. Hermes loads a plugin **by
+file path** from `~/.hermes/plugins/`, never by importing it from
+site-packages — so an isolated tool environment keeps the plugin's lifetime
+independent of a venv that Hermes owns and may rebuild on upgrade. uv puts the
+executable in `~/.local/bin`.
+
+**`--copy` rather than the symlink default**, for the same reason: a symlink
+into a tool or venv environment dangles if that environment is rebuilt, and the
+plugin then stops loading with nothing to say why except `polyflow_agents_push
+status` reporting missing files. Copying costs an explicit re-run on upgrade:
+
+```bash
+uv tool upgrade polyflow-agents-push
+polyflow_agents_push install --copy --force
+```
+
+Use the symlink default (drop `--copy`) when the environment is one you control
+and do not rebuild — then `upgrade` alone is enough.
+
+**Enabling is not optional.** A user plugin's Python is never imported until its
+name is in the `plugins.enabled` allow-list — that is the code-execution vector
+GHSA-mcfc-hp25-cjv7 closed. Without it every face is silently absent.
+`--enable` shells out to `hermes plugins enable`; if the CLI is not on PATH it
+prints the command instead.
 
 **Why a second command at all**, when Hermes supports pip-installed plugins
 through the `hermes_agent.plugins` entry-point group: that group covers hooks
@@ -45,11 +76,10 @@ for `<name>/dashboard/manifest.json` — `_discover_dashboard_plugins()` reads
 nothing else — and the backend route is where devices register. So the package
 deliberately does **not** declare an entry point (a plugin discovered twice
 registers its hooks twice, and every notification arrives twice with it) and
-links itself into the directory Hermes scans instead.
+puts itself in the directory Hermes scans instead.
 
-**Enabling is not optional.** A user plugin's Python is never imported until its
-name is in the `plugins.enabled` allow-list — that is the code-execution vector
-GHSA-mcfc-hp25-cjv7 closed. Without it every face is silently absent.
+`polyflow_agents_push status` says where it landed, whether each file Hermes
+looks for is present, and whether Hermes has it enabled.
 
 ## Device registration
 

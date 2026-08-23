@@ -3,8 +3,8 @@
 #
 # This is the *development* path. What other people use is pip:
 #
-#   pip install polyflow-agents-push
-#   polyflow_agents_push install --enable
+#   uv tool install polyflow-agents-push
+#   polyflow_agents_push install --copy --enable
 #
 # Both end at the same place — a `polyflow_agents_push` directory under
 # ~/.hermes/plugins — but pip links the installed package there and upgrades
