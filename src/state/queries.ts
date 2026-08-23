@@ -24,10 +24,15 @@ export const sessionsKey = (agentId: AgentId) => ['agent', agentId, 'sessions'] 
 export const searchKey = (agentId: AgentId, query: string) => ['agent', agentId, 'search', query] as const
 
 export function useSessions(agentId: AgentId, backend: AgentBackend | null) {
+  console.log('[useSessions] agentId:', agentId, 'backend:', backend ? 'present' : 'null')
   return useQuery({
     queryKey: sessionsKey(agentId),
     enabled: Boolean(backend),
-    queryFn: () => backend!.listSessions({ limit: 50 })
+    queryFn: async () => {
+      const result = await backend!.listSessions({ limit: 50 })
+      console.log('[useSessions] fetched', result.length, 'sessions for agentId:', agentId)
+      return result
+    }
   })
 }
 

@@ -410,8 +410,9 @@ export class HermesBackend implements AgentBackend {
   // --- Sessions -----------------------------------------------------------
 
   async listSessions(query?: SessionQuery): Promise<SessionSummary[]> {
+    console.log('[HermesBackend.listSessions] profile:', this.config.profile)
     const page = await this.rest.listSessions(query?.limit ?? 50, query?.offset ?? 0)
-
+    console.log('[HermesBackend.listSessions] fetched', page.sessions.length, 'sessions')
     return page.sessions.map(toSessionSummary)
   }
 

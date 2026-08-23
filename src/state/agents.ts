@@ -373,9 +373,12 @@ export function useConnectionOf(agent: Agent | null): AgentConnection {
 export function useSelectAgent() {
   const queryClient = useQueryClient()
   const select = useAgents(state => state.select)
+  const selectedAgentId = useAgents(state => state.selectedAgentId)
 
   return (id: AgentId) => {
+    console.log('[useSelectAgent] switching from', selectedAgentId, 'to', id)
     queryClient.removeQueries({ queryKey: agentScopeKey })
     select(id)
+    console.log('[useSelectAgent] switch complete')
   }
 }
