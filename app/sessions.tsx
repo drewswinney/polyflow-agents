@@ -45,8 +45,8 @@ export default function SessionsScreen() {
   const [searchActive, setSearchActive] = useState(false)
   const [query, setQuery] = useState('')
 
-  const sessions = useSessions(agent.id, backend)
-  const search = useSessionSearch(agent.id, backend, query)
+  const sessions = useSessions(agent.scope ?? '', backend)
+  const search = useSessionSearch(agent.scope ?? '', backend, query)
 
   const groups = useMemo(() => groupSessions(sessions.data ?? []), [sessions.data])
 
