@@ -379,14 +379,22 @@ export function useSelectAgent() {
     console.log('[useSelectAgent] switching from', selectedAgentId, 'to', id)
     
     // Debug: log all current query keys before removal
-    const allKeysBefore = queryClient.getQueryCache().findAll().map(q => q.queryKey)
-    console.log('[useSelectAgent] query keys BEFORE removeQueries:', JSON.stringify(allKeysBefore))
+    const allKeysBefore = queryClient.getQueryCache().findAll().map(q => ({ 
+      key: q.queryKey, 
+      state: q.state.status,
+      data: q.state.data ? 'present' : 'null' 
+    }))
+    console.log('[useSelectAgent] query keys BEFORE removeQueries:', JSON.stringify(allKeysBefore, null, 2))
     
-    queryClient.removeQueries({ queryKey: agentScopeKey })
+    // Remove ALL queries that start with ['agent'] prefix
+    const removed = queryClient.removeQueries({ queryKey: agentScopeKey })
     
-    // Debug: log all remaining query keys after removal
-    const allKeysAfter = queryClient.getQueryCache().findAll().map(q => q.queryKey)
-    console.log('[useSelectAgent] query keys AFTER removeQueries:', JSON.stringify(allKeysAfter))
+    // Debug: log how many were removed and what remains
+    const allKeysAfter = queryClient.getQueryCache().findAll().map(q => ({ 
+      key: q.queryKey, 
+      state: q.state.status 
+    }))
+    console.log('[useSelectAgent] AFTER removeQueries - remaining keys:', JSON.stringify(allKeysAfter, null, 2))
     
     select(id)
     console.log('[useSelectAgent] switch complete, new selectedAgentId:', id)
