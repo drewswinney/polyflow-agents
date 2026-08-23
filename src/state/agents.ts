@@ -377,8 +377,18 @@ export function useSelectAgent() {
 
   return (id: AgentId) => {
     console.log('[useSelectAgent] switching from', selectedAgentId, 'to', id)
+    
+    // Debug: log all current query keys before removal
+    const allKeysBefore = queryClient.getQueryCache().findAll().map(q => q.queryKey)
+    console.log('[useSelectAgent] query keys BEFORE removeQueries:', JSON.stringify(allKeysBefore))
+    
     queryClient.removeQueries({ queryKey: agentScopeKey })
+    
+    // Debug: log all remaining query keys after removal
+    const allKeysAfter = queryClient.getQueryCache().findAll().map(q => q.queryKey)
+    console.log('[useSelectAgent] query keys AFTER removeQueries:', JSON.stringify(allKeysAfter))
+    
     select(id)
-    console.log('[useSelectAgent] switch complete')
+    console.log('[useSelectAgent] switch complete, new selectedAgentId:', id)
   }
 }

@@ -8,6 +8,7 @@
  * expensive half is remembering to do it everywhere.
  */
 
+import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { AgentBackend, AgentId } from '@/domain'
@@ -37,9 +38,10 @@ export const sessionsKey = (scope: string) => ['agent', scope, 'sessions'] as co
 export const searchKey = (scope: string, query: string) => ['agent', scope, 'search', query] as const
 
 export function useSessions(scope: string, backend: AgentBackend | null) {
-  console.log('[useSessions] scope:', scope, 'backend:', backend ? 'present' : 'null')
+  const queryKey = useMemo(() => sessionsKey(scope), [scope])
+  console.log('[useSessions] scope:', scope, 'backend:', backend ? 'present' : 'null', 'queryKey:', JSON.stringify(queryKey))
   return useQuery({
-    queryKey: sessionsKey(scope),
+    queryKey,
     enabled: Boolean(backend),
     queryFn: async () => {
       const result = await backend!.listSessions({ limit: 50 })
