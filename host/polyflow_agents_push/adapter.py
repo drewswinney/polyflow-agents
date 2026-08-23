@@ -1,13 +1,18 @@
-"""Hermes plugin: push notifications for the handheld app.
+"""Hermes plugin: push notifications for the Polyflow Agents app.
 
-Two faces, loaded by two processes (see `docs/push-relay.md` §2, §3):
+Three faces, loaded by up to three processes (see `docs/push-relay.md` §2, §3):
 
 - **Hooks**, registered wherever a turn runs — for this app, `hermes serve`.
   They observe approvals, clarify questions and artifacts and push them out.
-- **A platform**, registered in the messaging gateway. It exists so cron jobs
-  can `deliver=handheld` and so the webhook gateway has somewhere to hand a
-  device registration, which is the only inbound channel available without a
-  listener of our own.
+- **A platform**, registered in the messaging gateway, so cron jobs can
+  `deliver=polyflow_agents_push`.
+- **Backend routes**, in `dashboard/plugin_api.py`, mounted by the web server
+  under `/api/plugins/polyflow_agents_push/`. Registration arrives there.
+
+Registration used to arrive through the *platform* face, as a control frame on
+the webhook gateway's `deliver_only` path — the only inbound channel available
+before a plugin could own an HTTP route. It can now, so that is gone and the
+platform face is send-only, which is all it ever wanted to be.
 
 Nothing here may raise into the agent. Every hook is wrapped, every failure is a
 log line, and the push itself happens on a daemon thread — an approval waiting
@@ -24,13 +29,13 @@ from . import devices, push
 
 logger = logging.getLogger(__name__)
 
-PLATFORM_NAME = "handheld"
-PLATFORM_LABEL = "Handheld"
-
-# A control message arriving through the webhook gateway's `deliver_only` path
-# rather than a notification to forward. The prefix is what separates the two on
-# a channel that only carries text.
-CONTROL_PREFIX = "#handheld:"
+# The gateway platform's name. Kept identical to the plugin's on purpose: it is
+# a third place the same thing gets named — after the pip distribution and the
+# route prefix — and a platform called something else is a name nobody can
+# derive from the other two. It is what cron config says (`deliver=...`) and
+# what the home-channel env var is built from.
+PLATFORM_NAME = "polyflow_agents_push"
+PLATFORM_LABEL = "Polyflow Agents"
 
 # Tools whose completion is worth interrupting someone for. "Artifact" is our
 # word, not Hermes's — there is no artifact concept upstream, only tool output.
@@ -151,13 +156,12 @@ def _build_adapter(config: Any) -> Any:
     from gateway.config import Platform
     from gateway.platforms.base import BasePlatformAdapter, SendResult
 
-    class HandheldPushAdapter(BasePlatformAdapter):
+    class PolyflowAgentsPushAdapter(BasePlatformAdapter):
         """A send-only platform whose "chat" is a set of phones.
 
-        It has no inbound socket of its own. The one thing that arrives is a
-        device registration, delivered by the webhook gateway's `deliver_only`
-        path — which reuses that server's HMAC validation, rate limiting and
-        idempotency, so this plugin does not have to own a port to be reachable.
+        Nothing arrives here. Registration moved to `dashboard/plugin_api.py`
+        once a plugin could own an HTTP route, which left this face doing the
+        one job it is suited to: handing cron output to the push client.
         """
 
         # Signatures below mirror `gateway/platforms/base.py` exactly. The
@@ -168,7 +172,7 @@ def _build_adapter(config: Any) -> Any:
             super().__init__(cfg, Platform(PLATFORM_NAME))
 
         async def connect(self, *, is_reconnect: bool = False) -> bool:
-            logger.info("[handheld-push] platform ready (%d device(s))", len(devices.load()))
+            logger.info("[polyflow_agents_push] platform ready (%d device(s))", len(devices.load()))
 
             return True
 
@@ -182,11 +186,6 @@ def _build_adapter(config: Any) -> Any:
             reply_to: Optional[str] = None,
             metadata: Optional[Dict[str, Any]] = None,
         ) -> Any:
-            control = _handle_control(content)
-
-            if control is not None:
-                return SendResult(success=control)
-
             push.notify(
                 kind="cronFailures" if _looks_like_failure(content) else "turnComplete",
                 title="Hermes",
@@ -215,46 +214,7 @@ def _build_adapter(config: Any) -> Any:
         async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
             return {"name": PLATFORM_LABEL, "type": "dm", "chat_id": chat_id}
 
-    return HandheldPushAdapter(config)
-
-
-def _handle_control(text: str) -> Optional[bool]:
-    """Device registration, or None when this is an ordinary message.
-
-    The payload rides a text channel because that is what `deliver_only` gives —
-    the rendered template is the message. The prefix keeps a genuine message that
-    happens to look like JSON from being mistaken for a command.
-    """
-    body = (text or "").strip()
-
-    if not body.startswith(CONTROL_PREFIX):
-        return None
-
-    try:
-        payload = json.loads(body[len(CONTROL_PREFIX) :])
-    except Exception:
-        logger.warning("[handheld-push] control message was not valid JSON")
-
-        return False
-
-    action = str(payload.get("action") or "")
-    token = str(payload.get("token") or "")
-
-    if action == "register":
-        return devices.register(
-            token,
-            agent_id=str(payload.get("agentId") or ""),
-            platform=str(payload.get("platform") or ""),
-            label=str(payload.get("label") or ""),
-            prefs=payload.get("prefs") if isinstance(payload.get("prefs"), dict) else None,
-        )
-
-    if action == "unregister":
-        return devices.unregister(token)
-
-    logger.warning("[handheld-push] unknown control action %r", action)
-
-    return False
+    return PolyflowAgentsPushAdapter(config)
 
 
 def _looks_like_failure(text: str) -> bool:
@@ -291,7 +251,7 @@ def register(ctx: Any) -> None:
         try:
             ctx.register_hook(hook_name, callback)
         except Exception:
-            logger.warning("[handheld-push] could not register hook %s", hook_name, exc_info=True)
+            logger.warning("[polyflow_agents_push] could not register hook %s", hook_name, exc_info=True)
 
     try:
         ctx.register_platform(
@@ -300,39 +260,39 @@ def register(ctx: Any) -> None:
             adapter_factory=_build_adapter,
             check_fn=lambda: True,
             emoji="📱",
-            # Lets `deliver=handheld` cron jobs route here without patching
+            # Lets `deliver=polyflow_agents_push` cron jobs route here without patching
             # cron/scheduler.py's hardcoded target sets.
-            cron_deliver_env_var="HANDHELD_HOME_CHANNEL",
+            cron_deliver_env_var="POLYFLOW_AGENTS_PUSH_HOME_CHANNEL",
             standalone_sender_fn=_standalone_send,
         )
     except ImportError:
         # Expected in a process that never imports the gateway — `hermes serve`
         # runs turns and fires hooks but has no platform registry.
-        logger.debug("[handheld-push] no platform registry in this process")
+        logger.debug("[polyflow_agents_push] no platform registry in this process")
     except Exception:
         # Not expected, and not something to shrug off: without the platform
-        # face there is no cron delivery and no way for a device to register, so
-        # notifications would half-work with nothing saying why.
-        logger.warning("[handheld-push] platform registration FAILED", exc_info=True)
+        # face there is no cron delivery, so notifications would half-work with
+        # nothing saying why. Registration is unaffected — that is the web
+        # server's face, in a different process.
+        logger.warning("[polyflow_agents_push] platform registration FAILED", exc_info=True)
 
 
 async def _standalone_send(*_args: Any, **kwargs: Any) -> Dict[str, Any]:
     """Out-of-process cron delivery.
 
     Cron jobs can run in a process with no live adapter, where a `deliver=` job
-    otherwise fails with `No live adapter for platform 'handheld'`. Push has no
+    otherwise fails with `No live adapter for platform 'polyflow_agents_push'`.
+    Push has no
     connection to hold, so serving these is just sending.
     """
     text = str(kwargs.get("text") or kwargs.get("message") or "")
-    control = _handle_control(text)
 
-    if control is None:
-        push.notify(
-            kind="cronFailures" if _looks_like_failure(text) else "turnComplete",
-            title="Hermes",
-            body=text[:200],
-            data={"source": "cron"},
-        )
+    push.notify(
+        kind="cronFailures" if _looks_like_failure(text) else "turnComplete",
+        title="Hermes",
+        body=text[:200],
+        data={"source": "cron"},
+    )
 
     return {"ok": True}
 
@@ -349,6 +309,6 @@ def _safe(callback: Any) -> Any:
         try:
             callback(**kwargs)
         except Exception:
-            logger.warning("[handheld-push] hook raised; ignoring", exc_info=True)
+            logger.warning("[polyflow_agents_push] hook raised; ignoring", exc_info=True)
 
     return wrapped

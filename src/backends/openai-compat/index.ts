@@ -26,7 +26,10 @@ export const OPENAI_COMPAT_CAPABILITIES: Capabilities = {
   extras: { cron: false, skills: false, mcp: false },
   approvals: { requests: false, policy: false },
   logs: { events: true },
-  media: { images: true, audioIn: false, audioOut: false }
+  media: { images: true, audioIn: false, audioOut: false },
+  // An OpenAI-compatible host serves completions and nothing else — there is no
+  // process there to hold a device registry, and no approvals to push about.
+  push: { register: false }
 }
 
 class NotImplemented extends Error {
@@ -118,6 +121,14 @@ export class OpenAiCompatBackend implements AgentBackend {
 
   async listEvents(): Promise<never> {
     throw new NotImplemented('events')
+  }
+
+  async registerPushDevice(): Promise<never> {
+    throw new NotImplemented('push registration')
+  }
+
+  async unregisterPushDevice(): Promise<never> {
+    throw new NotImplemented('push registration')
   }
 
   async listMcpServers(): Promise<never> {

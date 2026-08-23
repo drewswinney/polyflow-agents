@@ -129,6 +129,17 @@ export interface AgentBackend {
   triggerCronJob(id: string): Promise<void>
 
   /**
+   * Requires `capabilities.push.register`. Tell the host where to push.
+   *
+   * Idempotent by token, and called on every launch rather than once at
+   * install: Expo rotates push tokens, and a host registry keyed on a stale one
+   * pushes into the void with no error anyone sees.
+   */
+  registerPushDevice(registration: PushDeviceRegistration): Promise<void>
+  /** Requires `capabilities.push.register`. */
+  unregisterPushDevice(token: string): Promise<void>
+
+  /**
    * Requires `capabilities.media.audioIn`. Takes a base64 data URL.
    *
    * Push-to-talk, not a duplex channel: Hermes's audio surface is three
@@ -162,6 +173,39 @@ export interface StoredImage {
 
 /** A turn that carried nothing to report. */
 export const NO_IMAGES: PromptResult = { images: [] }
+
+/**
+ * What the host needs in order to push to this device.
+ *
+ * `prefs` is here because a *closed* app cannot filter its own push: once the
+ * process is gone the host is the only thing that can decide whether something
+ * is worth waking someone for. Quiet hours are deliberately absent — they are
+ * evaluated on the device against its own clock and timezone, which the host
+ * does not know and should not guess.
+ */
+export interface PushDeviceRegistration {
+  /** The Expo push token. Rotates; never travels in a push payload. */
+  token: string
+  /**
+   * The *app's* id for the agent, which the host has no idea about. It comes
+   * back on every push so a tap can re-scope the app before opening the
+   * session (§5.2); without it a notification cannot route.
+   */
+  agentId: string
+  /** `ios` / `android`, for the host's own logs. */
+  platform: string
+  /** Human-readable, so a device list is legible on the host. */
+  label: string
+  prefs: PushPrefs
+}
+
+export interface PushPrefs {
+  approvals: boolean
+  clarify: boolean
+  turnComplete: boolean
+  cronFailures: boolean
+  artifacts: boolean
+}
 
 export interface SessionSearchHit {
   sessionId: SessionId

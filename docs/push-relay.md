@@ -112,14 +112,14 @@ they do not share memory, so anything stateful (the device registry) has to live
 on disk rather than in a module global.
 
 ```
-~/.hermes/plugins/handheld-push/
+~/.hermes/plugins/polyflow_agents_push/
   plugin.yaml          # metadata, requires_env, optional_env (drives the setup wizard)
   adapter.py           # register(ctx): register_hook × N, register_platform × 1
 ```
 
 The platform face registers with:
 
-- `cron_deliver_env_var` — names the `*_HOME_CHANNEL` env var so `deliver=handheld`
+- `cron_deliver_env_var` — names the `*_HOME_CHANNEL` env var so `deliver=polyflow_agents_push`
   routes here without editing `cron/scheduler.py`'s hardcoded sets.
 - `standalone_sender_fn` — **required**, not optional. Cron jobs can run in a
   process separate from the gateway; without this, a `deliver=` job fires
@@ -163,8 +163,15 @@ Notes that change behaviour rather than decorate it:
 
 Nothing here is built yet; the app currently has no push-token code at all.
 
-1. **EAS project.** `app.json` carries no `extra.eas.projectId`, so
-   `getExpoPushTokenAsync({ projectId })` has nothing to resolve. `eas init` first.
+1. ~~**EAS project.**~~ Done: `app.json` carries `extra.eas.projectId` and
+   `getPushToken()` resolves it. Worth knowing what that buys — the app ships
+   under one EAS project, so every device gets an `ExponentPushToken` scoped to
+   it, and Expo's push endpoint accepts sends with **no authentication by
+   default**. A self-hoster's box can therefore push to the app with nothing but
+   outbound HTTPS: no APNs key, no FCM sender, no credential from us, and no
+   server we have to run. Leave Expo's *Enhanced Security for Push* off —
+   enabling it would require shipping our access token to every self-hoster,
+   which is worse than the spam it prevents.
 2. **A real build.** Remote push does not work in Expo Go — it was removed in SDK
    53. Testing needs a development build; `eas.json` already carries the profile.
    iOS additionally needs an APNs key and Android an FCM sender, both via EAS
@@ -177,31 +184,46 @@ Nothing here is built yet; the app currently has no push-token code at all.
 5. **New preference rows.** `notification-prefs.ts` covers approvals, turn
    complete and cron failures with quiet hours. Clarify and artifacts are new.
 
-**Device registration rides the webhook gateway.** Resolved, with a caveat.
+**Device registration is a plugin route.** *Superseded — see below for what it
+replaced, because the old shape explains most of this document.*
 
-A plugin cannot add an HTTP route: `gateway/platforms/webhook.py` registers a
-fixed table (`/webhooks/{route_name}` plus a profile-prefixed variant) and
-exposes no extension point. But a route's **`deliver` target may be a
-plugin-registered platform** — `platform_registry.is_registered(deliver_type)` —
-and **`deliver_only: true` skips the agent entirely**, handing the rendered
-payload straight to that target's send path at "zero LLM cost and sub-second
-delivery", in the upstream comment's words. So the app POSTs an HMAC-signed
-registration to a webhook route that delivers to us.
+A plugin **can** add an HTTP route, and this document was wrong to say
+otherwise. `_mount_plugin_api_routes()` in `hermes_cli/web_server.py` imports
+the file named by a plugin's `dashboard/manifest.json` `api` field and mounts
+its `router` under `/api/plugins/<name>/` — in the same process, on the same
+port, behind the same auth as `/api/ws`. The app registers over the connection
+it already has, with the credential it already has. Verified at ref `c86197e`;
+two bundled plugins (`kanban`, `hermes-achievements`) already do it.
 
-That reuses the webhook server's HMAC validation, rate limiting, idempotency
-cache and body caps instead of reimplementing them, at three costs, all real:
-a **second endpoint** (the webhook server is the messaging gateway's, on its own
-port, not the one the app already talks to), a **second device secret** (the
-route's HMAC key — not the pairing token, and never to be sent in a push
-payload), and **structured data on a prose channel** (`deliver_only` renders a
-template, so registration rides a JSON line behind a `#handheld:` sentinel).
+What that replaced was correct-but-expensive. `gateway/platforms/webhook.py`
+registers a fixed route table with no extension point, but a route's `deliver`
+target may be a plugin-registered platform and `deliver_only: true` skips the
+agent entirely — so registration used to POST HMAC-signed to a webhook route
+that delivered to us. That reused the webhook server's validation, rate limiting
+and idempotency, at three costs: a **second endpoint** (the messaging gateway's,
+on its own port), a **second device secret** (the route's HMAC key), and
+**structured data on a prose channel** (`deliver_only` renders a template, so
+registration rode a JSON line behind a `#handheld:` sentinel). The plugin route
+deletes all three, and with them three blocks of hand-edited `config.yaml`.
 
-The shortcut that would have avoided all three does not exist: `config.set` on
-the app's own gateway is a curated if/elif over known keys ending in
-`return _err(rid, 4002, f"unknown config key: {key}")`, so the app cannot write a
-plugin's config key through it.
+Three things about the route that are not obvious and each break it differently:
 
-Implementation and its weak points: [`../host/handheld-push/README.md`](../host/handheld-push/README.md).
+- **Header auth only.** `_has_valid_query_token` is scoped to
+  `_QUERY_TOKEN_API_PATHS` (`/api/files/download`), so the `?token=` form that
+  authenticates the WebSocket upgrade does **not** authenticate this.
+- **Enabling is mandatory.** A user plugin's Python is not imported until its
+  name is in `plugins.enabled` — the vector GHSA-mcfc-hp25-cjv7 closed.
+- **Rescan does not remount.** `/api/dashboard/plugins/rescan` refreshes the
+  plugin list and reloads JS/CSS; `_mount_plugin_api_routes()` runs at module
+  import, so a new backend route still needs `hermes serve` restarted.
+
+The shortcut that would have avoided the old design entirely never existed:
+`config.set` on the app's own gateway is a curated if/elif over known keys
+ending in `return _err(rid, 4002, f"unknown config key: {key}")`, so the app
+could not write a plugin's config key through it.
+
+Implementation, delivery (pip) and weak points:
+[`../host/polyflow_agents_push/README.md`](../host/polyflow_agents_push/README.md).
 
 ## 6. Answering from the lock screen — `register_approval_transport`
 
@@ -236,7 +258,7 @@ round-trip safe: a decision cannot be replayed against a different request.
 ```yaml
 security:
   approval:
-    transport: handheld-push     # default "builtin"
+    transport: polyflow_agents_push   # default "builtin"
     transport_fallback: builtin  # optional; anything else means fail closed
 ```
 
@@ -312,8 +334,10 @@ and the answer getting back to the plugin.
 
 Listed so the next person does not mistake this document for a finished spec:
 
-- **Everything in `host/handheld-push/` — it has never run.** Written against the
-  source at ref `c86197e`; the first deploy is the first test.
+- **The hooks have never fired against a real approval, and no push has ever
+  reached a device.** Registration is covered offline by `npm run check:plugin`,
+  which drives the real router against the real on-disk registry; everything
+  downstream of it is still written-not-run.
 - Whether `on_session_finalize` fires for an app session at all, and whether it
   is redundant with `background.complete` on the app's own socket.
 - How the app's approval card answers a transport-presented request in shape A

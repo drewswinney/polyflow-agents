@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polyflow-agents-push"
+version = "0.2.1"
+description = "Push notifications for the Polyflow Agents app — a Hermes plugin"
+readme = "polyflow_agents_push/README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Drew Swinney" }]
+keywords = ["hermes", "hermes-agent", "push", "notifications", "expo"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Plugins",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Topic :: Communications :: Chat",
+]
+
+# One, and only for the CLI. The *plugin* is stdlib-only by design: it runs
+# inside Hermes's processes, where every import it needs already exists, and
+# `push.py` stays dependency-free because the hooks fire from synchronous agent
+# code that cannot assume an event loop to borrow. Nothing in that path imports
+# yaml.
+#
+# The installer is a different environment. `uv tool install` isolates it from
+# Hermes, so it cannot import `hermes_cli` to ask whether the plugin is enabled
+# and has to read config.yaml itself — and without a parser, `status` answers
+# "unknown" for every install this README recommends.
+dependencies = ["PyYAML>=6.0"]
+
+[project.urls]
+Homepage = "https://github.com/drewswinney/agent-handheld"
+Repository = "https://github.com/drewswinney/agent-handheld"
+Issues = "https://github.com/drewswinney/agent-handheld/issues"
+
+[project.scripts]
+polyflow_agents_push = "polyflow_agents_push.cli:main"
+
+[tool.setuptools]
+# `polyflow_agents_push` only. `dashboard` is package *data*, not an import package:
+# the web server loads `plugin_api.py` by file path, and making it importable
+# would put a module named `dashboard` on the path of every process that loads
+# this plugin.
+packages = ["polyflow_agents_push"]
+
+[tool.setuptools.package-data]
+polyflow_agents_push = ["plugin.yaml", "dashboard/manifest.json", "dashboard/plugin_api.py"]

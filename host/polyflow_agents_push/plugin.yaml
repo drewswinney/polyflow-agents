@@ -1,0 +1,15 @@
+name: polyflow_agents_push
+label: Polyflow Agents
+kind: platform
+version: 0.2.1
+description: >
+  Push notifications for the Polyflow Agents app. Registers observer hooks for
+  approvals, clarify questions and artifacts, a send-only gateway platform so
+  cron jobs can deliver to a phone, and backend routes under
+  /api/plugins/polyflow_agents_push/ where devices register.
+author: Drew Swinney
+optional_env:
+  - name: POLYFLOW_AGENTS_PUSH_HOME_CHANNEL
+    description: "Cron delivery target for `deliver=polyflow_agents_push`. Any non-empty value; devices come from the registry, not from here."
+    prompt: "Polyflow Agents cron delivery target"
+    password: false

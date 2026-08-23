@@ -1,12 +1,12 @@
 import { router } from 'expo-router'
-import { useEffect, useState } from 'react'
-import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
+import { useEffect } from 'react'
+import { ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { readPushConfig, savePushConfig } from '@/platform/secure-store'
-import { useSelectedAgent, useSelectedServer } from '@/state/agents'
+import { useSelectedAgent } from '@/state/agents'
+import { useBackend } from '@/state/ConnectionProvider'
 import { useNotificationPrefs } from '@/state/notification-prefs'
-import { usePushConfigRevision, usePushRegistration, type PushStatus } from '@/state/push-sync'
+import { usePushRegistration, type PushStatus } from '@/state/push-sync'
 import { Card, Divider } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
@@ -20,7 +20,7 @@ import { useTheme } from '@/ui/ThemeProvider'
  * These preferences are enforced in two places, and that is deliberate. While
  * the app runs it filters its own local notifications. Once it is closed only
  * the host can decide anything, so the same preferences are sent to the
- * `handheld-push` plugin at registration — see `docs/push-relay.md`.
+ * `polyflow_agents_push` plugin at registration — see `docs/push-relay.md`.
  *
  * Quiet hours are the exception and stay device-side: they depend on this
  * phone's clock and timezone, which the host does not know.
@@ -30,8 +30,8 @@ export default function NotificationsScreen() {
   const insets = useSafeAreaInsets()
   const prefs = useNotificationPrefs()
   const agent = useSelectedAgent()
-  const server = useSelectedServer()
-  const status = usePushRegistration(server, agent)
+  const backend = useBackend()
+  const status = usePushRegistration(backend, agent)
 
   useEffect(() => {
     void prefs.hydrate()
@@ -93,7 +93,7 @@ export default function NotificationsScreen() {
           </Card>
         </View>
 
-        <PushSetup serverId={server.id} status={status} />
+        <PushDelivery status={status} />
 
         <Card style={styles.noticeCard}>
           <View style={styles.noticeHead}>
@@ -112,49 +112,14 @@ export default function NotificationsScreen() {
 }
 
 /**
- * Where this device registers for push.
+ * Whether this device will hear anything while the app is closed.
  *
- * Deliberately plain: two fields and a status line. It exists to prove the path
- * end to end, and the host's own setup (`host/handheld-push/README.md`) is
- * where the URL and secret come from.
+ * There is nothing to configure any more — registration rides the connection
+ * the app already has — so this is a status line and a sentence of context, not
+ * a form. It stays on screen precisely because the successful case is silent:
+ * without it, "the host has no plugin" and "everything is fine" look identical.
  */
-function PushSetup({ serverId, status }: { serverId: string; status: PushStatus }) {
-  const theme = useTheme()
-  const bump = usePushConfigRevision(state => state.bump)
-  const [baseUrl, setBaseUrl] = useState('')
-  const [secret, setSecret] = useState('')
-  const [loaded, setLoaded] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-
-    void readPushConfig(serverId).then(config => {
-      if (cancelled) return
-
-      setBaseUrl(config?.baseUrl ?? '')
-      // Never re-displayed. Showing a stored secret buys nothing and puts it on
-      // screen; an empty field means "unchanged".
-      setSecret('')
-      setLoaded(true)
-    })
-
-    return () => {
-      cancelled = true
-    }
-  }, [serverId])
-
-  const save = async () => {
-    const existing = await readPushConfig(serverId)
-
-    await savePushConfig(serverId, {
-      baseUrl: baseUrl.trim(),
-      secret: secret.trim() || existing?.secret || ''
-    })
-
-    // The keychain is not observable, so saving has to say so out loud.
-    bump()
-  }
-
+function PushDelivery({ status }: { status: PushStatus }) {
   return (
     <View style={styles.group}>
       <Text variant="sectionHeader" style={styles.groupLabel}>
@@ -162,45 +127,6 @@ function PushSetup({ serverId, status }: { serverId: string; status: PushStatus 
       </Text>
 
       <Card style={styles.pushCard}>
-        <Text variant="secondary">
-          The webhook endpoint on the agent host that registers this device. Its port is the messaging gateway&apos;s,
-          not the one the app talks to.
-        </Text>
-
-        <TextInput
-          value={baseUrl}
-          onChangeText={setBaseUrl}
-          editable={loaded}
-          placeholder="http://host:8644"
-          placeholderTextColor={theme.color.gray400}
-          autoCapitalize="none"
-          autoCorrect={false}
-          inputMode="url"
-          style={[styles.input, { borderColor: theme.color.border, color: theme.color.gray800 }]}
-        />
-
-        <TextInput
-          value={secret}
-          onChangeText={setSecret}
-          editable={loaded}
-          placeholder="Route secret (leave blank to keep)"
-          placeholderTextColor={theme.color.gray400}
-          autoCapitalize="none"
-          autoCorrect={false}
-          secureTextEntry
-          style={[styles.input, { borderColor: theme.color.border, color: theme.color.gray800 }]}
-        />
-
-        <Pressable
-          accessibilityRole="button"
-          onPress={() => void save()}
-          style={[styles.save, { borderColor: theme.color.secondaryMuted, borderRadius: theme.radius.control }]}
-        >
-          <Text variant="rowLabelStrong" color={theme.color.secondaryDeep}>
-            Save and register
-          </Text>
-        </Pressable>
-
         <StatusLine status={status} />
       </Card>
     </View>
@@ -212,7 +138,16 @@ function StatusLine({ status }: { status: PushStatus }) {
   const theme = useTheme()
 
   const [label, color] = {
-    unconfigured: ['Not set up — this device receives nothing while closed.', theme.color.gray500],
+    idle: ['Connect an agent to register this device.', theme.color.gray500],
+    // Not a fault and not fixable here: this agent kind has no host process to
+    // hold a device registry.
+    unsupported: ['This agent cannot deliver push. Notifications arrive only while the app is open.', theme.color.gray500],
+    // The one case a person can act on, so it says what to do rather than that
+    // something went wrong.
+    not_installed: [
+      'The host has no polyflow_agents_push plugin enabled. Install it there to get notifications while the app is closed.',
+      theme.color.warning700
+    ],
     unavailable: ['No push token. Remote push needs a development build, not Expo Go.', theme.color.warning700],
     registering: ['Registering…', theme.color.gray500],
     registered: ['Registered. The host will push to this device.', theme.color.success700],

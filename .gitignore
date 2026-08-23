@@ -41,3 +41,10 @@ example
 # generated native folders
 /ios
 /android
+
+# Python build artifacts from `pip install host/`
+host/build/
+host/dist/
+*.egg-info/
+__pycache__/
+*.pyc
