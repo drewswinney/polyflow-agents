@@ -42,18 +42,6 @@ export default function SettingsScreen() {
   const selectAgent = useSelectAgent()
   const dismissAgent = useAgents(state => state.dismissAgent)
   const removeServer = useAgents(state => state.removeServer)
-  // Every agent this one removal would take with it, which is what its
-  // confirmation has to name: the row was reached from a single agent, and
-  // nothing on the way here said the host had three (§7.4).
-  //
-  // Derived from `agents` above rather than selected out of the store. A
-  // selector that builds a new array is a fresh reference on every read, and
-  // zustand v5 hands the selector straight to `useSyncExternalStore`, which
-  // compares snapshots with `Object.is` — so the snapshot never settles and
-  // the screen re-renders until React gives up ("The result of getSnapshot
-  // should be cached to avoid an infinite loop"). Filtering a value the store
-  // already owns keeps the read stable.
-  const onThisServer = agents.filter(candidate => candidate.serverId === server?.id)
   const backend = useBackend()
   const state = useConnectionState()
   const reconnect = useReconnect()
@@ -65,6 +53,16 @@ export default function SettingsScreen() {
   // Narrowed past this point for the same reason `agent` is: an agent without
   // its server is not a state the registry can be in.
   if (!maybeAgent || !server) return <Redirect href="/" />
+
+  // Every agent this one removal would take with it, which is what its
+  // confirmation has to name: the row was reached from a single agent, and
+  // nothing on the way here said the host had three (§7.4).
+  //
+  // Derived from the subscribed list, *not* a second selector. `filter` builds
+  // a new array on every read, and a zustand selector is compared by identity —
+  // one that never returns the same value is a snapshot React re-renders
+  // against forever, which is what crashed this screen on open.
+  const onThisServer = agents.filter(candidate => candidate.serverId === server.id)
 
   const forgetServer = async () => {
     const id = server.id

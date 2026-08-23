@@ -205,7 +205,7 @@ function AppSidebar() {
   const hide = useSidebar(state => state.hide)
   const pathname = usePathname()
 
-  const sessions = useSessions(agent?.id ?? '', backend)
+  const sessions = useSessions(agent?.scope ?? '', backend)
 
   return (
     <Sidebar
