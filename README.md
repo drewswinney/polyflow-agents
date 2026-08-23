@@ -39,6 +39,52 @@ identity skips the picker. A host that will not answer still yields one agent,
 so discovery can only ever add. Servers are what you remove; agents that vanish
 server-side are marked, not deleted (architecture §4.2, §5.2a).
 
+## Notifications
+
+While the app is open it raises its own notifications. Once it is closed the
+phone cannot observe anything — neither OS keeps a WebSocket alive in the
+background — so the case that matters, an agent halted on an approval while
+your phone is in your pocket, needs the **host** to do the telling. That is a
+Hermes plugin, and it lives in this repo at
+[host/polyflow_agents_push/](host/polyflow_agents_push/) so it and the app stay
+versioned together: they share a contract, and drift between them is invisible
+until a notification silently stops arriving.
+
+On the agent host:
+
+```bash
+uv tool install polyflow-agents-push      # pip works too, wherever pip exists
+polyflow_agents_push install --copy --enable
+```
+
+Then restart `hermes serve` — that process loads both the hooks and the
+registration route — and the messaging gateway too if you want cron output
+pushed. `polyflow_agents_push status` says where it landed and whether Hermes
+has it enabled.
+
+**uv rather than pip** because a Hermes host usually has no pip: Hermes builds
+its venv with uv, uv does not put pip inside it, and a modern system Python is
+likely PEP 668-managed. uv ships with Hermes at `~/.hermes/bin/uv`. Nothing in
+the package needs uv specifically.
+
+**`--enable` is not optional flavour.** A user plugin's Python is never
+imported until its name is in Hermes's `plugins.enabled` allow-list, so an
+installed-but-not-enabled plugin is silently absent rather than broken.
+
+Nothing else to configure. The app registers this device over the connection it
+already has, authenticated by the credential you already gave it — there is no
+second endpoint, no second secret, and nothing to type into Settings. The
+Notifications screen reports what the host knows, including when it has no
+plugin.
+
+Remote push needs a real build. Expo Go dropped it in SDK 53, so `npm start` →
+scan gets you local notifications only; `eas build --profile preview` is the
+smallest thing that can receive a push.
+
+What the host sends, what it deliberately does not, and the two hooks it is
+still unproven against are in [docs/push-relay.md](docs/push-relay.md) and the
+plugin's own [README](host/polyflow_agents_push/README.md).
+
 ## Checks
 
 ```bash
@@ -139,9 +185,11 @@ Two things are deliberately not what the design drew, because no API backs them:
 - **Voice is push-to-talk, not realtime.** Hermes's audio surface is three
   request/response REST endpoints with no duplex channel, so barge-in has
   nothing to interrupt.
-- **Notifications are local-only.** Delivery once the app is closed needs a
-  relay on the agent host; its contract is written up in
-  [docs/push-relay.md](docs/push-relay.md).
+- **Notifications need a host plugin, and answering still happens in the app.**
+  Delivery once the app is closed is the plugin above. Resolving an approval
+  *from the lock screen* is a further step, deliberately not taken: it would
+  replace Hermes's built-in approval prompt for every client on that host,
+  including the TUI and the desktop app (`docs/push-relay.md` §6).
 
 Smaller absences — no approval countdown, no CPU/memory/disk tiles, no QR
 pairing, no MCP reachability — are §2.6 of the architecture. In each case the
