@@ -22,6 +22,13 @@ let handlerInstalled = false
 /**
  * Registered on first use, never at import.
  *
+ * "First use" has to include a *remote* push arriving, which is why this is
+ * exported. Without a handler installed, expo-notifications does not present a
+ * notification that lands while the app is foregrounded — and a push from the
+ * host can arrive at any moment, including before this session has raised a
+ * single local one. Calling it only from `notifyLocally` meant the host could
+ * deliver perfectly and the phone would show nothing.
+ *
  * This ran at module scope, which was harmless for as long as the module was
  * only reachable from the notifications screen. Wiring `useNotificationTap`
  * into the root layout pulled it onto the launch path, and a side effect on
@@ -34,7 +41,7 @@ let handlerInstalled = false
  * call that actually needs it, once, and a failure costs the banner rather
  * than the app.
  */
-function ensureNotificationHandler(): void {
+export function ensureNotificationHandler(): void {
   if (handlerInstalled) return
 
   handlerInstalled = true

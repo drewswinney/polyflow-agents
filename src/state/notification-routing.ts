@@ -21,6 +21,8 @@ import * as Notifications from 'expo-notifications'
 import { router } from 'expo-router'
 import { useEffect, useRef } from 'react'
 
+import { ensureNotificationHandler } from '@/platform/notifications'
+
 import { useAgents } from './agents'
 
 interface NotificationPayload {
@@ -62,6 +64,13 @@ export function useNotificationRouting(): void {
 
       if (payload.sessionId) router.push(`/chat/${payload.sessionId}`)
     }
+
+    // Armed here rather than by the first local notification: this hook is
+    // mounted at the root, so a push that lands while the app is open finds a
+    // handler already installed. Otherwise the host delivers, iOS hands the
+    // notification to a foregrounded app with nothing to present it, and the
+    // whole chain looks broken from the one place a person can see it.
+    ensureNotificationHandler()
 
     const subscription = Notifications.addNotificationResponseReceivedListener(response => {
       handle(response.notification.request.content.data as NotificationPayload)
