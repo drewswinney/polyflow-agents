@@ -6,17 +6,31 @@ build-backend = "setuptools.build_meta"
 name = "polyflow-agents-push"
 version = "0.2.0"
 description = "Push notifications for the Polyflow Agents app — a Hermes plugin"
-readme = "README.md"
+readme = "polyflow_agents_push/README.md"
 requires-python = ">=3.10"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Drew Swinney" }]
-keywords = ["hermes", "hermes-agent", "push", "notifications"]
+keywords = ["hermes", "hermes-agent", "push", "notifications", "expo"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Plugins",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Topic :: Communications :: Chat",
+]
 
 # Deliberately none. The plugin runs inside Hermes's own processes, so every
 # import it needs is already there, and the push client is stdlib-only by
 # design (`push.py`) — the hooks fire from synchronous agent code and cannot
 # assume an event loop to borrow.
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/drewswinney/agent-handheld"
+Repository = "https://github.com/drewswinney/agent-handheld"
+Issues = "https://github.com/drewswinney/agent-handheld/issues"
 
 [project.scripts]
 polyflow_agents_push = "polyflow_agents_push.cli:main"

@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: polyflow-agents-push
-Version: 0.2.0
-Summary: Push notifications for the Polyflow Agents app — a Hermes plugin
-Author: Drew Swinney
-License: MIT
-Keywords: hermes,hermes-agent,push,notifications
-Requires-Python: >=3.10
-Description-Content-Type: text/markdown

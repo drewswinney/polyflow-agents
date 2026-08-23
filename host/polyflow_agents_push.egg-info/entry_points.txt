@@ -1,2 +1,0 @@
-[console_scripts]
-polyflow_agents_push = polyflow_agents_push.cli:main
