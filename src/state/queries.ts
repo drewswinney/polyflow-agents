@@ -44,6 +44,7 @@ export function useSessions(scope: string, backend: AgentBackend | null) {
     queryKey,
     enabled: Boolean(backend),
     queryFn: async () => {
+      console.log('[useSessions] queryFn executing for scope:', scope)
       const result = await backend!.listSessions({ limit: 50 })
       console.log('[useSessions] fetched', result.length, 'sessions for scope:', scope)
       return result

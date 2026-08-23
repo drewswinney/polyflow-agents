@@ -386,8 +386,11 @@ export function useSelectAgent() {
     }))
     console.log('[useSelectAgent] query keys BEFORE removeQueries:', JSON.stringify(allKeysBefore, null, 2))
     
+    // Cancel any in-flight queries first to avoid race conditions
+    queryClient.cancelQueries({ queryKey: agentScopeKey })
+    
     // Remove ALL queries that start with ['agent'] prefix
-    const removed = queryClient.removeQueries({ queryKey: agentScopeKey })
+    queryClient.removeQueries({ queryKey: agentScopeKey })
     
     // Debug: log how many were removed and what remains
     const allKeysAfter = queryClient.getQueryCache().findAll().map(q => ({ 
