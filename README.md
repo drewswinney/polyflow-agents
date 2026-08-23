@@ -106,7 +106,7 @@ src/
   ui/                 theme tokens, components
   platform/           secure storage, RN polyfills
 vendor/hermes/        vendored upstream TypeScript — never edited in place
-host/handheld_push/   the Hermes plugin that pushes to this app (pip-installable)
+host/polyflow_agents_push/  the Hermes plugin that pushes to this app (pip)
 scripts/              upstream sync, M0 checks
 ```
 

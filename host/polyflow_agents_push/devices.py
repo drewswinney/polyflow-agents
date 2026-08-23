@@ -22,7 +22,7 @@ from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
-STORE_DIRNAME = "handheld-push"
+STORE_DIRNAME = "polyflow_agents_push"
 STORE_FILENAME = "devices.json"
 
 # What the app may set per device. Kept here rather than in the app alone
@@ -59,7 +59,7 @@ def load() -> List[Dict[str, Any]]:
     except FileNotFoundError:
         return []
     except Exception:
-        logger.warning("[handheld-push] device registry unreadable; treating as empty", exc_info=True)
+        logger.warning("[polyflow_agents_push] device registry unreadable; treating as empty", exc_info=True)
 
         return []
 
@@ -99,7 +99,7 @@ def register(
     token = (token or "").strip()
 
     if not token.startswith("ExponentPushToken[") and not token.startswith("ExpoPushToken["):
-        logger.warning("[handheld-push] refusing a token that is not an Expo push token")
+        logger.warning("[polyflow_agents_push] refusing a token that is not an Expo push token")
 
         return False
 
@@ -124,7 +124,7 @@ def register(
         }
     )
     _save(devices)
-    logger.info("[handheld-push] registered device (%d total)", len(devices))
+    logger.info("[polyflow_agents_push] registered device (%d total)", len(devices))
 
     return True
 
@@ -139,7 +139,7 @@ def unregister(token: str) -> bool:
         return False
 
     _save(remaining)
-    logger.info("[handheld-push] unregistered device (%d left)", len(remaining))
+    logger.info("[polyflow_agents_push] unregistered device (%d left)", len(remaining))
 
     return True
 

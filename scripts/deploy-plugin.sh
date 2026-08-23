@@ -4,9 +4,9 @@
 # This is the *development* path. What other people use is pip:
 #
 #   pip install polyflow-agents-push
-#   handheld-push install --enable
+#   polyflow_agents_push install --enable
 #
-# Both end at the same place — a `handheld-push` directory under
+# Both end at the same place — a `polyflow_agents_push` directory under
 # ~/.hermes/plugins — but pip links the installed package there and upgrades
 # with `pip install -U`, while this copies whatever is in the tree right now.
 # Use this when iterating; tell users the pip route.
@@ -16,16 +16,16 @@ set -euo pipefail
 
 SSH_HOST="${1:-hermes}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC="$ROOT/host/handheld_push"
-DEST=".hermes/plugins/handheld-push"
+SRC="$ROOT/host/polyflow_agents_push"
+DEST=".hermes/plugins/polyflow_agents_push"
 
-echo "Deploying handheld-push to $SSH_HOST:$DEST"
+echo "Deploying polyflow_agents_push to $SSH_HOST:$DEST"
 
 # A pip install leaves a symlink here. Copying onto it would write through into
 # site-packages and leave the two silently disagreeing about which is live.
 if ssh "$SSH_HOST" "test -L $DEST"; then
   echo "  $DEST is a symlink (pip install). Remove it first, or iterate with pip:" >&2
-  echo "    handheld-push uninstall" >&2
+  echo "    polyflow_agents_push uninstall" >&2
   exit 1
 fi
 
@@ -46,7 +46,7 @@ Deployed. Two things stand between this and working.
    `plugins.enabled` allow-list — an installed-but-not-enabled plugin running
    code at startup is the vector GHSA-mcfc-hp25-cjv7 closed.
 
-     ssh HOST 'hermes plugins enable handheld-push'
+     ssh HOST 'hermes plugins enable polyflow_agents_push'
 
 2. Restart the processes that load it:
 
@@ -60,6 +60,6 @@ Deployed. Two things stand between this and working.
 
 Then confirm both faces:
 
-  ssh HOST 'hermes plugins list | grep handheld'
-  curl -H "Authorization: Bearer $TOKEN" http://HOST:9119/api/plugins/handheld-push/devices
+  ssh HOST 'hermes plugins list | grep polyflow'
+  curl -H "Authorization: Bearer $TOKEN" http://HOST:9119/api/plugins/polyflow_agents_push/devices
 NOTE

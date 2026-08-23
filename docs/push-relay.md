@@ -112,7 +112,7 @@ they do not share memory, so anything stateful (the device registry) has to live
 on disk rather than in a module global.
 
 ```
-~/.hermes/plugins/handheld-push/
+~/.hermes/plugins/polyflow_agents_push/
   plugin.yaml          # metadata, requires_env, optional_env (drives the setup wizard)
   adapter.py           # register(ctx): register_hook × N, register_platform × 1
 ```
@@ -223,7 +223,7 @@ ending in `return _err(rid, 4002, f"unknown config key: {key}")`, so the app
 could not write a plugin's config key through it.
 
 Implementation, delivery (pip) and weak points:
-[`../host/handheld_push/README.md`](../host/handheld_push/README.md).
+[`../host/polyflow_agents_push/README.md`](../host/polyflow_agents_push/README.md).
 
 ## 6. Answering from the lock screen — `register_approval_transport`
 
@@ -258,7 +258,7 @@ round-trip safe: a decision cannot be replayed against a different request.
 ```yaml
 security:
   approval:
-    transport: handheld-push     # default "builtin"
+    transport: polyflow_agents_push   # default "builtin"
     transport_fallback: builtin  # optional; anything else means fail closed
 ```
 

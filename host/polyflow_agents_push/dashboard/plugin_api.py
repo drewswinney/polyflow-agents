@@ -3,7 +3,8 @@
 This is the third face of the plugin, and the one that removed the worst part of
 the design. `hermes_cli/web_server.py` discovers `dashboard/manifest.json`,
 imports the file named by its `api` field, and mounts the `router` below under
-`/api/plugins/handheld-push/` — in the *same* process and on the *same* port
+`/api/plugins/polyflow_agents_push/` — in the *same* process and on the *same*
+port
 that serves `/api/ws`. So the app registers over the connection it already has,
 with the credential it already has.
 
@@ -51,9 +52,13 @@ router = APIRouter()
 
 # The plugin root, one level up from `dashboard/`.
 _PLUGIN_ROOT = Path(__file__).resolve().parent.parent
-# Deliberately not `handheld-push`: a hyphen is not a valid Python identifier,
-# and this name has to work as one.
-_PACKAGE = "handheld_push_plugin"
+# Deliberately *not* the installed package's own name. When this plugin is
+# pip-installed, `polyflow_agents_push` is already importable from
+# site-packages, and registering a second module under that name in
+# `sys.modules` would shadow it. The suffix keeps the two apart — and the
+# file-path load below is what makes this work for a `--copy` install or a
+# scp'd working copy, where there is no installed package to import at all.
+_PACKAGE = "polyflow_agents_push_plugin"
 
 
 def _sibling(name: str) -> Any:

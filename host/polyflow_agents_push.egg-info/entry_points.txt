@@ -1,2 +1,2 @@
 [console_scripts]
-handheld-push = handheld_push.cli:main
+polyflow_agents_push = polyflow_agents_push.cli:main

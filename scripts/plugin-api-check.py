@@ -31,7 +31,7 @@ import tempfile
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
-PLUGIN = REPO / "host" / "handheld_push"
+PLUGIN = REPO / "host" / "polyflow_agents_push"
 TOKEN = "ExponentPushToken[abcdefghij1234567890]"
 
 
@@ -54,7 +54,7 @@ def main() -> int:
 
         # Exactly what web_server.py does, including the flat module name.
         spec = importlib.util.spec_from_file_location(
-            "hermes_dashboard_plugin_handheld-push", PLUGIN / "dashboard" / "plugin_api.py"
+            "hermes_dashboard_plugin_polyflow_agents_push", PLUGIN / "dashboard" / "plugin_api.py"
         )
 
         if spec is None or spec.loader is None:
@@ -68,9 +68,9 @@ def main() -> int:
             fail("push.py and plugin_api.py hold different `devices` modules; the registry would split")
 
         app = FastAPI()
-        app.include_router(module.router, prefix="/api/plugins/handheld-push")
+        app.include_router(module.router, prefix="/api/plugins/polyflow_agents_push")
         client = TestClient(app)
-        base = "/api/plugins/handheld-push"
+        base = "/api/plugins/polyflow_agents_push"
 
         if client.get(f"{base}/devices").json() != {"devices": []}:
             fail("a fresh registry should list no devices")
@@ -98,7 +98,7 @@ def main() -> int:
         if registered.status_code != 200 or registered.json().get("devices") != 1:
             fail(f"registration did not land: {registered.status_code} {registered.text}")
 
-        store = Path(tmp) / "handheld-push" / "devices.json"
+        store = Path(tmp) / "polyflow_agents_push" / "devices.json"
 
         if not store.exists():
             fail("registration returned 200 but wrote no registry file")

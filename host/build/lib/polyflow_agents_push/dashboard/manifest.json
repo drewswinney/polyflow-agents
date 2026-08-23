@@ -1,0 +1,11 @@
+{
+  "name": "polyflow_agents_push",
+  "label": "Handheld",
+  "description": "Device registration for the Polyflow Agents app. Backend routes only — no dashboard UI.",
+  "version": "0.2.0",
+  "icon": "Smartphone",
+  "api": "plugin_api.py",
+  "tab": {
+    "hidden": true
+  }
+}

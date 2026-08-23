@@ -4,7 +4,8 @@
  * The host cannot discover a phone; the phone has to say so. That used to be
  * the hardest part of this feature and is now the easiest: registration is an
  * ordinary authenticated request through the backend, to a route the
- * `handheld-push` plugin mounts under `/api/plugins/handheld-push/` in the same
+ * `polyflow_agents_push` plugin mounts under `/api/plugins/polyflow_agents_push/`
+ * in the same
  * process that serves the socket.
  *
  * What that replaced is worth remembering, because the old shape is what the
@@ -103,7 +104,7 @@ export async function registerDevice(
       return {
         ok: false,
         notInstalled: true,
-        error: 'This host has no handheld-push plugin, or it is installed but not enabled.'
+        error: 'This host has no polyflow_agents_push plugin, or it is installed but not enabled.'
       }
     }
 

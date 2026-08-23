@@ -123,7 +123,7 @@ export const HERMES_CAPABILITIES: Capabilities = {
   // Audio is request/response REST, not a duplex channel — push-to-talk only (§2.6, §7.9).
   media: { images: true, audioIn: true, audioOut: true },
   // True of the *kind*, not of a given host: the route exists once the
-  // `handheld-push` plugin is installed and enabled. A host without it 404s.
+  // `polyflow_agents_push` plugin is installed and enabled. Without it, 404.
   push: { register: true }
 }
 

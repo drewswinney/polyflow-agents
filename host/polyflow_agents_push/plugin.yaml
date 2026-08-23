@@ -1,4 +1,4 @@
-name: handheld-push
+name: polyflow_agents_push
 label: Handheld
 kind: platform
 version: 0.2.0

@@ -19,14 +19,14 @@ keywords = ["hermes", "hermes-agent", "push", "notifications"]
 dependencies = []
 
 [project.scripts]
-handheld-push = "handheld_push.cli:main"
+polyflow_agents_push = "polyflow_agents_push.cli:main"
 
 [tool.setuptools]
-# `handheld_push` only. `dashboard` is package *data*, not an import package:
+# `polyflow_agents_push` only. `dashboard` is package *data*, not an import package:
 # the web server loads `plugin_api.py` by file path, and making it importable
 # would put a module named `dashboard` on the path of every process that loads
 # this plugin.
-packages = ["handheld_push"]
+packages = ["polyflow_agents_push"]
 
 [tool.setuptools.package-data]
-handheld_push = ["plugin.yaml", "dashboard/manifest.json", "dashboard/plugin_api.py"]
+polyflow_agents_push = ["plugin.yaml", "dashboard/manifest.json", "dashboard/plugin_api.py"]

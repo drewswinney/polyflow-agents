@@ -1,4 +1,4 @@
-"""Hermes plugin: push notifications for the handheld app.
+"""Hermes plugin: push notifications for the Polyflow Agents app.
 
 Three faces, loaded by up to three processes (see `docs/push-relay.md` §2, §3):
 
@@ -7,7 +7,7 @@ Three faces, loaded by up to three processes (see `docs/push-relay.md` §2, §3)
 - **A platform**, registered in the messaging gateway, so cron jobs can
   `deliver=handheld`.
 - **Backend routes**, in `dashboard/plugin_api.py`, mounted by the web server
-  under `/api/plugins/handheld-push/`. Device registration arrives there.
+  under `/api/plugins/polyflow_agents_push/`. Registration arrives there.
 
 Registration used to arrive through the *platform* face, as a control frame on
 the webhook gateway's `deliver_only` path — the only inbound channel available
@@ -29,6 +29,10 @@ from . import devices, push
 
 logger = logging.getLogger(__name__)
 
+# The *gateway platform* name, which is not the plugin name and deliberately
+# stays short: it is what a person types in cron config (`deliver=handheld`)
+# and what `HANDHELD_HOME_CHANNEL` is named after. Renaming it would rewrite
+# every existing cron job's delivery target for no gain.
 PLATFORM_NAME = "handheld"
 PLATFORM_LABEL = "Handheld"
 
@@ -167,7 +171,7 @@ def _build_adapter(config: Any) -> Any:
             super().__init__(cfg, Platform(PLATFORM_NAME))
 
         async def connect(self, *, is_reconnect: bool = False) -> bool:
-            logger.info("[handheld-push] platform ready (%d device(s))", len(devices.load()))
+            logger.info("[polyflow_agents_push] platform ready (%d device(s))", len(devices.load()))
 
             return True
 
@@ -246,7 +250,7 @@ def register(ctx: Any) -> None:
         try:
             ctx.register_hook(hook_name, callback)
         except Exception:
-            logger.warning("[handheld-push] could not register hook %s", hook_name, exc_info=True)
+            logger.warning("[polyflow_agents_push] could not register hook %s", hook_name, exc_info=True)
 
     try:
         ctx.register_platform(
@@ -263,13 +267,13 @@ def register(ctx: Any) -> None:
     except ImportError:
         # Expected in a process that never imports the gateway — `hermes serve`
         # runs turns and fires hooks but has no platform registry.
-        logger.debug("[handheld-push] no platform registry in this process")
+        logger.debug("[polyflow_agents_push] no platform registry in this process")
     except Exception:
         # Not expected, and not something to shrug off: without the platform
         # face there is no cron delivery, so notifications would half-work with
         # nothing saying why. Registration is unaffected — that is the web
         # server's face, in a different process.
-        logger.warning("[handheld-push] platform registration FAILED", exc_info=True)
+        logger.warning("[polyflow_agents_push] platform registration FAILED", exc_info=True)
 
 
 async def _standalone_send(*_args: Any, **kwargs: Any) -> Dict[str, Any]:
@@ -303,6 +307,6 @@ def _safe(callback: Any) -> Any:
         try:
             callback(**kwargs)
         except Exception:
-            logger.warning("[handheld-push] hook raised; ignoring", exc_info=True)
+            logger.warning("[polyflow_agents_push] hook raised; ignoring", exc_info=True)
 
     return wrapped

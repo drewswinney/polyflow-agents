@@ -20,7 +20,7 @@ import { useTheme } from '@/ui/ThemeProvider'
  * These preferences are enforced in two places, and that is deliberate. While
  * the app runs it filters its own local notifications. Once it is closed only
  * the host can decide anything, so the same preferences are sent to the
- * `handheld-push` plugin at registration — see `docs/push-relay.md`.
+ * `polyflow_agents_push` plugin at registration — see `docs/push-relay.md`.
  *
  * Quiet hours are the exception and stay device-side: they depend on this
  * phone's clock and timezone, which the host does not know.
@@ -145,7 +145,7 @@ function StatusLine({ status }: { status: PushStatus }) {
     // The one case a person can act on, so it says what to do rather than that
     // something went wrong.
     not_installed: [
-      'The host has no handheld-push plugin enabled. Install it there to get notifications while the app is closed.',
+      'The host has no polyflow_agents_push plugin enabled. Install it there to get notifications while the app is closed.',
       theme.color.warning700
     ],
     unavailable: ['No push token. Remote push needs a development build, not Expo Go.', theme.color.warning700],

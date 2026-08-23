@@ -36,7 +36,7 @@ def notify(*, kind: str, title: str, body: str, data: Dict[str, Any] | None = No
     thread = threading.Thread(
         target=_send_now,
         kwargs={"kind": kind, "title": title, "body": body, "data": data or {}},
-        name=f"handheld-push-{kind}",
+        name=f"polyflow-push-{kind}",
         daemon=True,
     )
     thread.start()
@@ -69,7 +69,7 @@ def _send_now(*, kind: str, title: str, body: str, data: Dict[str, Any]) -> None
         for start in range(0, len(messages), MAX_MESSAGES_PER_REQUEST):
             _post(messages[start : start + MAX_MESSAGES_PER_REQUEST])
     except Exception:
-        logger.warning("[handheld-push] notification failed", exc_info=True)
+        logger.warning("[polyflow_agents_push] notification failed", exc_info=True)
 
 
 def _post(messages: List[Dict[str, Any]]) -> None:
@@ -84,7 +84,7 @@ def _post(messages: List[Dict[str, Any]]) -> None:
         with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
             payload = json.load(response)
     except urllib.error.URLError as exc:
-        logger.warning("[handheld-push] Expo unreachable: %s", exc)
+        logger.warning("[polyflow_agents_push] Expo unreachable: %s", exc)
 
         return
 
@@ -112,4 +112,4 @@ def _prune_dead_tokens(messages: List[Dict[str, Any]], payload: Any) -> None:
         if details.get("error") == "DeviceNotRegistered":
             devices.unregister(message["to"])
         else:
-            logger.warning("[handheld-push] Expo rejected a message: %s", ticket.get("message"))
+            logger.warning("[polyflow_agents_push] Expo rejected a message: %s", ticket.get("message"))

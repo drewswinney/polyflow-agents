@@ -105,14 +105,14 @@ export async function probeScheme(host: string, fetchImpl: typeof fetch = fetch)
 const DEFAULT_TIMEOUT_MS = 30_000
 
 /**
- * The `handheld-push` plugin's device route.
+ * The `polyflow_agents_push` plugin's device route.
  *
- * The plugin *name* is what Hermes mounts under, so this string is the contract
- * between this repo's two halves — rename the directory in `host/` and this
- * breaks silently, which is exactly the drift `host/handheld-push/README.md`
- * warns about.
+ * Hermes mounts a plugin's router under the `name` in its manifest, so this
+ * string is the contract between this repo's two halves — change the name in
+ * `host/polyflow_agents_push/dashboard/manifest.json` and this breaks silently,
+ * which is exactly the drift that plugin's README warns about.
  */
-const PUSH_ROUTE = '/api/plugins/handheld-push/devices'
+const PUSH_ROUTE = '/api/plugins/polyflow_agents_push/devices'
 
 /** Audio endpoints scale with payload size, between three and ten minutes. */
 function audioTimeoutMs(estimate: number): number {
@@ -304,7 +304,7 @@ export class HermesRest {
 
   // --- Push registration --------------------------------------------------
   //
-  // These are the `handheld-push` plugin's own routes, mounted by
+  // These are the `polyflow_agents_push` plugin's own routes, mounted by
   // `hermes_cli/web_server.py` under `/api/plugins/<name>/` — the same process
   // and port as `/api/ws`, behind the same auth. That is why registration needs
   // no endpoint, no secret and no code of its own beyond this: it is an

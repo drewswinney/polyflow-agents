@@ -1,4 +1,4 @@
-# handheld-push
+# polyflow_agents_push
 
 The host half of the app's notifications. A Hermes plugin, not a service — see
 [`../../docs/push-relay.md`](../../docs/push-relay.md) for why, and for the
@@ -28,16 +28,15 @@ being asked.
 
 ```bash
 pip install polyflow-agents-push
-handheld-push install --enable
+polyflow_agents_push install --enable
 ```
 
 Then restart `hermes serve` (hooks and the registration routes) and, if you want
 cron delivery, the messaging gateway.
 
-`install` links the installed package into `~/.hermes/plugins/handheld-push`, so
+`install` links the installed package into `~/.hermes/plugins/polyflow_agents_push`, so
 `pip install -U` is the whole upgrade. `--copy` copies instead, for hosts where
-site-packages and the plugin directory are not on one filesystem. `handheld-push
-status` says where it landed and whether Hermes has it enabled.
+site-packages and the plugin directory are not on one filesystem. `polyflow_agents_push status` says where it landed and whether Hermes has it enabled.
 
 **Why a second command at all**, when Hermes supports pip-installed plugins
 through the `hermes_agent.plugins` entry-point group: that group covers hooks
@@ -54,7 +53,7 @@ GHSA-mcfc-hp25-cjv7 closed. Without it every face is silently absent.
 
 ## Device registration
 
-The app POSTs to `/api/plugins/handheld-push/devices` on the port it already
+The app POSTs to `/api/plugins/polyflow_agents_push/devices` on the port it already
 talks to, authenticated by the credential it already holds. Nothing to
 configure, nothing to type, no secret of its own.
 
@@ -119,9 +118,13 @@ Untested: no cron job has delivered here yet.
   is stale gets notifications it has since turned off.
 - **Approvals ignore preferences by design** (`devices.wants`). A halted agent
   nobody is told about is a worse failure than an unwanted banner.
-- **The plugin's directory name is a contract.** Hermes mounts routes under the
-  directory name, so `handheld-push` is baked into the app's `PUSH_ROUTE`.
-  Renaming the directory breaks registration silently.
+- **The plugin's name is a contract.** Hermes mounts a router under the `name`
+  in `dashboard/manifest.json` (falling back to the directory basename), so
+  `polyflow_agents_push` is baked into the app's `PUSH_ROUTE`. Change one
+  without the other and registration 404s with nothing to say why.
+- **The gateway platform is still called `handheld`.** That is a different name
+  from the plugin's, on purpose: it is what cron config says (`deliver=handheld`)
+  and what `HANDHELD_HOME_CHANNEL` is named after.
 
 ## Not implemented
 

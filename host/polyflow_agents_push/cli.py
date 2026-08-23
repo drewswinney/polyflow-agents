@@ -1,4 +1,4 @@
-"""`handheld-push` — put this package where Hermes looks for plugins.
+"""`polyflow_agents_push` — put this package where Hermes looks for plugins.
 
 pip is the transport; it is not the discovery mechanism. Hermes does support
 entry-point plugins (`hermes_agent.plugins`), and using them would make
@@ -29,11 +29,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-# The directory name Hermes will know this by. It has a hyphen and the Python
-# package has an underscore, and they are not interchangeable: this string is
-# what the app's `PUSH_ROUTE` is built from (`/api/plugins/handheld-push/...`)
+# The name Hermes knows this plugin by. It is the `name` in both manifests, the
+# directory this links to, and — because the web server mounts routers under
+# `plugin['name']` — half of every route path. That is why it is a constant:
+# what the app's `PUSH_ROUTE` is built from (`/api/plugins/polyflow_agents_push/...`)
 # and what `hermes plugins enable` expects.
-PLUGIN_NAME = "handheld-push"
+PLUGIN_NAME = "polyflow_agents_push"
 
 PACKAGE_ROOT = Path(__file__).resolve().parent
 
@@ -166,7 +167,7 @@ def uninstall() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="handheld-push", description=__doc__.split("\n")[0])
+    parser = argparse.ArgumentParser(prog="polyflow_agents_push", description=__doc__.split("\n")[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_install = sub.add_parser("install", help="link this package into ~/.hermes/plugins/")
