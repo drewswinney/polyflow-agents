@@ -6,6 +6,7 @@ import { ActivityIndicator, Keyboard, Platform, StyleSheet, View } from 'react-n
 
 import type { TranscriptEntry } from '@/domain'
 import { useBackend, useConnectionState } from '@/state/ConnectionProvider'
+import { useAgentScopedRoute } from '@/state/agent-scope'
 import { useSelectedServer } from '@/state/agents'
 import { useSidebar } from '@/state/sidebar'
 import { useSessionStream } from '@/state/session-stream'
@@ -44,7 +45,18 @@ export default function ChatScreen() {
   const openSidebar = useSidebar(store => store.show)
   const listRef = useRef<FlashListRef<TranscriptEntry>>(null)
 
-  const stream = useSessionStream(backend, id, state)
+  /**
+   * Whether the agent moved on under this session.
+   *
+   * The id in the route only resolves against the agent it was opened for
+   * (§5.2), so once the selection changes this screen is holding an address
+   * nobody can look up. It hands the stream nothing rather than the new
+   * agent's backend — which would fetch a stranger's session, or more likely a
+   * 404 over a transcript that was fine — and steps off the stack as soon as
+   * it is the screen in front of you.
+   */
+  const stale = useAgentScopedRoute()
+  const stream = useSessionStream(stale ? null : backend, id, state)
   const streaming = useIsStreaming(stream.tail)
   // The composer offers Stop for the whole turn, not just while tokens land: a
   // tool can run for minutes with nothing streaming, and that is precisely when

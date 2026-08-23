@@ -211,7 +211,10 @@ function AppSidebar() {
     <Sidebar
       visible={open}
       sessions={sessions.data ?? []}
-      loading={sessions.isLoading}
+      // Pending covers the switch as well as the first load: the backend is
+      // withheld until it matches the selected agent, and the drawer's Recent
+      // list should say so rather than read as an agent with no history.
+      loading={sessions.isPending}
       activePath={pathname}
       paired={Boolean(agent)}
       onOpenSession={id => router.push(`/chat/${id}`)}

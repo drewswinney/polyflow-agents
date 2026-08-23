@@ -12,6 +12,7 @@ import { Pressable, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useBackend } from '@/state/ConnectionProvider'
+import { useAgentScopedRoute } from '@/state/agent-scope'
 import { useChatInbox } from '@/state/chat-inbox'
 import { Icon } from '@/ui/components/Icon'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
@@ -37,6 +38,12 @@ export default function VoiceScreen() {
   const { id } = useLocalSearchParams<{ id: string }>()
   const backend = useBackend()
   const submit = useChatInbox(state => state.submit)
+
+  // Dictation is addressed to one session, and a session belongs to one agent
+  // (§5.2): if the selection moves while this is open, the transcript has
+  // nowhere to be sent and the screen leaves rather than posting it into the
+  // wrong scope.
+  useAgentScopedRoute()
 
   const recorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY)
   const recorderState = useAudioRecorderState(recorder, 100)

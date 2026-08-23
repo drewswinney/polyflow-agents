@@ -4,7 +4,7 @@ import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, T
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { SessionSummary } from '@/domain'
-import { useBackend } from '@/state/ConnectionProvider'
+import { useBackend, useConnectionFault, useConnectionState } from '@/state/ConnectionProvider'
 import { useAgents, useSelectedAgent, useSelectedServerOrNull, useSelectAgent } from '@/state/agents'
 import { useSessions, useSessionSearch } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
@@ -39,6 +39,8 @@ export default function SessionsScreen() {
   const selectAgent = useSelectAgent()
   const dismissAgent = useAgents(state => state.dismissAgent)
   const backend = useBackend()
+  const connection = useConnectionState()
+  const fault = useConnectionFault()
   const openSidebar = useSidebar(store => store.show)
 
   const [switcherOpen, setSwitcherOpen] = useState(false)
@@ -49,6 +51,21 @@ export default function SessionsScreen() {
   const search = useSessionSearch(agent.id, backend, query)
 
   const groups = useMemo(() => groupSessions(sessions.data ?? []), [sessions.data])
+
+  /**
+   * Why there is nothing to show, when there is nothing to show.
+   *
+   * Two ways to have no list. The query can fail, which is a host that answered
+   * badly — and the dial can fail before a backend exists at all, which leaves
+   * the query merely *disabled* and reports nothing. Only the first was drawn;
+   * the second fell through to the empty state and blamed the agent for the
+   * app's own missing socket.
+   */
+  const loadError = sessions.error
+    ? String((sessions.error as Error).message)
+    : !backend && connection === 'error'
+      ? (fault.error ?? 'Not connected.')
+      : null
 
   const openSession = (id: string) => router.push(`/chat/${id}`)
 
@@ -105,32 +122,41 @@ export default function SessionsScreen() {
           <>
             <NewSessionButton onPress={() => router.navigate('/')} />
 
-            {sessions.isLoading ? (
-              <ActivityIndicator color={theme.color.secondary} style={styles.loading} />
-            ) : sessions.error ? (
+            {/* Answered first, then failed, then still asking — in that
+                order, and on `data` rather than a loading flag. Switching
+                agents withholds the backend until it belongs to the agent now
+                on the pill, so the incoming query is *disabled* for a dial:
+                nothing fetched, nothing cached, nothing wrong. That window
+                used to reach the empty state and announce a paired, idle agent
+                whose sessions had not been asked for yet. */}
+            {sessions.data ? (
+              groups.length === 0 ? (
+                <EmptyState agentName={agent.displayName} agentIcon={agent.icon} />
+              ) : (
+                groups.map(group => (
+                  <View key={group.label} style={styles.group}>
+                    <Text variant="sectionHeader" style={styles.groupLabel}>
+                      {group.label}
+                    </Text>
+                    <Card>
+                      {group.sessions.map((session, index) => (
+                        <View key={session.id}>
+                          {index > 0 ? <Divider /> : null}
+                          {session.blockedOn ? <BlockedStrip /> : null}
+                          <SessionRow session={session} onPress={() => openSession(session.id)} />
+                        </View>
+                      ))}
+                    </Card>
+                  </View>
+                ))
+              )
+            ) : loadError ? (
               <Card style={styles.messageCard}>
                 <Text variant="rowLabelStrong">Could not reach {agent.displayName}</Text>
-                <Text variant="secondary">{String((sessions.error as Error).message)}</Text>
+                <Text variant="secondary">{loadError}</Text>
               </Card>
-            ) : groups.length === 0 ? (
-              <EmptyState agentName={agent.displayName} agentIcon={agent.icon} />
             ) : (
-              groups.map(group => (
-                <View key={group.label} style={styles.group}>
-                  <Text variant="sectionHeader" style={styles.groupLabel}>
-                    {group.label}
-                  </Text>
-                  <Card>
-                    {group.sessions.map((session, index) => (
-                      <View key={session.id}>
-                        {index > 0 ? <Divider /> : null}
-                        {session.blockedOn ? <BlockedStrip /> : null}
-                        <SessionRow session={session} onPress={() => openSession(session.id)} />
-                      </View>
-                    ))}
-                  </Card>
-                </View>
-              ))
+              <ActivityIndicator color={theme.color.secondary} style={styles.loading} />
             )}
           </>
         )}
