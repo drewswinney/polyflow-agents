@@ -11,9 +11,23 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { AgentBackend, AgentId } from '@/domain'
 
+/** The prefix every agent-scoped key shares, for invalidating one agent's lot. */
+export const agentKey = (agentId: AgentId) => ['agent', agentId] as const
+
 export const sessionsKey = (agentId: AgentId) => ['agent', agentId, 'sessions'] as const
 export const searchKey = (agentId: AgentId, query: string) => ['agent', agentId, 'search', query] as const
 
+/**
+ * The selected agent's sessions.
+ *
+ * `backend` is null for the length of a switch — it is handed out only once it
+ * belongs to the agent whose id is in the key above (see `useConnection`) — so
+ * this query is *disabled*, not idle, while an agent change is in flight. A
+ * disabled query with nothing cached reports `isPending` without `isLoading`,
+ * which is why callers must render `isPending` as loading: reading `isLoading`
+ * alone drew "no sessions" over the gap, and the emptiness was the app's, not
+ * the agent's.
+ */
 export function useSessions(agentId: AgentId, backend: AgentBackend | null) {
   return useQuery({
     queryKey: sessionsKey(agentId),

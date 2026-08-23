@@ -15,7 +15,7 @@ import { AppState, type AppStateStatus } from 'react-native'
 import { discoverAgents } from '@/backends/discovery'
 import { probeScheme } from '@/backends/hermes'
 import { activateBackend, MOCK_HOST, releaseBackend } from '@/backends/registry'
-import type { Agent, AgentBackend, ConnectionState, Server } from '@/domain'
+import type { Agent, AgentBackend, AgentId, ConnectionState, Server } from '@/domain'
 import { type AgentCredential, readAgentCredential } from '@/platform/secure-store'
 
 import { useAgents } from './agents'
@@ -39,7 +39,19 @@ export interface Connection {
 export function useConnection(server: Server | null, agent: Agent | null): Connection {
   const patchServer = useAgents(state => state.patchServer)
   const reconcile = useAgents(state => state.reconcile)
-  const [backend, setBackend] = useState<AgentBackend | null>(null)
+  /**
+   * The live backend **and the agent it was built for**.
+   *
+   * Paired rather than stored alone because a switch is not instant: the effect
+   * below waits on a dial cooldown, a keychain read and sometimes a scheme
+   * probe before the new backend exists, and for that whole window the
+   * selection has already moved while this state still holds the previous
+   * agent's socket. Screens read the two together — `agent.id` for the cache
+   * key, `backend` for the fetch — so an unpaired backend let one agent's
+   * sessions be fetched and then cached under the other's key, which is exactly
+   * the swap that showed up as switching agents changing nothing (§5.2).
+   */
+  const [active, setActive] = useState<{ agentId: AgentId; backend: AgentBackend } | null>(null)
   const [state, setState] = useState<ConnectionState>('idle')
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
@@ -174,7 +186,7 @@ export function useConnection(server: Server | null, agent: Agent | null): Conne
 
       if (cancelled) return
 
-      setBackend(next)
+      setActive({ agentId: agent.id, backend: next })
       const unsubscribe = next.connectionState.subscribe(value => {
         if (!cancelled) setState(value)
       })
@@ -311,6 +323,15 @@ export function useConnection(server: Server | null, agent: Agent | null): Conne
       previous = current
     })
   }, [])
+
+  /**
+   * Nothing is handed out until it belongs to the agent on screen.
+   *
+   * The gap is short — one dial — and null is the honest answer for it: a
+   * query with no backend stays pending, so the lists spend the switch loading
+   * rather than briefly showing the previous agent's rows as the new one's.
+   */
+  const backend = active && active.agentId === agent?.id ? active.backend : null
 
   return { backend, state, error, attempt, reconnect }
 }

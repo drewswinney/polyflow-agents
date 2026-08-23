@@ -14,7 +14,7 @@ import { create } from 'zustand'
 import { useQueryClient } from '@tanstack/react-query'
 
 import type { Agent, AgentConnection, AgentIconName, AgentId, AgentIdentity, Server, ServerId } from '@/domain'
-import { sessionsKey } from './queries'
+import { agentKey } from './queries'
 
 const STORAGE_KEY = 'agents/v2'
 /** Read once, on first hydrate after the upgrade, and then never written. */
@@ -355,19 +355,27 @@ export function useConnectionOf(agent: Agent | null): AgentConnection {
 }
 
 /**
- * Hook for selecting an agent and refreshing dependent queries.
+ * Select an agent, and make everything scoped to it reload.
  *
- * When switching agents, the React Query cache for sessions must be invalidated
- * so fresh data loads for the new agent (§5.2). This wraps the select action
- * with query invalidation.
+ * The whole agent prefix, not just its session list: search results, and
+ * anything else keyed under the agent, are as stale as the list is (§5.2).
+ * Invalidated rather than removed — the incoming agent's cached rows are still
+ * that agent's own rows, so they are worth drawing while the refetch runs, and
+ * dropping them would blank a list the switch is meant to fill.
+ *
+ * Correctness does not rest on this. A key carries the agent id, and the
+ * backend is withheld until it belongs to that same agent, so the wrong
+ * agent's sessions cannot be written under this one's key whether or not the
+ * invalidation runs — which matters, because notification routing selects
+ * through the store directly (§7.12). This is what keeps a switch *fresh*; the
+ * pairing is what keeps it *right*.
  */
 export function useSelectAgent() {
   const queryClient = useQueryClient()
   const select = useAgents(state => state.select)
 
   return (id: AgentId) => {
-    // Invalidate sessions cache so fresh data loads for the newly selected agent
-    queryClient.invalidateQueries({ queryKey: sessionsKey(id) })
+    void queryClient.invalidateQueries({ queryKey: agentKey(id) })
     select(id)
   }
 }
