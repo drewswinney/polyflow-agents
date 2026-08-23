@@ -1,38 +1,54 @@
 /**
- * Server state, keyed by agent.
+ * Server state, keyed by agent scope (profile name).
  *
- * Every key starts with the agent id: session ids are only unique within a
- * backend, so a cache shared across agents would serve one agent's transcript
+ * The backend uses agent.scope to fetch sessions, so query keys must use scope
+ * to match what the backend actually queries. Session ids are only unique within
+ * a backend, so a cache shared across agents would serve one agent's transcript
  * for another's id (§5.2). This is the cheap half of agent scoping — the
  * expensive half is remembering to do it everywhere.
  */
 
+import { useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
 import type { AgentBackend, AgentId } from '@/domain'
 
-/** The prefix every agent-scoped key shares, for invalidating one agent's lot. */
-export const agentKey = (agentId: AgentId) => ['agent', agentId] as const
-
-export const sessionsKey = (agentId: AgentId) => ['agent', agentId, 'sessions'] as const
-export const searchKey = (agentId: AgentId, query: string) => ['agent', agentId, 'search', query] as const
+/**
+ * The prefix every agent-scoped key starts with.
+ *
+ * For the one case that has to reach past a single agent: switching. React
+ * Query matches keys by prefix, so this invalidates every agent's cache at
+ * once — which is the point, because the rows that were stale belong to the
+ * agent you are *leaving*, not the one you are selecting.
+ */
+export const agentScopeKey = ['agent'] as const
 
 /**
- * The selected agent's sessions.
+ * Query keys use agent scope (profile name) instead of agent id.
  *
- * `backend` is null for the length of a switch — it is handed out only once it
- * belongs to the agent whose id is in the key above (see `useConnection`) — so
- * this query is *disabled*, not idle, while an agent change is in flight. A
- * disabled query with nothing cached reports `isPending` without `isLoading`,
- * which is why callers must render `isPending` as loading: reading `isLoading`
- * alone drew "no sessions" over the gap, and the emptiness was the app's, not
- * the agent's.
+ * The backend's dialKey includes agent.scope to determine which identity's
+ * data to fetch. If query keys use agent.id instead, switching between agents
+ * with swapped scopes results in cached data being served from the wrong agent.
+ *
+ * Example: Agent A (id="default", scope="greg") fetches greg's sessions but
+ * caches under "default". Agent B (id="Greg", scope="default") fetches
+ * default's sessions but caches under "Greg". Result: sessions appear swapped.
  */
-export function useSessions(agentId: AgentId, backend: AgentBackend | null) {
+export const sessionsKey = (scope: string) => ['agent', scope, 'sessions'] as const
+export const searchKey = (scope: string, query: string) => ['agent', scope, 'search', query] as const
+
+export function useSessions(scope: string, backend: AgentBackend | null) {
+  const queryKey = useMemo(() => sessionsKey(scope), [scope])
+  console.log('[useSessions] scope:', scope, 'backend:', backend ? 'present' : 'null', 'queryKey:', JSON.stringify(queryKey))
   return useQuery({
-    queryKey: sessionsKey(agentId),
+    queryKey,
     enabled: Boolean(backend),
-    queryFn: () => backend!.listSessions({ limit: 50 })
+    queryFn: async () => {
+      console.log('[useSessions] queryFn executing for scope:', scope)
+      const result = await backend!.listSessions({ limit: 50 })
+      console.log('[useSessions] fetched', result.length, 'sessions for scope:', scope)
+      return result
+    }
   })
 }
 
@@ -40,11 +56,11 @@ export function useSessions(agentId: AgentId, backend: AgentBackend | null) {
  * Search is server-side. The session store is SQLite with FTS5, so filtering
  * the fetched page client-side would only ever search the page (§7.1).
  */
-export function useSessionSearch(agentId: AgentId, backend: AgentBackend | null, query: string) {
+export function useSessionSearch(scope: string, backend: AgentBackend | null, query: string) {
   const trimmed = query.trim()
 
   return useQuery({
-    queryKey: searchKey(agentId, trimmed),
+    queryKey: searchKey(scope, trimmed),
     enabled: Boolean(backend) && trimmed.length > 1,
     queryFn: () => backend!.searchSessions(trimmed)
   })
@@ -57,7 +73,7 @@ export function useSessionSearch(agentId: AgentId, backend: AgentBackend | null,
  * screen and the sidebar — and the invalidation is the easy half to forget: a
  * new session that is not in the list is a session you cannot get back to.
  */
-export function useCreateSession(agentId: AgentId, backend: AgentBackend | null) {
+export function useCreateSession(scope: string, backend: AgentBackend | null) {
   const queryClient = useQueryClient()
 
   return useMutation({
@@ -66,6 +82,6 @@ export function useCreateSession(agentId: AgentId, backend: AgentBackend | null)
 
       return backend.createSession({ title: 'New session' })
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: sessionsKey(agentId) })
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: sessionsKey(scope) })
   })
 }
