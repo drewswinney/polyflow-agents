@@ -1,13 +1,18 @@
 """Hermes plugin: push notifications for the handheld app.
 
-Two faces, loaded by two processes (see `docs/push-relay.md` §2, §3):
+Three faces, loaded by up to three processes (see `docs/push-relay.md` §2, §3):
 
 - **Hooks**, registered wherever a turn runs — for this app, `hermes serve`.
   They observe approvals, clarify questions and artifacts and push them out.
-- **A platform**, registered in the messaging gateway. It exists so cron jobs
-  can `deliver=handheld` and so the webhook gateway has somewhere to hand a
-  device registration, which is the only inbound channel available without a
-  listener of our own.
+- **A platform**, registered in the messaging gateway, so cron jobs can
+  `deliver=handheld`.
+- **Backend routes**, in `dashboard/plugin_api.py`, mounted by the web server
+  under `/api/plugins/handheld-push/`. Device registration arrives there.
+
+Registration used to arrive through the *platform* face, as a control frame on
+the webhook gateway's `deliver_only` path — the only inbound channel available
+before a plugin could own an HTTP route. It can now, so that is gone and the
+platform face is send-only, which is all it ever wanted to be.
 
 Nothing here may raise into the agent. Every hook is wrapped, every failure is a
 log line, and the push itself happens on a daemon thread — an approval waiting
@@ -26,11 +31,6 @@ logger = logging.getLogger(__name__)
 
 PLATFORM_NAME = "handheld"
 PLATFORM_LABEL = "Handheld"
-
-# A control message arriving through the webhook gateway's `deliver_only` path
-# rather than a notification to forward. The prefix is what separates the two on
-# a channel that only carries text.
-CONTROL_PREFIX = "#handheld:"
 
 # Tools whose completion is worth interrupting someone for. "Artifact" is our
 # word, not Hermes's — there is no artifact concept upstream, only tool output.
@@ -154,10 +154,9 @@ def _build_adapter(config: Any) -> Any:
     class HandheldPushAdapter(BasePlatformAdapter):
         """A send-only platform whose "chat" is a set of phones.
 
-        It has no inbound socket of its own. The one thing that arrives is a
-        device registration, delivered by the webhook gateway's `deliver_only`
-        path — which reuses that server's HMAC validation, rate limiting and
-        idempotency, so this plugin does not have to own a port to be reachable.
+        Nothing arrives here. Registration moved to `dashboard/plugin_api.py`
+        once a plugin could own an HTTP route, which left this face doing the
+        one job it is suited to: handing cron output to the push client.
         """
 
         # Signatures below mirror `gateway/platforms/base.py` exactly. The
@@ -182,11 +181,6 @@ def _build_adapter(config: Any) -> Any:
             reply_to: Optional[str] = None,
             metadata: Optional[Dict[str, Any]] = None,
         ) -> Any:
-            control = _handle_control(content)
-
-            if control is not None:
-                return SendResult(success=control)
-
             push.notify(
                 kind="cronFailures" if _looks_like_failure(content) else "turnComplete",
                 title="Hermes",
@@ -216,45 +210,6 @@ def _build_adapter(config: Any) -> Any:
             return {"name": PLATFORM_LABEL, "type": "dm", "chat_id": chat_id}
 
     return HandheldPushAdapter(config)
-
-
-def _handle_control(text: str) -> Optional[bool]:
-    """Device registration, or None when this is an ordinary message.
-
-    The payload rides a text channel because that is what `deliver_only` gives —
-    the rendered template is the message. The prefix keeps a genuine message that
-    happens to look like JSON from being mistaken for a command.
-    """
-    body = (text or "").strip()
-
-    if not body.startswith(CONTROL_PREFIX):
-        return None
-
-    try:
-        payload = json.loads(body[len(CONTROL_PREFIX) :])
-    except Exception:
-        logger.warning("[handheld-push] control message was not valid JSON")
-
-        return False
-
-    action = str(payload.get("action") or "")
-    token = str(payload.get("token") or "")
-
-    if action == "register":
-        return devices.register(
-            token,
-            agent_id=str(payload.get("agentId") or ""),
-            platform=str(payload.get("platform") or ""),
-            label=str(payload.get("label") or ""),
-            prefs=payload.get("prefs") if isinstance(payload.get("prefs"), dict) else None,
-        )
-
-    if action == "unregister":
-        return devices.unregister(token)
-
-    logger.warning("[handheld-push] unknown control action %r", action)
-
-    return False
 
 
 def _looks_like_failure(text: str) -> bool:
@@ -311,8 +266,9 @@ def register(ctx: Any) -> None:
         logger.debug("[handheld-push] no platform registry in this process")
     except Exception:
         # Not expected, and not something to shrug off: without the platform
-        # face there is no cron delivery and no way for a device to register, so
-        # notifications would half-work with nothing saying why.
+        # face there is no cron delivery, so notifications would half-work with
+        # nothing saying why. Registration is unaffected — that is the web
+        # server's face, in a different process.
         logger.warning("[handheld-push] platform registration FAILED", exc_info=True)
 
 
@@ -324,15 +280,13 @@ async def _standalone_send(*_args: Any, **kwargs: Any) -> Dict[str, Any]:
     connection to hold, so serving these is just sending.
     """
     text = str(kwargs.get("text") or kwargs.get("message") or "")
-    control = _handle_control(text)
 
-    if control is None:
-        push.notify(
-            kind="cronFailures" if _looks_like_failure(text) else "turnComplete",
-            title="Hermes",
-            body=text[:200],
-            data={"source": "cron"},
-        )
+    push.notify(
+        kind="cronFailures" if _looks_like_failure(text) else "turnComplete",
+        title="Hermes",
+        body=text[:200],
+        data={"source": "cron"},
+    )
 
     return {"ok": True}
 
