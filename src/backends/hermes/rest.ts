@@ -104,6 +104,16 @@ export async function probeScheme(host: string, fetchImpl: typeof fetch = fetch)
 
 const DEFAULT_TIMEOUT_MS = 30_000
 
+/**
+ * The `handheld-push` plugin's device route.
+ *
+ * The plugin *name* is what Hermes mounts under, so this string is the contract
+ * between this repo's two halves — rename the directory in `host/` and this
+ * breaks silently, which is exactly the drift `host/handheld-push/README.md`
+ * warns about.
+ */
+const PUSH_ROUTE = '/api/plugins/handheld-push/devices'
+
 /** Audio endpoints scale with payload size, between three and ten minutes. */
 function audioTimeoutMs(estimate: number): number {
   return Math.min(600_000, Math.max(180_000, Math.ceil(estimate)))
@@ -290,6 +300,29 @@ export class HermesRest {
       method: 'POST',
       timeoutMs: 300_000
     })
+  }
+
+  // --- Push registration --------------------------------------------------
+  //
+  // These are the `handheld-push` plugin's own routes, mounted by
+  // `hermes_cli/web_server.py` under `/api/plugins/<name>/` — the same process
+  // and port as `/api/ws`, behind the same auth. That is why registration needs
+  // no endpoint, no secret and no code of its own beyond this: it is an
+  // ordinary authenticated request like every other method on this client.
+  //
+  // A host without the plugin answers 404, which is how the caller tells "not
+  // installed" from "installed and broken".
+  //
+  // `withProfile` appends `?profile=` here as it does everywhere. Harmless — the
+  // route declares no such parameter and FastAPI drops it — but worth knowing it
+  // means nothing: the device registry is per host, not per profile.
+
+  registerPush(body: Record<string, unknown>): Promise<void> {
+    return this.request<void>(PUSH_ROUTE, { method: 'POST', body, timeoutMs: 15_000 })
+  }
+
+  unregisterPush(token: string): Promise<void> {
+    return this.request<void>(PUSH_ROUTE, { method: 'DELETE', body: { token }, timeoutMs: 15_000 })
   }
 
   transcribe(dataUrl: string, mimeType: string): Promise<AudioTranscriptionResponse> {

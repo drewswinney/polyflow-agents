@@ -41,7 +41,11 @@ export const MOCK_CAPABILITIES: Capabilities = {
   logs: { events: true },
   // Push-to-talk is exercisable against the mock; speech synthesis is not, and
   // says so rather than returning silence.
-  media: { images: true, audioIn: true, audioOut: false }
+  media: { images: true, audioIn: true, audioOut: false },
+  // There is no host to register with. The demo agent exists so the UI can be
+  // built without one, and a fake "registered" would hide the only thing that
+  // matters about push: whether a real device reached a real host.
+  push: { register: false }
 }
 
 const MINUTE = 60_000
@@ -499,6 +503,14 @@ export class MockBackend implements AgentBackend {
         payload: { job: id, triggered: 'manually' }
       })
     }
+  }
+
+  async registerPushDevice(): Promise<never> {
+    throw new Error('The demo agent has no host to register a device with.')
+  }
+
+  async unregisterPushDevice(): Promise<never> {
+    throw new Error('The demo agent has no host to register a device with.')
   }
 
   async transcribe(dataUrl: string, _mimeType: string): Promise<string> {

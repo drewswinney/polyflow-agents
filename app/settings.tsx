@@ -4,7 +4,7 @@ import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { missingCapabilityLabels, NO_CAPABILITIES } from '@/domain'
-import { forgetAgentCredential, forgetPushConfig } from '@/platform/secure-store'
+import { forgetAgentCredential } from '@/platform/secure-store'
 import { useBackend, useConnectionState, useReconnect } from '@/state/ConnectionProvider'
 import { useAgents, useSelectedAgent, useSelectedAgentOrNull, useSelectedServerOrNull, useSelectAgent } from '@/state/agents'
 import { useSidebar } from '@/state/sidebar'
@@ -69,11 +69,11 @@ export default function SettingsScreen() {
   const forgetServer = async () => {
     const id = server.id
 
-    // Secrets first. The registry row is what makes them findable, so dropping
-    // it before them is what strands a credential in the keychain. Both are
-    // keyed by server: one host, one credential, one push registration (§5.2).
+    // The credential first. The registry row is what makes it findable, so
+    // dropping the row first is what strands a secret in the keychain. Push
+    // registration is no longer among them — it lives on the host, keyed by the
+    // device's own token, and is dropped when Expo reports the token dead.
     await forgetAgentCredential(id)
-    await forgetPushConfig(id)
     await removeServer(id)
 
     router.replace('/')

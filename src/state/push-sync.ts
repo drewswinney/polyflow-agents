@@ -10,54 +10,46 @@
  *   app cannot filter its own push, so turning something off in Settings means
  *   nothing until the host is told.
  *
- * Everything here is best-effort and silent on failure. Push is additive: an
- * unreachable webhook endpoint must not make the app feel broken when the parts
- * that matter — the socket, the transcript — are fine.
+ * This used to need a stored endpoint and secret of its own, because
+ * registration went to a webhook route on the messaging gateway's port. It now
+ * rides the live backend — same host, same credential, same connection — so
+ * there is nothing to configure and nothing to keep in the keychain.
+ *
+ * Everything here is best-effort and quiet about it. Push is additive: a host
+ * without the plugin must not make the app feel broken when the parts that
+ * matter — the socket, the transcript — are fine.
  */
 
 import { useEffect, useRef, useState } from 'react'
 import { Platform } from 'react-native'
-import { create } from 'zustand'
 
-import type { Agent, Server } from '@/domain'
+import type { Agent, AgentBackend } from '@/domain'
 import { getPushToken } from '@/platform/notifications'
 import { registerDevice } from '@/platform/push-registration'
-import { readPushConfig } from '@/platform/secure-store'
 
 import { useNotificationPrefs } from './notification-prefs'
 
-/**
- * Bumped when the stored endpoint changes.
- *
- * The config lives in the keychain, which nothing can subscribe to, so saving it
- * would otherwise leave the registration hook waiting for an unrelated render to
- * notice. Settings bumps this; the hook re-reads.
- */
-export const usePushConfigRevision = create<{ revision: number; bump: () => void }>(set => ({
-  revision: 0,
-  bump: () => set(state => ({ revision: state.revision + 1 }))
-}))
-
 export type PushStatus =
-  | { state: 'unconfigured' }
+  | { state: 'idle' }
+  | { state: 'unsupported' }
+  | { state: 'not_installed' }
   | { state: 'unavailable' }
   | { state: 'registering' }
   | { state: 'registered' }
   | { state: 'error'; message: string }
 
 /**
- * Register this device for the selected agent, and re-register when what the
+ * Register this device with the connected host, and re-register when what the
  * host knows would otherwise go stale.
  *
  * Returns a status for Settings to show. A silent failure here is the exact
  * failure mode this whole subsystem exists to avoid, so it is reported even
  * though it is never thrown.
  */
-export function usePushRegistration(server: Server, agent: Agent): PushStatus {
-  const [status, setStatus] = useState<PushStatus>({ state: 'unconfigured' })
+export function usePushRegistration(backend: AgentBackend | null, agent: Agent | null): PushStatus {
+  const [status, setStatus] = useState<PushStatus>({ state: 'idle' })
 
   const prefs = useNotificationPrefs()
-  const revision = usePushConfigRevision(state => state.revision)
   // Only the fields the host filters on. Quiet hours stay on the device — the
   // host does not know this phone's timezone and should not guess it.
   const signature = [prefs.approvals, prefs.clarify, prefs.turnComplete, prefs.cronFailures, prefs.artifacts].join(
@@ -71,21 +63,24 @@ export function usePushRegistration(server: Server, agent: Agent): PushStatus {
   useEffect(() => {
     if (!prefs.hydrated) return
 
+    if (!backend || !agent) {
+      setStatus({ state: 'idle' })
+
+      return
+    }
+
+    // Structural, not a probe: an OpenAI-compatible host has no process to hold
+    // a device registry, so there is nothing to attempt and nothing to report
+    // as broken (§4.1).
+    if (!backend.capabilities.push.register) {
+      setStatus({ state: 'unsupported' })
+
+      return
+    }
+
     let cancelled = false
 
     const run = async () => {
-      // Where to register is the *server's* — one host, one relay, one
-      // registration, however many agents sit behind it (§5.2).
-      const config = await readPushConfig(server.id)
-
-      if (cancelled) return
-
-      if (!config?.baseUrl || !config.secret) {
-        setStatus({ state: 'unconfigured' })
-
-        return
-      }
-
       const token = await getPushToken()
 
       if (cancelled) return
@@ -98,29 +93,20 @@ export function usePushRegistration(server: Server, agent: Agent): PushStatus {
         return
       }
 
-      const attempt = `${server.id}|${agent.id}|${token}|${signature}`
+      const attempt = `${agent.id}|${token}|${signature}`
 
       if (attempt === lastSent.current) return
 
       setStatus({ state: 'registering' })
 
-      const result = await registerDevice(config, token, {
-        // Still the *agent*, not the server: this comes back on every push so a
-        // tap can re-scope the app before opening the session, and the app is
-        // scoped to an agent (§5.2). Only the endpoint is per-host.
+      const result = await registerDevice(backend, token, {
+        // The *agent*, not the server: this comes back on every push so a tap
+        // can re-scope the app before opening the session, and the app is
+        // scoped to an agent (§5.2).
         agentId: agent.id,
         platform: Platform.OS,
         label: agent.displayName,
-        prefs: {
-          approvals: prefs.approvals,
-          clarify: prefs.clarify,
-          turnComplete: prefs.turnComplete,
-          cronFailures: prefs.cronFailures,
-          artifacts: prefs.artifacts,
-          quietHours: prefs.quietHours,
-          quietFrom: prefs.quietFrom,
-          quietTo: prefs.quietTo
-        }
+        prefs
       })
 
       if (cancelled) return
@@ -128,11 +114,19 @@ export function usePushRegistration(server: Server, agent: Agent): PushStatus {
       if (result.ok) {
         lastSent.current = attempt
         setStatus({ state: 'registered' })
-      } else {
-        // Not cached: a failed attempt must be retried on the next change, not
-        // treated as the host's current state.
-        setStatus({ state: 'error', message: result.error ?? 'Registration failed.' })
+
+        return
       }
+
+      // Not cached: a failed attempt must be retried on the next change, not
+      // treated as the host's current state.
+      if (result.notInstalled) {
+        setStatus({ state: 'not_installed' })
+
+        return
+      }
+
+      setStatus({ state: 'error', message: result.error ?? 'Registration failed.' })
     }
 
     void run()
@@ -140,7 +134,7 @@ export function usePushRegistration(server: Server, agent: Agent): PushStatus {
     return () => {
       cancelled = true
     }
-  }, [server.id, agent.id, agent.displayName, prefs, signature, revision])
+  }, [backend, agent, prefs, signature])
 
   return status
 }

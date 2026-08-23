@@ -15,6 +15,16 @@ export interface Capabilities {
   approvals: { requests: boolean; policy: boolean }
   logs: { events: boolean }
   media: { images: boolean; audioIn: boolean; audioOut: boolean }
+  /**
+   * Whether this backend *kind* has anywhere to register a push device.
+   *
+   * Structural, like every other flag here: it says a Hermes host has the
+   * route if the plugin is installed, not that this one does. Whether a given
+   * host actually answers is a 404 at registration time, which the settings
+   * screen reports as "not installed" rather than as a failure — an absent
+   * plugin is a host that has not been set up, not a broken app.
+   */
+  push: { register: boolean }
 }
 
 /** Everything off — the floor a backend builds up from. */
@@ -24,7 +34,8 @@ export const NO_CAPABILITIES: Capabilities = {
   extras: { cron: false, skills: false, mcp: false },
   approvals: { requests: false, policy: false },
   logs: { events: false },
-  media: { images: false, audioIn: false, audioOut: false }
+  media: { images: false, audioIn: false, audioOut: false },
+  push: { register: false }
 }
 
 /**

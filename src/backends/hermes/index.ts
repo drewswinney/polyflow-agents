@@ -33,6 +33,7 @@ import {
   type NewSessionOptions,
   NO_IMAGES,
   type PromptResult,
+  type PushDeviceRegistration,
   type StoredImage,
   type ClarifyRequest,
   type PermissionRequest,
@@ -120,7 +121,10 @@ export const HERMES_CAPABILITIES: Capabilities = {
   approvals: { requests: true, policy: true },
   logs: { events: true },
   // Audio is request/response REST, not a duplex channel — push-to-talk only (§2.6, §7.9).
-  media: { images: true, audioIn: true, audioOut: true }
+  media: { images: true, audioIn: true, audioOut: true },
+  // True of the *kind*, not of a given host: the route exists once the
+  // `handheld-push` plugin is installed and enabled. A host without it 404s.
+  push: { register: true }
 }
 
 const OUTCOME_TO_CHOICE: Record<PermissionOutcome, string> = {
@@ -737,6 +741,20 @@ export class HermesBackend implements AgentBackend {
 
   async triggerCronJob(id: string): Promise<void> {
     await this.rest.cronTrigger(id)
+  }
+
+  async registerPushDevice(registration: PushDeviceRegistration): Promise<void> {
+    await this.rest.registerPush({
+      token: registration.token,
+      agentId: registration.agentId,
+      platform: registration.platform,
+      label: registration.label,
+      prefs: registration.prefs
+    })
+  }
+
+  async unregisterPushDevice(token: string): Promise<void> {
+    await this.rest.unregisterPush(token)
   }
 
   async transcribe(dataUrl: string, mimeType: string): Promise<string> {
