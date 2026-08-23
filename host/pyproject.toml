@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "polyflow-agents-push"
+version = "0.2.0"
+description = "Push notifications for the Polyflow Agents app — a Hermes plugin"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Drew Swinney" }]
+keywords = ["hermes", "hermes-agent", "push", "notifications"]
+
+# Deliberately none. The plugin runs inside Hermes's own processes, so every
+# import it needs is already there, and the push client is stdlib-only by
+# design (`push.py`) — the hooks fire from synchronous agent code and cannot
+# assume an event loop to borrow.
+dependencies = []
+
+[project.scripts]
+handheld-push = "handheld_push.cli:main"
+
+[tool.setuptools]
+# `handheld_push` only. `dashboard` is package *data*, not an import package:
+# the web server loads `plugin_api.py` by file path, and making it importable
+# would put a module named `dashboard` on the path of every process that loads
+# this plugin.
+packages = ["handheld_push"]
+
+[tool.setuptools.package-data]
+handheld_push = ["plugin.yaml", "dashboard/manifest.json", "dashboard/plugin_api.py"]

@@ -46,6 +46,7 @@ npm run typecheck     # includes the vendored upstream types
 npm run check:m0      # the M0 gate, without needing a host
 npm run check:images  # image attachments, without needing a host
 npm run check:discovery  # agent discovery + the v1→v2 registry migration
+npm run check:plugin  # the host plugin's registration route, without a Hermes
 npm run spike:m0      # the M0 gate against a live `hermes serve`
 ```
 
@@ -60,6 +61,16 @@ agent on a working server gets marked missing the moment one request fails. And
 the `agents/v1` → `v2` migration has to keep each old agent id as its new
 server id, because that is the key its credential sits under in the keychain;
 minting a fresh one typechecks perfectly and silently loses the password.
+
+`check:plugin` covers the host half. `dashboard/plugin_api.py` is imported by
+Hermes with `spec_from_file_location` under a flat module name — no package —
+so the `from . import devices` that works in `adapter.py` raises there, and
+`push.py` has relative imports of its own that break the same way. The check
+drives the real router through that exact import path and round-trips a
+registration to the on-disk registry, because a register that returns 200
+without landing is a device that will never be pushed to and nothing that says
+so. It skips itself when FastAPI is absent, so it costs nothing on a machine
+that is only building the app.
 
 `check:images` covers the one thing about sending a picture that types cannot:
 `image.attach_bytes` queues a file *on the session* and the next `prompt.submit`
@@ -95,6 +106,7 @@ src/
   ui/                 theme tokens, components
   platform/           secure storage, RN polyfills
 vendor/hermes/        vendored upstream TypeScript — never edited in place
+host/handheld_push/   the Hermes plugin that pushes to this app (pip-installable)
 scripts/              upstream sync, M0 checks
 ```
 

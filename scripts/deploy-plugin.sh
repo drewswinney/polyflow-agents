@@ -1,20 +1,34 @@
 #!/usr/bin/env bash
-# Install the handheld-push plugin onto the agent host.
+# Push the working copy of the plugin onto a host, for the edit/reload loop.
 #
-# Mirrors sync-upstream.sh in the other direction: that pulls Hermes's types
-# down, this pushes our plugin up. The plugin is versioned here because it and
-# the app share a contract (§3 of docs/push-relay.md) and drift between them is
-# invisible until a notification silently stops arriving.
+# This is the *development* path. What other people use is pip:
+#
+#   pip install polyflow-agents-push
+#   handheld-push install --enable
+#
+# Both end at the same place — a `handheld-push` directory under
+# ~/.hermes/plugins — but pip links the installed package there and upgrades
+# with `pip install -U`, while this copies whatever is in the tree right now.
+# Use this when iterating; tell users the pip route.
 #
 #   ./scripts/deploy-plugin.sh [ssh-host]
 set -euo pipefail
 
 SSH_HOST="${1:-hermes}"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-SRC="$ROOT/host/handheld-push"
+SRC="$ROOT/host/handheld_push"
 DEST=".hermes/plugins/handheld-push"
 
 echo "Deploying handheld-push to $SSH_HOST:$DEST"
+
+# A pip install leaves a symlink here. Copying onto it would write through into
+# site-packages and leave the two silently disagreeing about which is live.
+if ssh "$SSH_HOST" "test -L $DEST"; then
+  echo "  $DEST is a symlink (pip install). Remove it first, or iterate with pip:" >&2
+  echo "    handheld-push uninstall" >&2
+  exit 1
+fi
+
 ssh "$SSH_HOST" "mkdir -p $DEST/dashboard"
 scp -q "$SRC"/*.py "$SRC"/plugin.yaml "$SSH_HOST:$DEST/"
 # `dashboard/` is what the web server discovers: manifest.json names the api
@@ -36,11 +50,11 @@ Deployed. Two things stand between this and working.
 
 2. Restart the processes that load it:
 
-     hermes serve        — hooks (approvals, clarify, artifacts) AND the
-                           registration routes, which mount at import
-     hermes gateway      — the platform face (cron delivery only)
+     hermes serve        hooks (approvals, clarify, artifacts) AND the
+                         registration routes, which mount at import
+     hermes gateway      the platform face (cron delivery only)
 
-   `/api/dashboard/plugins/rescan` re-scans the plugin *list* and reloads
+   `/api/dashboard/plugins/rescan` re-scans the plugin list and reloads
    JS/CSS, but `_mount_plugin_api_routes()` runs at module import, so a new or
    changed backend route needs the restart.
 
