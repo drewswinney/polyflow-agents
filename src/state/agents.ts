@@ -373,33 +373,17 @@ export function useConnectionOf(agent: Agent | null): AgentConnection {
 export function useSelectAgent() {
   const queryClient = useQueryClient()
   const select = useAgents(state => state.select)
-  const selectedAgentId = useAgents(state => state.selectedAgentId)
 
   return (id: AgentId) => {
-    console.log('[useSelectAgent] switching from', selectedAgentId, 'to', id)
+    console.log('[useSelectAgent] switching to', id)
     
-    // Debug: log all current query keys before removal
-    const allKeysBefore = queryClient.getQueryCache().findAll().map(q => ({ 
-      key: q.queryKey, 
-      state: q.state.status,
-      data: q.state.data ? 'present' : 'null' 
-    }))
-    console.log('[useSelectAgent] query keys BEFORE removeQueries:', JSON.stringify(allKeysBefore, null, 2))
+    // First, update the agent selection
+    select(id)
     
-    // Cancel any in-flight queries first to avoid race conditions
-    queryClient.cancelQueries({ queryKey: agentScopeKey })
-    
-    // Remove ALL queries that start with ['agent'] prefix
+    // THEN invalidate the cache - this ensures components re-render with the
+    // new agent and their queries will fire with fresh cache
     queryClient.removeQueries({ queryKey: agentScopeKey })
     
-    // Debug: log how many were removed and what remains
-    const allKeysAfter = queryClient.getQueryCache().findAll().map(q => ({ 
-      key: q.queryKey, 
-      state: q.state.status 
-    }))
-    console.log('[useSelectAgent] AFTER removeQueries - remaining keys:', JSON.stringify(allKeysAfter, null, 2))
-    
-    select(id)
-    console.log('[useSelectAgent] switch complete, new selectedAgentId:', id)
+    console.log('[useSelectAgent] cache cleared, components will refetch')
   }
 }
