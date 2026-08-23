@@ -119,7 +119,7 @@ on disk rather than in a module global.
 
 The platform face registers with:
 
-- `cron_deliver_env_var` — names the `*_HOME_CHANNEL` env var so `deliver=handheld`
+- `cron_deliver_env_var` — names the `*_HOME_CHANNEL` env var so `deliver=polyflow_agents_push`
   routes here without editing `cron/scheduler.py`'s hardcoded sets.
 - `standalone_sender_fn` — **required**, not optional. Cron jobs can run in a
   process separate from the gateway; without this, a `deliver=` job fires

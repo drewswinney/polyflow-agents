@@ -19,7 +19,7 @@ to register one yet.
 | Agent question | `pre_tool_call` on `clarify` | the question |
 | Artifact produced | `post_tool_call` on `ARTIFACT_TOOLS` | "Artifact ready" |
 | Turn finished | `on_session_finalize` | "Turn finished" |
-| Cron job output | `deliver=handheld` delivery target | the rendered output |
+| Cron job output | `deliver=polyflow_agents_push` delivery target | the rendered output |
 
 Smart-mode approvals are skipped: an auxiliary LLM decides those and nobody is
 being asked.
@@ -97,7 +97,8 @@ but now it can fail at registration too.
 
 ## Cron delivery
 
-`deliver=handheld` needs a home channel, which is what `HANDHELD_HOME_CHANNEL`
+`deliver=polyflow_agents_push` needs a home channel, which is what
+`POLYFLOW_AGENTS_PUSH_HOME_CHANNEL`
 is declared for (`cron_deliver_env_var` on the platform registration). Set it to
 any non-empty value — the devices come from the registry, not from the channel.
 Untested: no cron job has delivered here yet.
@@ -122,9 +123,11 @@ Untested: no cron job has delivered here yet.
   in `dashboard/manifest.json` (falling back to the directory basename), so
   `polyflow_agents_push` is baked into the app's `PUSH_ROUTE`. Change one
   without the other and registration 404s with nothing to say why.
-- **The gateway platform is still called `handheld`.** That is a different name
-  from the plugin's, on purpose: it is what cron config says (`deliver=handheld`)
-  and what `HANDHELD_HOME_CHANNEL` is named after.
+- **One name, four places.** The pip distribution is `polyflow-agents-push`;
+  the import package, the plugin Hermes mounts, and the gateway platform are all
+  `polyflow_agents_push`. Only the distribution differs, because PyPI normalises
+  to hyphens. Nothing here derives a name from another, so changing one means
+  changing them together.
 
 ## Not implemented
 

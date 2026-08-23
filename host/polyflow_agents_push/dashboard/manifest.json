@@ -1,6 +1,6 @@
 {
   "name": "polyflow_agents_push",
-  "label": "Handheld",
+  "label": "Polyflow Agents",
   "description": "Device registration for the Polyflow Agents app. Backend routes only — no dashboard UI.",
   "version": "0.2.0",
   "icon": "Smartphone",

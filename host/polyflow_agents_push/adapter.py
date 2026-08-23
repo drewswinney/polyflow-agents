@@ -5,7 +5,7 @@ Three faces, loaded by up to three processes (see `docs/push-relay.md` §2, §3)
 - **Hooks**, registered wherever a turn runs — for this app, `hermes serve`.
   They observe approvals, clarify questions and artifacts and push them out.
 - **A platform**, registered in the messaging gateway, so cron jobs can
-  `deliver=handheld`.
+  `deliver=polyflow_agents_push`.
 - **Backend routes**, in `dashboard/plugin_api.py`, mounted by the web server
   under `/api/plugins/polyflow_agents_push/`. Registration arrives there.
 
@@ -29,12 +29,13 @@ from . import devices, push
 
 logger = logging.getLogger(__name__)
 
-# The *gateway platform* name, which is not the plugin name and deliberately
-# stays short: it is what a person types in cron config (`deliver=handheld`)
-# and what `HANDHELD_HOME_CHANNEL` is named after. Renaming it would rewrite
-# every existing cron job's delivery target for no gain.
-PLATFORM_NAME = "handheld"
-PLATFORM_LABEL = "Handheld"
+# The gateway platform's name. Kept identical to the plugin's on purpose: it is
+# a third place the same thing gets named — after the pip distribution and the
+# route prefix — and a platform called something else is a name nobody can
+# derive from the other two. It is what cron config says (`deliver=...`) and
+# what the home-channel env var is built from.
+PLATFORM_NAME = "polyflow_agents_push"
+PLATFORM_LABEL = "Polyflow Agents"
 
 # Tools whose completion is worth interrupting someone for. "Artifact" is our
 # word, not Hermes's — there is no artifact concept upstream, only tool output.
@@ -155,7 +156,7 @@ def _build_adapter(config: Any) -> Any:
     from gateway.config import Platform
     from gateway.platforms.base import BasePlatformAdapter, SendResult
 
-    class HandheldPushAdapter(BasePlatformAdapter):
+    class PolyflowAgentsPushAdapter(BasePlatformAdapter):
         """A send-only platform whose "chat" is a set of phones.
 
         Nothing arrives here. Registration moved to `dashboard/plugin_api.py`
@@ -213,7 +214,7 @@ def _build_adapter(config: Any) -> Any:
         async def get_chat_info(self, chat_id: str) -> Dict[str, Any]:
             return {"name": PLATFORM_LABEL, "type": "dm", "chat_id": chat_id}
 
-    return HandheldPushAdapter(config)
+    return PolyflowAgentsPushAdapter(config)
 
 
 def _looks_like_failure(text: str) -> bool:
@@ -259,9 +260,9 @@ def register(ctx: Any) -> None:
             adapter_factory=_build_adapter,
             check_fn=lambda: True,
             emoji="📱",
-            # Lets `deliver=handheld` cron jobs route here without patching
+            # Lets `deliver=polyflow_agents_push` cron jobs route here without patching
             # cron/scheduler.py's hardcoded target sets.
-            cron_deliver_env_var="HANDHELD_HOME_CHANNEL",
+            cron_deliver_env_var="POLYFLOW_AGENTS_PUSH_HOME_CHANNEL",
             standalone_sender_fn=_standalone_send,
         )
     except ImportError:
@@ -280,7 +281,8 @@ async def _standalone_send(*_args: Any, **kwargs: Any) -> Dict[str, Any]:
     """Out-of-process cron delivery.
 
     Cron jobs can run in a process with no live adapter, where a `deliver=` job
-    otherwise fails with `No live adapter for platform 'handheld'`. Push has no
+    otherwise fails with `No live adapter for platform 'polyflow_agents_push'`.
+    Push has no
     connection to hold, so serving these is just sending.
     """
     text = str(kwargs.get("text") or kwargs.get("message") or "")
