@@ -358,19 +358,24 @@ export function useConnectionOf(agent: Agent | null): AgentConnection {
  * Hook for selecting an agent and refreshing dependent queries.
  *
  * Selecting re-scopes the whole app (§5.2), so the cache is dropped wholesale
- * rather than per agent: invalidating only the incoming agent's key left the
+ * rather than per agent: removing only the incoming agent's key left the
  * sidebar and the sessions list showing rows that were fetched for the agent
  * you just left, because those are the entries that are cached and mounted.
  * The prefix match covers every agent, and the drop happens *before* the
  * selection so the screens that re-render on it read a cache with nothing
  * stale left in it.
+ *
+ * Uses removeQueries instead of invalidateQueries to ensure complete removal
+ * of cached data. invalidateQueries marks queries as stale but keeps cached
+ * data available during refetch; removeQueries wipes the cache entirely,
+ * forcing fresh fetches when components re-render with the new agent.
  */
 export function useSelectAgent() {
   const queryClient = useQueryClient()
   const select = useAgents(state => state.select)
 
   return (id: AgentId) => {
-    queryClient.invalidateQueries({ queryKey: agentScopeKey })
+    queryClient.removeQueries({ queryKey: agentScopeKey })
     select(id)
   }
 }
