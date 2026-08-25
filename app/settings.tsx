@@ -42,11 +42,12 @@ export default function SettingsScreen() {
   const selectAgent = useSelectAgent()
   const dismissAgent = useAgents(state => state.dismissAgent)
   const removeServer = useAgents(state => state.removeServer)
-  // Every agent this one removal would take with it, which is what its
-  // confirmation has to name: the row was reached from a single agent, and
-  // nothing on the way here said the host had three (§7.4).
-  const onThisServer = useAgents(state => state.agents.filter(candidate => candidate.serverId === server?.id))
   const backend = useBackend()
+  
+  // Compute this from the already-subscribed `agents` list, not a second selector.
+  // A filter inside a selector builds a new array on every read, and zustand compares
+  // by identity — one that never returns the same value causes infinite re-renders.
+  const onThisServer = agents.filter(candidate => candidate.serverId === server?.id)
   const state = useConnectionState()
   const reconnect = useReconnect()
   const openSidebar = useSidebar(store => store.show)
