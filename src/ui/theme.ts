@@ -3,9 +3,9 @@
  *
  * Two rules govern this file:
  *
- * 1. **Nothing hardcodes a colour anywhere else.** The design is light-only
- *    today (§12 open question 1); routing every colour through tokens makes a
- *    dark palette a swap rather than a refactor.
+ * 1. **Nothing hardcodes a colour anywhere else.** The design supports light
+ *    and dark themes; routing every colour through tokens makes switching a
+ *    simple state change rather than a refactor.
  * 2. **Accent is resolved per agent.** A glance at any screen should say which
  *    agent you are in, so the six accent tokens come from the selected agent
  *    when it declares them and from `BASE_ACCENT` when it does not. Per-agent
@@ -24,8 +24,8 @@ export const BASE_ACCENT: AgentAccent = {
   secondaryTintStrong: '#ede9fe'
 }
 
-/** Everything that does not change with the agent. */
-export const NEUTRAL = {
+/** Light theme neutral colours. */
+export const NEUTRAL_LIGHT = {
   gray900: '#0b1120',
   gray800: '#1f2937',
   gray600: '#4b5563',
@@ -51,8 +51,41 @@ export const NEUTRAL = {
   highlight: '#fef9c3'
 } as const
 
+/** Dark theme neutral colours. */
+export const NEUTRAL_DARK = {
+  gray900: '#0b1120',
+  gray800: '#1f2937',
+  gray600: '#4b5563',
+  gray500: '#6b7280',
+  gray400: '#9ca3af',
+  border: '#374151',
+  divider: '#1f2937',
+  surface: '#1f2937',
+  bg: '#0b1120',
+  bgSubtle: '#111827',
+  primaryTint: '#1e3a5f',
+  success700: '#22c55e',
+  success200: '#166534',
+  success50: '#052e16',
+  successDot: '#4ade80',
+  warning700: '#fb923c',
+  warning200: '#92400e',
+  warning50: '#431407',
+  warningText: '#fdba74',
+  error700: '#f87171',
+  error200: '#991b1b',
+  error50: '#450a0a',
+  highlight: '#422006'
+} as const
+
+/** Legacy export for compatibility — resolves to light theme. */
+export const NEUTRAL = NEUTRAL_LIGHT
+
+/** Neutral colors can be either light or dark variant. */
+export type NeutralColors = typeof NEUTRAL_LIGHT | typeof NEUTRAL_DARK
+
 export type Theme = {
-  color: typeof NEUTRAL & AgentAccent
+  color: (typeof NEUTRAL_LIGHT | typeof NEUTRAL_DARK) & AgentAccent
   radius: typeof RADIUS
   space: typeof SPACE
   font: typeof FONT
@@ -131,9 +164,10 @@ export const GRADIENT = {
   end: { x: 1, y: 1 }
 } as const
 
-export function buildTheme(accent: AgentAccent = BASE_ACCENT): Theme {
+export function buildTheme(accent: AgentAccent = BASE_ACCENT, darkMode: boolean = false): Theme {
+  const neutral = darkMode ? NEUTRAL_DARK : NEUTRAL_LIGHT
   return {
-    color: { ...NEUTRAL, ...accent },
+    color: { ...neutral, ...accent },
     radius: RADIUS,
     space: SPACE,
     font: FONT,

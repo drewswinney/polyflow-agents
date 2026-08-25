@@ -2,16 +2,19 @@ import { createContext, type ReactNode, useContext, useMemo } from 'react'
 
 import type { AgentAccent } from '@/domain'
 
+import { useIsDarkMode } from '@/state/theme-prefs'
 import { BASE_ACCENT, BASE_THEME, buildTheme, GRADIENT, type Theme } from './theme'
 
 const ThemeContext = createContext<Theme>(BASE_THEME)
 
 /**
- * Resolves the accent for the selected agent. Screens read `useTheme()` and
- * never import a colour directly, so re-theming per agent is a prop change.
+ * Resolves the accent for the selected agent and theme mode (light/dark/system).
+ * Screens read `useTheme()` and never import a colour directly, so re-theming
+ * per agent or dark mode is just a prop/state change.
  */
 export function ThemeProvider({ accent, children }: { accent?: AgentAccent; children: ReactNode }) {
-  const theme = useMemo(() => buildTheme(accent ?? BASE_ACCENT), [accent])
+  const isDark = useIsDarkMode()
+  const theme = useMemo(() => buildTheme(accent ?? BASE_ACCENT, isDark), [accent, isDark])
 
   return <ThemeContext.Provider value={theme}>{children}</ThemeContext.Provider>
 }

@@ -188,6 +188,8 @@ export default function SettingsScreen() {
           <Card>
             <SettingsRow label="Notifications" icon="bell" onPress={() => router.push('/notifications')} />
             <Divider />
+            <SettingsRow label="Theme" icon="moon" onPress={() => router.push('/theme')} />
+            <Divider />
             <SettingsRow label="Logs & events" icon="list" onPress={() => router.push('/logs')} />
           </Card>
         </View>
