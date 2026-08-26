@@ -43,6 +43,11 @@ export default function SettingsScreen() {
   const dismissAgent = useAgents(state => state.dismissAgent)
   const removeServer = useAgents(state => state.removeServer)
   const backend = useBackend()
+  
+  // Compute this from the already-subscribed `agents` list, not a second selector.
+  // A filter inside a selector builds a new array on every read, and zustand compares
+  // by identity — one that never returns the same value causes infinite re-renders.
+  const onThisServer = agents.filter(candidate => candidate.serverId === server?.id)
   const state = useConnectionState()
   const reconnect = useReconnect()
   const openSidebar = useSidebar(store => store.show)
@@ -193,6 +198,8 @@ export default function SettingsScreen() {
           </Text>
           <Card>
             <SettingsRow label="Notifications" icon="bell" onPress={() => router.push('/notifications')} />
+            <Divider />
+            <SettingsRow label="Theme" icon="moon" onPress={() => router.push('/theme')} />
             <Divider />
             <SettingsRow label="Logs & events" icon="list" onPress={() => router.push('/logs')} />
           </Card>
