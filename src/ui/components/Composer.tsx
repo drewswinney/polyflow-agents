@@ -155,6 +155,7 @@ export function Composer({
             onChangeText={setDraft}
             placeholder="Message the agent"
             placeholderTextColor={theme.color.gray400}
+            keyboardAppearance={theme.dark ? 'dark' : 'light'}
             multiline
             style={[styles.input, { color: theme.color.gray800, fontFamily: theme.font.body }]}
             onSubmitEditing={submit}
@@ -207,7 +208,7 @@ function Staged({ image, onRemove }: { image: PickedImage; onRemove: () => void 
         hitSlop={8}
         style={[styles.remove, { backgroundColor: theme.color.gray800 }]}
       >
-        <Icon name="xmark" size={9} color="#ffffff" />
+        <Icon name="xmark" size={9} color={theme.color.onAccent} />
       </Pressable>
     </View>
   )
@@ -230,7 +231,7 @@ function ActionButton({
     return (
       <Pressable accessibilityRole="button" accessibilityLabel="Send" onPress={onPress}>
         <LinearGradient colors={gradient.colors} start={gradient.start} end={gradient.end} style={styles.action}>
-          <Icon name="arrow-up" size={17} color="#ffffff" />
+          <Icon name="arrow-up" size={17} color={theme.color.onAccent} />
         </LinearGradient>
       </Pressable>
     )
@@ -244,7 +245,7 @@ function ActionButton({
         onPress={onPress}
         style={[styles.action, { backgroundColor: theme.color.gray800 }]}
       >
-        <Icon name="stop" size={15} color="#ffffff" />
+        <Icon name="stop" size={15} color={theme.color.onAccent} />
       </Pressable>
     )
   }

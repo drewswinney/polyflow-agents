@@ -103,7 +103,7 @@ export function Sidebar({
 
   return (
     <Modal transparent visible animationType="none" onRequestClose={onDismiss}>
-      <Animated.View style={[styles.scrim, { opacity: progress }]}>
+      <Animated.View style={[styles.scrim, { backgroundColor: theme.color.scrim, opacity: progress }]}>
         <Pressable
           accessibilityRole="button"
           accessibilityLabel="Close navigation"
@@ -288,7 +288,7 @@ function RecentRow({ session, onPress }: { session: SessionSummary; onPress: () 
 }
 
 const styles = StyleSheet.create({
-  scrim: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(11,17,32,0.32)' },
+  scrim: { ...StyleSheet.absoluteFillObject },
   panel: {
     position: 'absolute',
     top: 0,

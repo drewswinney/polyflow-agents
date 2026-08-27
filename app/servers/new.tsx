@@ -427,9 +427,9 @@ export default function AddServerScreen() {
               style={[styles.primary, { borderRadius: theme.radius.control }]}
             >
               {saving ? (
-                <ActivityIndicator color={primaryReady ? '#ffffff' : theme.color.gray400} />
+                <ActivityIndicator color={primaryReady ? theme.color.onAccent : theme.color.gray400} />
               ) : (
-                <Text variant="rowLabelStrong" color={primaryReady ? '#ffffff' : theme.color.gray400}>
+                <Text variant="rowLabelStrong" color={primaryReady ? theme.color.onAccent : theme.color.gray400}>
                   {picking
                     ? `Add ${chosen.size} ${chosen.size === 1 ? 'agent' : 'agents'}`
                     : 'Pair and connect'}
@@ -582,6 +582,7 @@ function Field({
           onChangeText={onChange}
           placeholder={placeholder}
           placeholderTextColor={theme.color.gray400}
+            keyboardAppearance={theme.dark ? 'dark' : 'light'}
           secureTextEntry={secure}
           autoCapitalize="none"
           autoCorrect={false}

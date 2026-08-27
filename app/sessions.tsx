@@ -250,6 +250,7 @@ function SearchHeader({
             onChangeText={onChange}
             placeholder="Search this agent"
             placeholderTextColor={theme.color.gray400}
+            keyboardAppearance={theme.dark ? 'dark' : 'light'}
             style={[styles.searchInput, { color: theme.color.gray800, fontFamily: theme.font.body }]}
           />
           {query ? (
@@ -352,7 +353,7 @@ function EmptyState({ agentName, agentIcon }: { agentName: string; agentIcon: Pa
   return (
     <View style={styles.empty}>
       <View style={[styles.emptyRing, { borderColor: theme.color.secondaryMuted }]}>
-        <AgentGlyph name={agentIcon} size={34} color="#a78bfa" />
+        <AgentGlyph name={agentIcon} size={34} color={theme.color.secondaryMuted} />
       </View>
       <Text variant="sheetTitle">{`${agentName} is paired and idle`}</Text>
       <Text variant="secondary" style={styles.emptyBody}>

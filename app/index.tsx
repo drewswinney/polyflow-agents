@@ -89,7 +89,7 @@ export default function NewSessionScreen() {
         <View style={styles.body}>
           <View style={styles.empty}>
             <View style={[styles.ring, { borderColor: theme.color.secondaryMuted }]}>
-              <AgentGlyph name={agent.icon} size={34} color="#a78bfa" />
+              <AgentGlyph name={agent.icon} size={34} color={theme.color.secondaryMuted} />
             </View>
             <Text variant="sheetTitle">{`Message ${agent.displayName}`}</Text>
             <Text variant="secondary" style={styles.emptyBody}>

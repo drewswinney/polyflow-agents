@@ -92,9 +92,9 @@ function statusChip(call: ToolCall, theme: ReturnType<typeof useTheme>) {
     case 'running':
       return {
         label: 'running',
-        background: theme.color.primaryTint,
-        border: '#bfdbfe',
-        text: theme.color.primary
+        background: theme.color.info50,
+        border: theme.color.info200,
+        text: theme.color.info700
       }
     case 'pending':
       return {

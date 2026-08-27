@@ -34,6 +34,7 @@ export const TranscriptEntryView = memo(function TranscriptEntryView({ entry }: 
 })
 
 function UserBubble({ text, images }: { text: string; images?: MessageImage[] }) {
+  const theme = useTheme()
   const gradient = useGradient()
   const [copied, setCopied] = useState(false)
 
@@ -63,7 +64,7 @@ function UserBubble({ text, images }: { text: string; images?: MessageImage[] })
             end={gradient.end}
             style={styles.userBubble}
           >
-            <Text variant="chat" color="#ffffff" selectable>
+            <Text variant="chat" color={theme.color.onAccent} selectable>
               {text}
             </Text>
           </LinearGradient>
@@ -77,7 +78,7 @@ function UserBubble({ text, images }: { text: string; images?: MessageImage[] })
               hitSlop={COPY_HIT_SLOP}
               style={styles.copyButton}
             >
-              <Icon name={copied ? 'check' : 'copy'} size={12} color="#9ca3af" />
+              <Icon name={copied ? 'check' : 'copy'} size={12} color={theme.color.gray400} />
             </Pressable>
           </View>
         ) : null}

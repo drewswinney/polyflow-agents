@@ -21,8 +21,9 @@ import { useNotificationTap } from '@/state/notification-tap'
 import { useSessions } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
 import { Sidebar } from '@/ui/components/Sidebar'
-import { ThemeProvider } from '@/ui/ThemeProvider'
-import { NEUTRAL } from '@/ui/theme'
+import { useIsDarkMode } from '@/state/theme-prefs'
+import { ThemeProvider, useTheme } from '@/ui/ThemeProvider'
+import { NEUTRAL_DARK, NEUTRAL_LIGHT } from '@/ui/theme'
 
 void SplashScreen.preventAutoHideAsync()
 
@@ -101,6 +102,11 @@ export default function RootLayout() {
   // something upstream never answered at all.
   const ready = (fontsSettled && hydrated) || deadlinePassed
 
+  // The navigator's own background sits behind every screen, so it has to track
+  // the theme too; left light it showed as a white flash between screens.
+  const isDark = useIsDarkMode()
+  const stackBg = isDark ? NEUTRAL_DARK.bg : NEUTRAL_LIGHT.bg
+
   /**
    * Keep asking for a frame until the app is ready to be seen.
    *
@@ -158,7 +164,9 @@ export default function RootLayout() {
     )
   }, [deadlinePassed, fontsSettled, hydrated])
 
-  if (!ready) return <View style={{ flex: 1, backgroundColor: NEUTRAL.bg }} />
+  // Painted before ThemeProvider mounts, so it reads the preference directly —
+  // otherwise a dark-mode launch flashes a white screen behind the splash.
+  if (!ready) return <View style={{ flex: 1, backgroundColor: isDark ? NEUTRAL_DARK.bg : NEUTRAL_LIGHT.bg }} />
 
   return (
     <SafeAreaProvider onLayout={hideSplash}>
@@ -166,8 +174,8 @@ export default function RootLayout() {
         {/* Accent follows the selected agent, so a glance says which one you are in. */}
         <ThemeProvider accent={agent?.accent}>
           <ConnectionProvider server={server} agent={agent}>
-            <StatusBar style="dark" />
-            <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: NEUTRAL.bg } }}>
+            <ThemedChrome />
+            <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: stackBg } }}>
               <Stack.Screen name="index" />
               <Stack.Screen name="welcome" />
               <Stack.Screen name="sessions" />
@@ -192,6 +200,17 @@ export default function RootLayout() {
       </QueryClientProvider>
     </SafeAreaProvider>
   )
+}
+
+/**
+ * Status-bar styling, split out so it can read the resolved theme from inside
+ * `ThemeProvider`. The icons are drawn by the OS, so they take a mode rather
+ * than a colour — dark glyphs over a dark background is invisible chrome.
+ */
+function ThemedChrome() {
+  const theme = useTheme()
+
+  return <StatusBar style={theme.dark ? 'light' : 'dark'} />
 }
 
 /**
