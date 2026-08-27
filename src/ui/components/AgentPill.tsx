@@ -19,12 +19,14 @@ export function AgentPill({
   agent,
   connection,
   open,
-  onPress
+  onPress,
+  disabled = false
 }: {
   agent: Agent
   connection: AgentConnection
   open: boolean
-  onPress: () => void
+  onPress?: () => void
+  disabled?: boolean
 }) {
   const theme = useTheme()
 
@@ -35,17 +37,35 @@ export function AgentPill({
         ? theme.color.gray400
         : theme.color.warning700
 
+  const pillColor = disabled
+    ? theme.color.bgSubtle
+    : open
+      ? theme.color.secondaryTint
+      : theme.color.bgSubtle
+
+  const textColor = disabled
+    ? theme.color.gray500
+    : open
+      ? theme.color.secondaryDeep
+      : theme.color.gray800
+
+  const iconColor = disabled
+    ? theme.color.gray500
+    : open
+      ? theme.color.secondaryDeep
+      : theme.color.gray600
+
   return (
     <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Selected agent ${agent.displayName}`}
-      hitSlop={8}
+      accessibilityRole={disabled ? undefined : 'button'}
+      accessibilityLabel={disabled ? `Selected agent ${agent.displayName}` : undefined}
+      disabled={disabled}
       onPress={onPress}
       style={[
         styles.pill,
         {
-          backgroundColor: open ? theme.color.secondaryTint : theme.color.bgSubtle,
-          borderColor: open ? theme.color.secondaryMuted : theme.color.border,
+          backgroundColor: pillColor,
+          borderColor: disabled ? theme.color.border : open ? theme.color.secondaryMuted : theme.color.border,
           borderRadius: theme.radius.pill
         }
       ]}
@@ -54,14 +74,16 @@ export function AgentPill({
       <View style={styles.glyphSlot}>
         <AgentGlyph name={agent.icon} />
       </View>
-      <Text variant="pill" numberOfLines={1} color={open ? theme.color.secondaryDeep : theme.color.gray800}>
+      <Text variant="pill" numberOfLines={1} color={textColor}>
         {agent.displayName}
       </Text>
-      <Icon
-        name={open ? 'chevron-up' : 'chevron-down'}
-        size={9}
-        color={open ? theme.color.secondaryDeep : theme.color.gray600}
-      />
+      {!disabled && (
+        <Icon
+          name={open ? 'chevron-up' : 'chevron-down'}
+          size={9}
+          color={iconColor}
+        />
+      )}
     </Pressable>
   )
 }
