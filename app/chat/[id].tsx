@@ -7,7 +7,7 @@ import { ActivityIndicator, Keyboard, Platform, StyleSheet, View } from 'react-n
 import type { TranscriptEntry } from '@/domain'
 import { useBackend, useConnectionState } from '@/state/ConnectionProvider'
 import { useAgentScopedRoute } from '@/state/agent-scope'
-import { useSelectedServer } from '@/state/agents'
+import { useAgents, useSelectedAgent, useSelectedServer } from '@/state/agents'
 import { useSidebar } from '@/state/sidebar'
 import { useSessionStream } from '@/state/session-stream'
 import { useIsStreaming } from '@/state/stream-tail'
@@ -20,6 +20,7 @@ import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { ScrollToBottomButton } from '@/ui/components/ScrollToBottomButton'
 import { StreamingTail } from '@/ui/components/StreamingTail'
 import { Text } from '@/ui/components/Text'
+import { AgentPill } from '@/ui/components/AgentPill'
 import { TranscriptEntryView } from '@/ui/components/TranscriptEntryView'
 import { compactTokens, usd } from '@/ui/format'
 import { KeyboardInset } from '@/ui/keyboard'
@@ -32,13 +33,16 @@ import { useTheme } from '@/ui/ThemeProvider'
  * tail as its footer. Tokens land in the tail's own store, so a delta repaints
  * one bubble rather than the list (§7.3).
  *
- * No agent pill here: the agent is established by how you got into the session.
+ * The agent pill is shown here as a read-only indicator — you can't switch
+ * agents mid-chat because the session id is scoped to one agent (§5.2).
  */
 export default function ChatScreen() {
   const theme = useTheme()
   // The approval sentence names the *host* the command would run on (§7.6),
   // which is the server's rather than the agent's — several agents share one.
   const server = useSelectedServer()
+  const agent = useSelectedAgent()
+  const connection = useAgents(state => state.servers.find(s => s.id === server.id)?.connection ?? 'offline')
   const { id } = useLocalSearchParams<{ id: string }>()
   const backend = useBackend()
   const state = useConnectionState()
@@ -258,6 +262,14 @@ export default function ChatScreen() {
               {stream.approval || stream.clarify ? 'blocked on you' : 'reconnecting…'}
             </Text>
           )
+        }
+        center={
+          <AgentPill
+            agent={agent}
+            connection={connection}
+            open={false}
+            disabled={true}
+          />
         }
         right={<IconButton name="ellipsis" accessibilityLabel="Session options" edge="right" />}
       />
