@@ -243,7 +243,7 @@ function ActionButton({
         accessibilityRole="button"
         accessibilityLabel="Stop"
         onPress={onPress}
-        style={[styles.action, { backgroundColor: theme.color.gray800 }]}
+        style={[styles.action, { backgroundColor: '#6d28d9' }]}
       >
         <Icon name="stop" size={15} color={theme.color.onAccent} />
       </Pressable>

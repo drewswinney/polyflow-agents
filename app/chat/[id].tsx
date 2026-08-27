@@ -118,9 +118,19 @@ export default function ChatScreen() {
    * Fires on every token, so the scroll is unanimated: an animation restarted
    * each frame never arrives anywhere, and the distance being covered here is a
    * line of text.
+   *
+   * Gated on `!dragging.current` too, not just `following.current`: a token
+   * lands roughly every 60ms while streaming (§7.3's flush interval), and
+   * `following` only flips false once an `onScroll` event reports the drag has
+   * carried you away from the end. A finger-down that has not yet moved far
+   * enough to fire that event was getting re-pinned to the bottom by the next
+   * token before it had the chance — the trap where scrolling up "not fast
+   * enough" just snapped you back. A live touch is unambiguous intent to read
+   * where you are, so it holds the pin off regardless of what `following` still
+   * says.
    */
   const onContentSizeChange = useCallback(() => {
-    if (following.current) listRef.current?.scrollToEnd({ animated: false })
+    if (following.current && !dragging.current) listRef.current?.scrollToEnd({ animated: false })
   }, [])
 
   const onScrollBeginDrag = useCallback(() => {
