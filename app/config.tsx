@@ -207,6 +207,7 @@ function ValueInput({ field, onCommit }: { field: ConfigField; onCommit: (value:
       autoCorrect={false}
       placeholder="not set"
       placeholderTextColor={theme.color.gray400}
+            keyboardAppearance={theme.dark ? 'dark' : 'light'}
       style={[
         styles.input,
         {

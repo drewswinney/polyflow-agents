@@ -27,5 +27,5 @@ export function useTheme(): Theme {
 export function useGradient(): { colors: [string, string]; start: typeof GRADIENT.start; end: typeof GRADIENT.end } {
   const theme = useTheme()
 
-  return { colors: [theme.color.primary, theme.color.secondary], start: GRADIENT.start, end: GRADIENT.end }
+  return { colors: [theme.color.gradientFrom, theme.color.gradientTo], start: GRADIENT.start, end: GRADIENT.end }
 }

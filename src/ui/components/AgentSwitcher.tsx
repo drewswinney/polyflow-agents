@@ -48,7 +48,10 @@ export function AgentSwitcher({
     <Modal transparent visible animationType="fade" onRequestClose={onDismiss}>
       {/* The scrim covers the list region only; the header stays clear so the
           pill you just tapped remains legible. */}
-      <Pressable style={[styles.scrim, { top: insets.top + 52 }]} onPress={onDismiss} />
+      <Pressable
+        style={[styles.scrim, { backgroundColor: theme.color.scrim, top: insets.top + 52 }]}
+        onPress={onDismiss}
+      />
 
       <View style={[styles.anchor, { top: insets.top + 52 + 10 }]} pointerEvents="box-none">
         <View
@@ -219,7 +222,7 @@ function AgentRow({
 }
 
 const styles = StyleSheet.create({
-  scrim: { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(11,17,32,0.28)' },
+  scrim: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   anchor: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
   popover: { width: 256, paddingVertical: 5, overflow: 'hidden' },
   groupHead: { height: 26, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 11 },

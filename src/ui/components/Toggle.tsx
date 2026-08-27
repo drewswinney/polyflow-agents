@@ -32,18 +32,32 @@ export function Toggle({
       style={[
         styles.track,
         {
-          backgroundColor: value ? theme.color.secondary : theme.color.divider,
-          borderColor: value ? theme.color.secondary : theme.color.border,
+          backgroundColor: value ? theme.color.accentFill : theme.color.divider,
+          borderColor: value ? theme.color.accentFill : theme.color.border,
           opacity: disabled ? 0.5 : 1
         }
       ]}
     >
-      <View style={[styles.knob, { marginLeft: value ? 23 : 3 }]} />
+      <View
+        style={[
+          styles.knob,
+          {
+            // On the filled track the knob is white; on the empty one it has to
+            // contrast with a divider that is light in one theme and dark in
+            // the other.
+            backgroundColor:
+              value ? theme.color.onAccent
+              : theme.dark ? theme.color.gray600
+              : theme.color.surface,
+            marginLeft: value ? 23 : 3
+          }
+        ]}
+      />
     </Pressable>
   )
 }
 
 const styles = StyleSheet.create({
   track: { width: 48, height: 28, borderRadius: 100, borderWidth: StyleSheet.hairlineWidth, justifyContent: 'center' },
-  knob: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#ffffff' }
+  knob: { width: 22, height: 22, borderRadius: 11 }
 })

@@ -97,7 +97,7 @@ export function ApprovalCard({
               end={gradient.end}
               style={[styles.primary, { borderRadius: theme.radius.control }]}
             >
-              <Text variant="rowLabelStrong" color="#ffffff">
+              <Text variant="rowLabelStrong" color={theme.color.onAccent}>
                 Allow once
               </Text>
             </LinearGradient>
