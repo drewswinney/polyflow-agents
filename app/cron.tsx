@@ -5,8 +5,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { CronJobSummary } from '@/domain'
 import { useBackend } from '@/state/ConnectionProvider'
-import { useSelectedAgent } from '@/state/agents'
+import { useAgents, useSelectedAgent, useSelectAgent } from '@/state/agents'
 import { Card, Divider } from '@/ui/components/Card'
+import { AgentSwitcher } from '@/ui/components/AgentSwitcher'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { Toggle } from '@/ui/components/Toggle'
@@ -27,6 +28,11 @@ export default function CronScreen() {
   const agent = useSelectedAgent()
   const backend = useBackend()
   const queryClient = useQueryClient()
+  const servers = useAgents(state => state.servers)
+  const agents = useAgents(state => state.agents)
+  const selectAgent = useSelectAgent()
+  const dismissAgent = useAgents(state => state.dismissAgent)
+  const [switcherOpen, setSwitcherOpen] = useState(false)
 
   const jobsKey = ['agent', agent.id, 'cron'] as const
 
@@ -81,6 +87,17 @@ export default function CronScreen() {
           <Text variant="secondary">Running — the result arrives on the event stream.</Text>
         ) : null}
       </ScrollView>
+
+      <AgentSwitcher
+        servers={servers}
+        agents={agents}
+        selectedId={agent.id}
+        visible={switcherOpen}
+        onSelect={selectAgent}
+        onDismissAgent={id => void dismissAgent(id)}
+        onAddServer={() => router.push('/servers/new')}
+        onDismiss={() => setSwitcherOpen(false)}
+      />
     </View>
   )
 }
