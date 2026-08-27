@@ -81,12 +81,23 @@ re-derived under three rules. `src/ui/theme.ts` holds the values;
 3. **Status and accent swap ends.** The `700` tones become the *light* end of
    each hue and the `50` backgrounds the dark end. The accent lifts
    (`secondary` → `#a071e9`) and the violet tints sink into dark tinted
-   surfaces — which means `onAccent`, the thing drawn on a filled accent, is
-   **dark** in dark mode, not white. White on a lifted accent lands near 3.5:1.
+   surfaces.
+
+The accent lift in (3) forces a split. `primary`/`secondary` do double duty in
+light mode — deep enough to carry white when filled, dark enough to read as
+icons on white. Dark mode cannot have both: icons must lift to stay legible on
+`bg`, but a lifted accent will not hold white text (~3.5:1). So the **filled**
+roles are separate tokens — `gradientFrom`, `gradientTo`, `accentFill` — which
+stay deep in both themes, and `onAccent` is white in both. Light mode is
+unaffected: the fills resolve to the accent exactly as declared.
 
 Agent accents are per-agent and arbitrary, so their dark counterparts are
 derived at runtime by `deriveDarkAccent`, not hand-picked: each role keeps the
-agent's hue and is re-toned to the lightness its job needs.
+agent's hue and is re-toned to the lightness its job needs. The filled roles go
+through `accentSurfaces`, which derives lightness from the contrast requirement
+rather than a constant — at equal HSL lightness an amber is far more luminous
+than a violet, so one fixed value cannot carry white across every hue an agent
+might declare.
 
 Targets: body text ≥ 4.5:1 against every surface it can land on; icons, large
 text and the gradient ≥ 3:1; borders stay between 1.2:1 and 4.5:1 so they read

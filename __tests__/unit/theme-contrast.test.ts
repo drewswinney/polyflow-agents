@@ -105,11 +105,25 @@ describe.each([
     expect(contrastRatio(color.secondaryDeep, color.secondaryTintStrong)).toBeGreaterThanOrEqual(AA)
   })
 
-  // `onAccent` is what sits on the gradient: send button, user bubbles, the
-  // primary call to action. It flips polarity between themes.
-  it('reads onAccent against both gradient stops', () => {
-    expect(contrastRatio(color.onAccent, color.primary)).toBeGreaterThanOrEqual(AA)
-    expect(contrastRatio(color.onAccent, color.secondary)).toBeGreaterThanOrEqual(AA)
+  // `onAccent` is what sits on a filled accent: send button, user bubbles, the
+  // toggle knob, the voice buttons. It is white in both themes, which is only
+  // safe because the filled roles stay deep while the foreground roles lift.
+  it('reads onAccent against every filled accent role', () => {
+    for (const fill of ['gradientFrom', 'gradientTo', 'accentFill'] as const) {
+      expect(contrastRatio(color.onAccent, color[fill])).toBeGreaterThanOrEqual(AA)
+    }
+  })
+
+  // The whole point of splitting the roles: a fill that had lifted far enough
+  // to serve as a foreground would no longer hold white text.
+  it('keeps filled accents deeper than the foreground accents', () => {
+    expect(hexToHsl(color.gradientTo)!.l).toBeLessThan(hexToHsl(color.secondary)!.l + 0.01)
+  })
+
+  it('keeps the filled accent distinguishable from the background', () => {
+    for (const fill of ['gradientFrom', 'gradientTo', 'accentFill'] as const) {
+      expect(contrastRatio(color[fill], color.bg)).toBeGreaterThanOrEqual(AA_LARGE - 0.1)
+    }
   })
 
   it('reads search highlights, which keep the secondary ink', () => {
@@ -184,7 +198,8 @@ describe('deriveDarkAccent', () => {
 
     expect(contrastRatio(color.secondary, color.bg)).toBeGreaterThanOrEqual(AA_LARGE)
     expect(contrastRatio(color.secondaryDeep, color.secondaryTint)).toBeGreaterThanOrEqual(AA)
-    expect(contrastRatio(color.onAccent, color.secondary)).toBeGreaterThanOrEqual(AA_LARGE)
+    expect(contrastRatio(color.onAccent, color.gradientTo)).toBeGreaterThanOrEqual(AA)
+    expect(contrastRatio(color.onAccent, color.accentFill)).toBeGreaterThanOrEqual(AA)
     expect(contrastRatio(color.gray800, color.secondaryTint)).toBeGreaterThanOrEqual(AA)
   })
 })

@@ -135,3 +135,24 @@ export function withHsl(hex: string, targetL: number, targetS: number, fallback 
 
   return hslToHex({ h: hsl.h, s: targetS, l: targetL })
 }
+
+/**
+ * Deepens a colour until `over` reads against it at `minRatio`, starting from
+ * `startL` and stepping down.
+ *
+ * A fixed lightness cannot serve every hue: at the same HSL lightness an amber
+ * is far more luminous than a violet, so `l = 0.54` carries white for one and
+ * fails for the other. Agent accents are arbitrary, so the fill has to be
+ * derived from the contrast requirement itself rather than from a constant.
+ */
+export function deepenUntil(hex: string, over: string, minRatio: number, startL: number): string {
+  const hsl = hexToHsl(hex)
+  if (!hsl) return hex
+
+  for (let l = Math.min(startL, 0.95); l >= 0.1; l -= 0.01) {
+    const candidate = hslToHex({ h: hsl.h, s: hsl.s, l })
+    if (contrastRatio(over, candidate) >= minRatio) return candidate
+  }
+
+  return hslToHex({ h: hsl.h, s: hsl.s, l: 0.1 })
+}

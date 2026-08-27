@@ -6,7 +6,7 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "hermeshandheld",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": false,
@@ -44,7 +44,12 @@
         {
           "backgroundColor": "#fcfcfd",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "imageWidth": 76,
+          "dark": {
+            "backgroundColor": "#0b1120",
+            "image": "./assets/images/splash-icon.png",
+            "imageWidth": 76
+          }
         }
       ],
       [

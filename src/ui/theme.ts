@@ -14,7 +14,7 @@
 
 import type { AgentAccent } from '@/domain'
 
-import { retone, withHsl } from './color'
+import { deepenUntil, hexToHsl, retone, withHsl } from './color'
 
 /** The Polyflow indigo/violet accent, exactly as drawn. */
 export const BASE_ACCENT: AgentAccent = {
@@ -108,13 +108,8 @@ export const NEUTRAL_DARK = {
   error200: '#7a2626',
   error50: '#2d1113',
   highlight: '#443307',
-  /**
-   * Text/icons on the accent gradient or a filled accent button. In dark mode
-   * the accent itself is the *light* colour, so what sits on it must be dark —
-   * white on a lifted accent lands around 3.5:1, which is not readable at body
-   * size.
-   */
-  onAccent: '#150e26',
+  /** Text/icons on the accent gradient or a filled accent button. */
+  onAccent: '#ffffff',
   /** Scrim behind sheets and the sidebar. */
   scrim: 'rgba(3,6,14,0.62)',
   /** Translucent wash laid over the blurred screen header. */
@@ -128,11 +123,55 @@ export const NEUTRAL_DARK = {
  */
 export type NeutralColors = typeof NEUTRAL_LIGHT | typeof NEUTRAL_DARK
 
+/**
+ * Accent roles that are **fills** rather than foregrounds.
+ *
+ * `primary`/`secondary` do double duty in the light theme: deep enough to carry
+ * white text when filled, dark enough to read as icons on a white background.
+ * Dark mode splits that pair — icons have to lift to stay legible on `bg`, but
+ * a lifted accent cannot carry white text (it lands near 3.5:1). So the filled
+ * roles are separated out here and stay deep in both themes, and `onAccent`
+ * stays white in both.
+ */
+export type AccentSurfaces = {
+  /** Gradient start — composer send button, the user's own bubbles. */
+  gradientFrom: string
+  /** Gradient end. */
+  gradientTo: string
+  /** Solid accent fill: toggle track, voice buttons. */
+  accentFill: string
+}
+
+/** Dark mode lifts a fill this far for presence, contrast permitting. */
+const DARK_FILL_LIGHTNESS = 0.54
+/** White body text on a filled accent. */
+const ON_ACCENT_TARGET = 4.5
+
+/**
+ * Resolves the filled accent roles so each one can carry `onAccent`.
+ *
+ * Dark mode lifts a fill for presence against `bg`, but only as far as white
+ * still reads on it — an agent may declare a bright amber or cyan, where the
+ * same lightness that flatters a violet would leave white unreadable. Light
+ * mode starts from the accent as declared and deepens only if that colour
+ * could not hold white either.
+ */
+export function accentSurfaces(accent: AgentAccent, darkMode: boolean): AccentSurfaces {
+  const fill = (hex: string): string => {
+    const own = hexToHsl(hex)?.l ?? DARK_FILL_LIGHTNESS
+    const start = darkMode ? Math.max(own, DARK_FILL_LIGHTNESS) : own
+
+    return deepenUntil(hex, '#ffffff', ON_ACCENT_TARGET, start)
+  }
+
+  return { gradientFrom: fill(accent.primary), gradientTo: fill(accent.secondary), accentFill: fill(accent.secondary) }
+}
+
 export type Theme = {
   /** Whether the dark palette is active — for the few native props (blur tint,
    *  keyboard appearance, status bar) that take a mode rather than a colour. */
   dark: boolean
-  color: NeutralColors & AgentAccent
+  color: NeutralColors & AgentAccent & AccentSurfaces
   radius: typeof RADIUS
   space: typeof SPACE
   font: typeof FONT
@@ -245,7 +284,9 @@ export function buildTheme(accent: AgentAccent = BASE_ACCENT, darkMode: boolean 
 
   return {
     dark: darkMode,
-    color: { ...neutral, ...resolved },
+    // Filled roles derive from the accent **as declared**, not from the lifted
+    // dark variant — lifting is for foregrounds, and a lifted fill loses white.
+    color: { ...neutral, ...resolved, ...accentSurfaces(accent, darkMode) },
     radius: RADIUS,
     space: SPACE,
     font: FONT,

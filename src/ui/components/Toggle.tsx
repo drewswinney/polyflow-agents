@@ -32,8 +32,8 @@ export function Toggle({
       style={[
         styles.track,
         {
-          backgroundColor: value ? theme.color.secondary : theme.color.divider,
-          borderColor: value ? theme.color.secondary : theme.color.border,
+          backgroundColor: value ? theme.color.accentFill : theme.color.divider,
+          borderColor: value ? theme.color.accentFill : theme.color.border,
           opacity: disabled ? 0.5 : 1
         }
       ]}
@@ -42,8 +42,9 @@ export function Toggle({
         style={[
           styles.knob,
           {
-            // The knob must contrast with the track it sits on, and in dark mode
-            // both tracks are the opposite polarity of their light counterparts.
+            // On the filled track the knob is white; on the empty one it has to
+            // contrast with a divider that is light in one theme and dark in
+            // the other.
             backgroundColor:
               value ? theme.color.onAccent
               : theme.dark ? theme.color.gray600

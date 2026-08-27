@@ -192,8 +192,8 @@ export default function VoiceScreen() {
             style={[
               styles.talk,
               {
-                backgroundColor: recorderState.isRecording ? theme.color.secondary : theme.color.surface,
-                borderColor: recorderState.isRecording ? theme.color.secondary : theme.color.border
+                backgroundColor: recorderState.isRecording ? theme.color.accentFill : theme.color.surface,
+                borderColor: recorderState.isRecording ? theme.color.accentFill : theme.color.border
               }
             ]}
           >
@@ -210,7 +210,7 @@ export default function VoiceScreen() {
             <Pressable
               accessibilityRole="button"
               onPress={send}
-              style={[styles.send, { backgroundColor: theme.color.secondary, borderRadius: theme.radius.control }]}
+              style={[styles.send, { backgroundColor: theme.color.accentFill, borderRadius: theme.radius.control }]}
             >
               <Text variant="rowLabelStrong" color={theme.color.onAccent}>
                 Send to session
