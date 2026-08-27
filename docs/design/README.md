@@ -62,6 +62,36 @@ Polyflow (indigo/violet, Outfit + Inter + Space Mono). Ported to mobile with the
 | error50 / error200 | `#fef2f2` / `#fecaca` | destructive button |
 | highlight | `#fef9c3` | search term highlight |
 
+The table above is the **light** palette. Two tokens exist only in code because
+they have no single hex: `onAccent` (whatever sits on the gradient) and `scrim`.
+
+#### Dark
+
+Dark mode is not the light palette on a dark background — the table above is
+re-derived under three rules. `src/ui/theme.ts` holds the values;
+`__tests__/unit/theme-contrast.test.ts` enforces the contrast they promise.
+
+1. **The ink ramp inverts, it does not carry over.** `gray900` means *highest
+   contrast against the current background* in both themes, so in dark mode it
+   is near-white (`#f8fafc`) and steps down to `gray400` (`#8593a6`). Copying
+   the light values here is what made body text near-black on near-black.
+2. **Surfaces stack upward from `bg`.** `bg` `#0b1120` → `surface` `#151c2b` →
+   `bgSubtle` `#1c2434`. Dark backgrounds swallow the diffuse shadows in
+   *Platform notes*, so elevation has to be carried by the fill itself.
+3. **Status and accent swap ends.** The `700` tones become the *light* end of
+   each hue and the `50` backgrounds the dark end. The accent lifts
+   (`secondary` → `#a071e9`) and the violet tints sink into dark tinted
+   surfaces — which means `onAccent`, the thing drawn on a filled accent, is
+   **dark** in dark mode, not white. White on a lifted accent lands near 3.5:1.
+
+Agent accents are per-agent and arbitrary, so their dark counterparts are
+derived at runtime by `deriveDarkAccent`, not hand-picked: each role keeps the
+agent's hue and is re-toned to the lightness its job needs.
+
+Targets: body text ≥ 4.5:1 against every surface it can land on; icons, large
+text and the gradient ≥ 3:1; borders stay between 1.2:1 and 4.5:1 so they read
+as structure rather than content.
+
 ### Typography
 
 - **Outfit 500** — screen titles 22px/1.1 (letter-spacing -0.02em), sheet titles 18px, sub-screen titles 17px, stat numbers 22px, voice transcript 20px/1.4.

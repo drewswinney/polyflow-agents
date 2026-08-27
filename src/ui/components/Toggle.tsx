@@ -38,12 +38,25 @@ export function Toggle({
         }
       ]}
     >
-      <View style={[styles.knob, { marginLeft: value ? 23 : 3 }]} />
+      <View
+        style={[
+          styles.knob,
+          {
+            // The knob must contrast with the track it sits on, and in dark mode
+            // both tracks are the opposite polarity of their light counterparts.
+            backgroundColor:
+              value ? theme.color.onAccent
+              : theme.dark ? theme.color.gray600
+              : theme.color.surface,
+            marginLeft: value ? 23 : 3
+          }
+        ]}
+      />
     </Pressable>
   )
 }
 
 const styles = StyleSheet.create({
   track: { width: 48, height: 28, borderRadius: 100, borderWidth: StyleSheet.hairlineWidth, justifyContent: 'center' },
-  knob: { width: 22, height: 22, borderRadius: 11, backgroundColor: '#ffffff' }
+  knob: { width: 22, height: 22, borderRadius: 11 }
 })

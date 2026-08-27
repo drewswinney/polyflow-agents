@@ -200,7 +200,7 @@ export default function VoiceScreen() {
             <Icon
               name="microphone"
               size={26}
-              color={recorderState.isRecording ? '#ffffff' : theme.color.secondary}
+              color={recorderState.isRecording ? theme.color.onAccent : theme.color.secondary}
             />
           </Pressable>
 
@@ -212,7 +212,7 @@ export default function VoiceScreen() {
               onPress={send}
               style={[styles.send, { backgroundColor: theme.color.secondary, borderRadius: theme.radius.control }]}
             >
-              <Text variant="rowLabelStrong" color="#ffffff">
+              <Text variant="rowLabelStrong" color={theme.color.onAccent}>
                 Send to session
               </Text>
             </Pressable>

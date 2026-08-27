@@ -14,6 +14,8 @@
 
 import type { AgentAccent } from '@/domain'
 
+import { retone, withHsl } from './color'
+
 /** The Polyflow indigo/violet accent, exactly as drawn. */
 export const BASE_ACCENT: AgentAccent = {
   primary: '#1d4ed8',
@@ -37,6 +39,9 @@ export const NEUTRAL_LIGHT = {
   bg: '#fcfcfd',
   bgSubtle: '#f8fafc',
   primaryTint: '#eff6ff',
+  info700: '#1d4ed8',
+  info200: '#bfdbfe',
+  info50: '#eff6ff',
   success700: '#15803d',
   success200: '#bbf7d0',
   success50: '#f0fdf4',
@@ -48,44 +53,86 @@ export const NEUTRAL_LIGHT = {
   error700: '#b91c1c',
   error200: '#fecaca',
   error50: '#fef2f2',
-  highlight: '#fef9c3'
+  highlight: '#fef9c3',
+  /** Text/icons that sit on the accent gradient or a filled accent button. */
+  onAccent: '#ffffff',
+  /** Scrim behind sheets and the sidebar. */
+  scrim: 'rgba(11,17,32,0.32)',
+  /** Translucent wash laid over the blurred screen header. */
+  headerWash: 'rgba(255,255,255,0.9)'
 } as const
 
-/** Dark theme neutral colours. */
+/**
+ * Dark theme neutral colours.
+ *
+ * The ramp is **inverted, not copied**: `gray900` is the highest-contrast text
+ * colour in both themes, so in dark mode it is near-white and steps *down* to
+ * `gray400` for the faintest metadata. Keeping the light values here is what
+ * made body text render as near-black on a near-black background.
+ *
+ * Surfaces step the other way — `bg` is the deepest, `surface` sits above it,
+ * `bgSubtle` above that — so an elevated card reads as elevated without relying
+ * on a shadow that dark backgrounds swallow anyway.
+ *
+ * Status colours are re-picked rather than inverted: on dark surfaces the `700`
+ * text tones need to be the *light* end of each hue, and the `50` backgrounds
+ * the dark end, or the pairing inverts into unreadable.
+ */
 export const NEUTRAL_DARK = {
-  gray900: '#0b1120',
-  gray800: '#1f2937',
-  gray600: '#4b5563',
-  gray500: '#6b7280',
-  gray400: '#9ca3af',
-  border: '#374151',
-  divider: '#1f2937',
-  surface: '#1f2937',
+  // Foreground ramp — high contrast to low. Checked against `bg` and `surface`.
+  gray900: '#f8fafc',
+  gray800: '#e2e8f0',
+  gray600: '#b6c2d2',
+  gray500: '#94a3b8',
+  gray400: '#8593a6',
+  // Structure.
+  border: '#2c3444',
+  divider: '#212936',
+  // Surfaces — deepest to highest.
   bg: '#0b1120',
-  bgSubtle: '#111827',
-  primaryTint: '#1e3a5f',
-  success700: '#22c55e',
-  success200: '#166534',
-  success50: '#052e16',
+  surface: '#151c2b',
+  bgSubtle: '#1c2434',
+  primaryTint: '#16264a',
+  info700: '#93b4f8',
+  info200: '#2f4f8f',
+  info50: '#16264a',
+  success700: '#4ade80',
+  success200: '#1e5735',
+  success50: '#0e2a1a',
   successDot: '#4ade80',
-  warning700: '#fb923c',
-  warning200: '#92400e',
-  warning50: '#431407',
+  warning700: '#fdba74',
+  warning200: '#6b3d13',
+  warning50: '#2b1a0b',
   warningText: '#fdba74',
-  error700: '#f87171',
-  error200: '#991b1b',
-  error50: '#450a0a',
-  highlight: '#422006'
+  error700: '#fca5a5',
+  error200: '#7a2626',
+  error50: '#2d1113',
+  highlight: '#443307',
+  /**
+   * Text/icons on the accent gradient or a filled accent button. In dark mode
+   * the accent itself is the *light* colour, so what sits on it must be dark —
+   * white on a lifted accent lands around 3.5:1, which is not readable at body
+   * size.
+   */
+  onAccent: '#150e26',
+  /** Scrim behind sheets and the sidebar. */
+  scrim: 'rgba(3,6,14,0.62)',
+  /** Translucent wash laid over the blurred screen header. */
+  headerWash: 'rgba(11,17,32,0.86)'
 } as const
 
-/** Legacy export for compatibility — resolves to light theme. */
-export const NEUTRAL = NEUTRAL_LIGHT
-
-/** Neutral colors can be either light or dark variant. */
+/**
+ * Either palette. There is deliberately no alias that resolves to one of them:
+ * a `NEUTRAL` shorthand pointing at the light palette is how the navigator
+ * background and the startup gate ended up painting white in dark mode.
+ */
 export type NeutralColors = typeof NEUTRAL_LIGHT | typeof NEUTRAL_DARK
 
 export type Theme = {
-  color: (typeof NEUTRAL_LIGHT | typeof NEUTRAL_DARK) & AgentAccent
+  /** Whether the dark palette is active — for the few native props (blur tint,
+   *  keyboard appearance, status bar) that take a mode rather than a colour. */
+  dark: boolean
+  color: NeutralColors & AgentAccent
   radius: typeof RADIUS
   space: typeof SPACE
   font: typeof FONT
@@ -164,10 +211,41 @@ export const GRADIENT = {
   end: { x: 1, y: 1 }
 } as const
 
+/**
+ * Derives a dark-theme counterpart for any accent.
+ *
+ * Agents declare accents tuned for the light theme: saturated mid-tones for
+ * foreground roles and near-white tints for surface roles. Used unchanged on a
+ * dark background that inverts — the foreground roles go too dark to read, and
+ * the tint roles become glaring near-white blocks.
+ *
+ * So each role is re-toned to the lightness its *job* needs in dark mode, with
+ * the hue left alone so the agent still reads as itself. Roles are named after
+ * their use in `AgentAccent`, not after a fixed colour.
+ */
+export function deriveDarkAccent(accent: AgentAccent): AgentAccent {
+  return {
+    // Gradient start/end keep real saturation — they sit under white text.
+    primary: retone(accent.primary, 0.62, 1.05),
+    secondary: retone(accent.secondary, 0.68, 1.05),
+    // Text on tinted surfaces: light enough to clear AA on `secondaryTint`.
+    secondaryDeep: withHsl(accent.secondaryDeep, 0.78, 0.65),
+    // Borders: present against `bg` without glowing.
+    secondaryMuted: withHsl(accent.secondaryMuted, 0.44, 0.38),
+    // The tints stop being near-white and become dark tinted *surfaces*. Their
+    // source saturation is rounding noise at that lightness, so it is replaced.
+    secondaryTint: withHsl(accent.secondaryTint, 0.17, 0.32),
+    secondaryTintStrong: withHsl(accent.secondaryTintStrong, 0.23, 0.34)
+  }
+}
+
 export function buildTheme(accent: AgentAccent = BASE_ACCENT, darkMode: boolean = false): Theme {
   const neutral = darkMode ? NEUTRAL_DARK : NEUTRAL_LIGHT
+  const resolved = darkMode ? deriveDarkAccent(accent) : accent
+
   return {
-    color: { ...neutral, ...accent },
+    dark: darkMode,
+    color: { ...neutral, ...resolved },
     radius: RADIUS,
     space: SPACE,
     font: FONT,

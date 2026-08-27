@@ -81,7 +81,7 @@ export default function WelcomeScreen() {
             end={gradient.end}
             style={[styles.primary, { borderRadius: theme.radius.control }]}
           >
-            <Text variant="rowLabelStrong" color="#ffffff">
+            <Text variant="rowLabelStrong" color={theme.color.onAccent}>
               Next
             </Text>
           </LinearGradient>

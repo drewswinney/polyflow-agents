@@ -90,10 +90,13 @@ export function ScreenHeader({
   return (
     <BlurView
       intensity={12}
-      tint="light"
+      tint={theme.dark ? 'dark' : 'light'}
       style={[
         styles.wrap,
         {
+          // The translucent wash over the blur has to follow the theme; a fixed
+          // white left every header a bright band across a dark screen.
+          backgroundColor: theme.color.headerWash,
           // Both pads sit on the wrap, not inside a row, so the header actually
           // grows rather than shuffling its contents within a fixed height.
           paddingTop: (insetTop ? insets.top : 0) + theme.space.headerTop,
@@ -142,7 +145,6 @@ export function ScreenHeader({
 
 const styles = StyleSheet.create({
   wrap: {
-    backgroundColor: 'rgba(255,255,255,0.9)',
     borderBottomWidth: StyleSheet.hairlineWidth
   },
   pillRow: { alignItems: 'center', paddingBottom: 6 },
