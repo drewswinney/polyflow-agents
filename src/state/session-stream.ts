@@ -152,19 +152,33 @@ export function useSessionStream(
 /** Seal the streaming tail into a settled entry. */
   const sealTail = useCallback(() => {
     const settled = tail.finish()
+    const text = settled.text.trim()
+    const thinking = settled.thinking.trim()
 
-    if (settled.text.trim() || settled.thinking.trim()) {
+    if (text || thinking) {
       const at = Date.now()
 
-      setEntries(current => [
-        ...current,
-        ...(settled.thinking.trim()
-          ? [{ kind: 'thinking' as const, id: `think-${at}`, text: settled.thinking, at }]
-          : []),
-        ...(settled.text.trim()
-          ? [{ kind: 'message' as const, id: `agent-${at}`, role: 'agent' as const, text: settled.text, at }]
-          : [])
-      ])
+      setEntries(current => {
+        // A transcript reload (every reconnect refetches, §5.4) can race a
+        // live turn and land *after* the last chunk but *before*
+        // `turn_complete`: the REST snapshot already carries this reply as a
+        // settled row, and appending the tail on top of it doubles the
+        // bubble. The reload always replaces `entries` wholesale (see
+        // `sameEntries` below), so the reply — if it made it in — is the very
+        // last message entry; nothing legitimate is ever *undone* by this
+        // check, only a redundant append is skipped.
+        const lastMessage = [...current].reverse().find(entry => entry.kind === 'message')
+
+        if (text && lastMessage?.kind === 'message' && lastMessage.role === 'agent' && lastMessage.text === text) {
+          return current
+        }
+
+        return [
+          ...current,
+          ...(thinking ? [{ kind: 'thinking' as const, id: `think-${at}`, text: settled.thinking, at }] : []),
+          ...(text ? [{ kind: 'message' as const, id: `agent-${at}`, role: 'agent' as const, text: settled.text, at }] : [])
+        ]
+      })
     }
 
     tail.reset()
