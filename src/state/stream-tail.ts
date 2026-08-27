@@ -40,6 +40,8 @@ export function createStreamTail(): StreamTail {
   let pendingThinking = ''
   let timer: ReturnType<typeof setTimeout> | null = null
   const listeners = new Set<() => void>()
+  /** Track the last appended text to deduplicate consecutive identical chunks. */
+  let lastAppendedText = ''
 
   const emit = () => {
     for (const listener of listeners) listener()
@@ -72,6 +74,14 @@ export function createStreamTail(): StreamTail {
     },
     getSnapshot: () => snapshot,
     appendText(chunk) {
+      // Skip if this chunk is identical to the last one appended (deduplication).
+      // This handles cases where the backend emits both message.delta and message.interim
+      // with the same content, or re-emits chunks during reconnection.
+      if (chunk === lastAppendedText) {
+        return
+      }
+      
+      lastAppendedText = chunk
       pendingText += chunk
 
       if (!snapshot.streaming) {
@@ -107,6 +117,7 @@ export function createStreamTail(): StreamTail {
 
       pendingText = ''
       pendingThinking = ''
+      lastAppendedText = ''
       snapshot = EMPTY
       emit()
     },
