@@ -20,6 +20,7 @@ export function KanbanCardDetail({ card, onDismiss }: { card: KanbanCardSummary 
 
   const details = [
     ['Status', card.statusLabel],
+    ['Assignee', card.assignee],
     ['Risk', card.risk],
     ['Branch', card.branch],
     ['PR', card.pr]

@@ -1,4 +1,4 @@
-"""Device registration, on the port the app already talks to.
+"""Device registration and the kanban board, on the port the app already talks to.
 
 This is the third face of the plugin, and the one that removed the worst part of
 the design. `hermes_cli/web_server.py` discovers `dashboard/manifest.json`,
@@ -7,6 +7,10 @@ imports the file named by its `api` field, and mounts the `router` below under
 port
 that serves `/api/ws`. So the app registers over the connection it already has,
 with the credential it already has.
+
+The `/kanban` route reads the native Hermes kanban SQLite (read-only) and
+shapes it for the mobile Boards screen; `?source=obsidian` still serves the
+legacy markdown board for hosts that have not migrated.
 
 What that deleted (all three costs enumerated in `docs/push-relay.md` §5):
 
@@ -39,9 +43,11 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import json
 import logging
 import os
 import re
+import sqlite3
 import sys
 from pathlib import Path
 from typing import Any, Dict
@@ -171,12 +177,180 @@ async def unregister_device(body: dict) -> Dict[str, Any]:
     return {"ok": devices.unregister(token)}
 
 
-_STATUS_MAP = [
-    ("backlog", re.compile(r"backlog", re.I)),
-    ("in_progress", re.compile(r"in\s+progress|active", re.I)),
-    ("testing", re.compile(r"testing|qa", re.I)),
-    ("done", re.compile(r"done|complete", re.I)),
+_KANBAN_COLUMNS: list[tuple[str, str, list[str]]] = [
+    ("backlog", "Backlog", ["triage", "todo", "scheduled"]),
+    ("in_progress", "In Progress", ["ready", "running"]),
+    ("review", "Review", ["review"]),
+    ("blocked", "Blocked", ["blocked"]),
+    ("done", "Done", ["done"]),
 ]
+
+_NATIVE_PR_RE = re.compile(r"(?:#(\d+)|pull/(\d+))")
+_NATIVE_RISK_RE = re.compile(r"risk(?:\s+level)?[:\s]+(low|medium|high)\b", re.I)
+
+
+def _kanban_db_path() -> Path:
+    """The native kanban board backing the mobile Boards screen.
+
+    Delegates to Hermes's own resolver (`hermes_cli.kanban_db`) when
+    importable, so the phone shows the *active* board — the same file the
+    CLI, the dispatcher and the dashboard all read: `HERMES_KANBAN_DB`
+    override → `HERMES_KANBAN_BOARD` → `kanban/current` → the legacy
+    default board at `<root>/kanban.db`. A hand-rolled fallback below
+    covers hosts where `hermes_cli` is not importable (bare Python with no
+    Hermes install), reproducing the same chain against the resolved root.
+    `POLYFLOW_KANBAN_DB` is the plugin-level override (offline dev,
+    alternate installs) and always wins.
+    """
+    configured = os.environ.get("POLYFLOW_KANBAN_DB")
+    if configured:
+        return Path(configured).expanduser()
+    try:
+        from hermes_cli import kanban_db  # the host IS a hermes process
+
+        return Path(kanban_db.kanban_db_path())
+    except Exception:
+        pass
+
+    root = Path(os.environ.get("HERMES_KANBAN_HOME") or os.environ.get("HERMES_HOME") or Path.home() / ".hermes").expanduser()
+    # Boards are shared at the Hermes root, so a profile home
+    # (`<root>/profiles/<name>`) resolves up to `<root>` first.
+    parts = root.parts
+    if "profiles" in parts:
+        i = parts.index("profiles")
+        if i >= 2:
+            root = Path(*parts[:i])
+    slug = os.environ.get("HERMES_KANBAN_BOARD", "").strip()
+    if not slug:
+        try:
+            slug = (root / "kanban" / "current").read_text(encoding="utf-8").strip()
+        except OSError:
+            slug = ""
+    if not slug or slug == "default":
+        return root / "kanban.db"
+    return root / "kanban" / "boards" / slug / "kanban.db"
+
+
+def _kanban_board_title(db_path: Path) -> str:
+    """Display name from the board's `board.json`, when one is on disk.
+
+    Named boards keep `board.json` next to their DB; the legacy default
+    board's metadata lives in `kanban/boards/default/` even though its DB
+    file does not — so look in both places.
+    """
+    candidates = [db_path.parent / "board.json", db_path.parent / "boards" / "default" / "board.json"]
+    for metadata in candidates:
+        try:
+            name = str(json.loads(metadata.read_text(encoding="utf-8")).get("name") or "").strip()
+        except (OSError, ValueError):
+            continue
+        if name:
+            return name
+    return ""
+
+
+def _first_prose_line(body: str, limit: int = 200) -> str:
+    """The first line of a task body worth showing on a dense card.
+
+    Frontmatter and headings are structure, not description; a task whose body
+    is only checkboxes should render with an empty description, not a checkbox.
+    """
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("---"):
+            continue
+        if re.match(r"^(?:[-*]\s+)?\[[ xX]\]\s", stripped):
+            continue
+        return _strip_markdown(stripped)[:limit]
+    return ""
+
+
+def _native_card(row: dict[str, Any]) -> Dict[str, Any]:
+    body = str(row["body"] or "")
+    pr_match = _NATIVE_PR_RE.search(f"{body} {row['result']}")
+    pr = f"#{pr_match.group(1) or pr_match.group(2)}" if pr_match else None
+    risk_match = _NATIVE_RISK_RE.search(body)
+
+    return {
+        "id": row["id"],
+        "title": row["title"],
+        "description": _first_prose_line(body),
+        "status": row["status"],
+        "statusLabel": row["status"].replace("_", " ").title(),
+        "checked": row["status"] == "done",
+        "assignee": row["assignee"] or None,
+        "branch": row["branch"] or None,
+        "pr": pr,
+        "risk": risk_match.group(1).lower() if risk_match else None,
+        "body": body.strip()[:4000] or None,
+    }
+
+
+def _read_native_kanban() -> Dict[str, Any]:
+    """Read the native kanban SQLite board for the mobile Boards screen.
+
+    Read-only URI connection: the dispatcher and workers write this DB from
+    other processes, and a WAL read here must never take a write lock or
+    disturb a claim. The same failure semantics as the old Obsidian reader —
+    missing board is a 404, an unreadable one a 500 — so the app's existing
+    error card covers both without new UI.
+    """
+    db_path = _kanban_db_path()
+
+    if not db_path.exists():
+        raise HTTPException(status_code=404, detail=f"kanban board not found: {db_path}")
+
+    try:
+        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, check_same_thread=False)
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=500, detail=f"could not read kanban board: {exc}") from exc
+
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT id, title, body, assignee, status, branch_name AS branch, result, created_at
+            FROM tasks
+            WHERE status != 'archived'
+            ORDER BY priority DESC, created_at DESC
+            """
+        ).fetchall()
+    except sqlite3.Error as exc:
+        raise HTTPException(status_code=500, detail=f"could not read kanban board: {exc}") from exc
+    finally:
+        conn.close()
+
+    by_status = {row["status"]: [] for row in rows}
+    for row in rows:
+        by_status.setdefault(str(row["status"]), []).append(row)
+
+    columns: list[Dict[str, Any]] = []
+    for column_id, title, statuses in _KANBAN_COLUMNS:
+        cards = [_native_card(dict(r)) for status in statuses for r in by_status.get(status, [])]
+        columns.append({"id": column_id, "title": title, "cards": cards})
+
+    return {
+        "title": _kanban_board_title(db_path) or "Kanban Board",
+        "source": str(db_path),
+        "updatedAt": int(db_path.stat().st_mtime * 1000),
+        "columns": columns,
+    }
+
+
+@router.get("/kanban")
+async def kanban_board(source: str = "native") -> Dict[str, Any]:
+    """Kanban board for the mobile Boards screen.
+
+    `native` (default) reads the Hermes kanban SQLite — the board the
+    dispatcher actually runs, so what the phone shows is what is happening.
+    `obsidian` keeps the legacy markdown-board reader for hosts that have not
+    migrated yet (and for the offline dev workflow that fakes a host).
+    """
+    if source == "obsidian":
+        return _parse_kanban(_default_kanban_path())
+    if source != "native":
+        raise HTTPException(status_code=400, detail=f"unknown kanban source: {source}")
+    return _read_native_kanban()
 
 
 def _default_kanban_path() -> Path:
@@ -191,6 +365,15 @@ def _backlog_dir(board_path: Path) -> Path:
     if configured:
         return Path(configured).expanduser()
     return board_path.parent / "Backlog"
+
+
+# Legacy markdown-board reader (kept for `?source=obsidian`).
+_STATUS_MAP = [
+    ("backlog", re.compile(r"backlog", re.I)),
+    ("in_progress", re.compile(r"in\s+progress|active", re.I)),
+    ("testing", re.compile(r"testing|qa", re.I)),
+    ("done", re.compile(r"done|complete", re.I)),
+]
 
 
 def _status_for_heading(heading: str) -> str:
@@ -364,12 +547,6 @@ def _parse_kanban(board_path: Path) -> dict[str, object]:
         "updatedAt": int(board_path.stat().st_mtime * 1000),
         "columns": merged,
     }
-
-
-@router.get("/kanban")
-async def kanban_board() -> Dict[str, Any]:
-    """Read the local Obsidian DEV kanban board for the mobile Boards screen."""
-    return _parse_kanban(_default_kanban_path())
 
 
 @router.post("/test")

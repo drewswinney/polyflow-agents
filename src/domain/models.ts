@@ -391,6 +391,7 @@ export interface KanbanCardSummary {
   status: KanbanStatus
   statusLabel: string
   checked: boolean
+  assignee?: string | null
   branch?: string | null
   pr?: string | null
   risk?: string | null
