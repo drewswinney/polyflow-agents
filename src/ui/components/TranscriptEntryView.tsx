@@ -9,6 +9,7 @@ import { clockTime, duration } from '../format'
 import { Markdown } from '../markdown/Markdown'
 import { useGradient, useTheme } from '../ThemeProvider'
 import { Icon } from './Icon'
+import { KanbanUnfurls } from './KanbanMentions'
 import { Text } from './Text'
 import { ToolCard } from './ToolCard'
 
@@ -154,6 +155,11 @@ function AgentText({ text, role }: { text: string; role: 'agent' | 'system' }) {
   return (
     <View style={styles.agentContent}>
       <Markdown source={text} />
+
+      {/* Under the message rather than inside it: the sentence keeps its shape,
+          and a card the agent named twice still only appears once. */}
+      <KanbanUnfurls text={text} />
+
       <View style={styles.buttonBar}>
         <Pressable
           accessibilityRole="button"

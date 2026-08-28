@@ -63,7 +63,7 @@ export default function ConfigScreen() {
 
       <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
         {fields.isLoading ? (
-          <Text variant="secondary">Reading the agent's schema…</Text>
+          <Text variant="secondary">Reading the agent schema…</Text>
         ) : fields.error ? (
           <Text variant="secondary" color={theme.color.error700}>
             {String((fields.error as Error).message)}
@@ -102,7 +102,7 @@ export default function ConfigScreen() {
         visible={switcherOpen}
         onSelect={selectAgent}
         onDismissAgent={id => void dismissAgent(id)}
-        onAddServer={() => router.push('/servers/new')}
+        onAddServer={() => router.push('/servers/new' as never)}
         onDismiss={() => setSwitcherOpen(false)}
       />
     </View>

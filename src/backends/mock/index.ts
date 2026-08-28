@@ -18,6 +18,7 @@ import {
   type PromptResult,
   type CronJobSummary,
   type EventRecord,
+  type KanbanBoard,
   type McpServerStatus,
   type ModelOption,
   type NewSessionOptions,
@@ -36,7 +37,7 @@ import {
 export const MOCK_CAPABILITIES: Capabilities = {
   sessions: { search: true, rename: true, pin: true },
   settings: { schemaDriven: true, model: true, providers: false },
-  extras: { cron: true, skills: true, mcp: true },
+  extras: { cron: true, skills: true, mcp: true, boards: true },
   approvals: { requests: true, policy: true },
   logs: { events: true },
   // Push-to-talk is exercisable against the mock; speech synthesis is not, and
@@ -91,6 +92,22 @@ function seedSessions(now: number): MockSession[] {
       messageCount: 8,
       blockedOn: null,
       reply: 'The MCP server is refusing connections. Its container exited 12 minutes ago.'
+    },
+    {
+      id: 'ses-board',
+      title: 'Kanban board screen',
+      preview: 'Lanes are in; a mentioned ticket now unfurls in the transcript',
+      updatedAt: now - 12 * MINUTE,
+      pinned: false,
+      unread: false,
+      model: 'sonnet-4.5',
+      messageCount: 6,
+      blockedOn: null,
+      // Wiki-links, because that is what an agent working an Obsidian board
+      // writes — and what the transcript now resolves into cards.
+      reply:
+        'Lanes are in on [[kanban-board]] — swipe between columns, tap a card for the ticket. ' +
+        'That leaves [[push-notifications]] as the last thing that shipped.'
     }
   ]
 
@@ -369,6 +386,58 @@ export class MockBackend implements AgentBackend {
       { name: 'filesystem', enabled: true, transport: 'stdio', toolCount: 4, tools: ['read', 'write'] },
       { name: 'github', enabled: false, transport: 'http', toolCount: 0, tools: null }
     ]
+  }
+
+  async listKanbanBoard(): Promise<KanbanBoard> {
+    return {
+      title: 'DEV Kanban Board',
+      source: 'mock',
+      updatedAt: Date.now(),
+      columns: [
+        {
+          id: 'backlog',
+          title: 'Backlog',
+          cards: [
+            { id: 'settings-screen', title: 'Settings screen polish', description: 'Tighten grouped rows and empty states', status: 'backlog', statusLabel: 'Backlog', checked: false, risk: 'low' }
+          ]
+        },
+        {
+          id: 'in_progress',
+          title: 'In Progress',
+          cards: [
+            {
+              id: 'kanban-board',
+              title: 'Expose kanban board screen',
+              description: 'Boards link, status columns, dense cards, and closeable detail modal',
+              status: 'in_progress',
+              statusLabel: 'In Progress',
+              checked: false,
+              branch: 'feat/expose-kanban-board-screen',
+              pr: '#38',
+              risk: 'medium',
+              // A real ticket body is markdown on disk, and the detail modal
+              // renders it as markdown — so the mock carries markdown, or the
+              // demo agent exercises a path the real one never takes.
+              body: [
+                '# Expose kanban board screen',
+                '',
+                'Read the Obsidian board over the push plugin and render it as lanes.',
+                '',
+                '## Checklist',
+                '',
+                '- [x] Plugin route + parser',
+                '- [x] Horizontal columns',
+                '- [ ] Drag between columns',
+                '',
+                '`GET /api/plugins/polyflow_agents_push/kanban`'
+              ].join('\n')
+            }
+          ]
+        },
+        { id: 'testing', title: 'Testing / QA', cards: [] },
+        { id: 'done', title: 'Done', cards: [{ id: 'push-notifications', title: 'Push notifications', description: 'Registered device endpoint and local notification routing', status: 'done', statusLabel: 'Done', checked: true }] }
+      ]
+    }
   }
 
   async listSkills(): Promise<SkillSummary[]> {

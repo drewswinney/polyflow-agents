@@ -19,7 +19,7 @@ import { Icon } from './Icon'
 import { Text } from './Text'
 
 /** The drawer's destinations, as expo-router's typed routes see them. */
-export type SidebarPath = '/' | '/sessions' | '/settings'
+export type SidebarPath = '/' | '/sessions' | '/boards' | '/settings'
 
 const MAX_WIDTH = 320
 const WIDTH_FRACTION = 0.84
@@ -46,6 +46,7 @@ export function Sidebar({
   loading,
   activePath,
   paired,
+  supportsBoards,
   onOpenSession,
   onNavigate,
   onDismiss
@@ -65,6 +66,7 @@ export function Sidebar({
    * these at yet", not as features that vanished.
    */
   paired: boolean
+  supportsBoards: boolean
   onOpenSession: (id: string) => void
   onNavigate: (path: SidebarPath) => void
   onDismiss: () => void
@@ -148,6 +150,18 @@ export function Sidebar({
               onNavigate('/sessions')
             }}
           />
+          {supportsBoards ? (
+            <NavRow
+              icon="table-columns"
+              label="Boards"
+              disabled={!paired}
+              selected={activePath === '/boards'}
+              onPress={() => {
+                onDismiss()
+                onNavigate('/boards')
+              }}
+            />
+          ) : null}
         </View>
 
         {!paired ? (

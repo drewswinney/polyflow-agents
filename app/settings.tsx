@@ -189,7 +189,7 @@ export default function SettingsScreen() {
           <Card>
             <SettingsRow label="Notifications" icon="bell" onPress={() => router.push('/notifications')} />
             <Divider />
-            <SettingsRow label="Theme" icon="moon" onPress={() => router.push('/theme')} />
+            <SettingsRow label="Theme" icon="moon" onPress={() => router.push('/theme' as never)} />
             <Divider />
             <SettingsRow label="Logs & events" icon="list" onPress={() => router.push('/logs')} />
           </Card>
@@ -248,7 +248,7 @@ export default function SettingsScreen() {
         visible={switcherOpen}
         onSelect={selectAgent}
         onDismissAgent={id => void dismissAgent(id)}
-        onAddServer={() => router.push('/servers/new')}
+        onAddServer={() => router.push('/servers/new' as never)}
         onDismiss={() => setSwitcherOpen(false)}
       />
     </View>

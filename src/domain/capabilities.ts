@@ -11,7 +11,7 @@
 export interface Capabilities {
   sessions: { search: boolean; rename: boolean; pin: boolean }
   settings: { schemaDriven: boolean; model: boolean; providers: boolean }
-  extras: { cron: boolean; skills: boolean; mcp: boolean }
+  extras: { cron: boolean; skills: boolean; mcp: boolean; boards: boolean }
   approvals: { requests: boolean; policy: boolean }
   logs: { events: boolean }
   media: { images: boolean; audioIn: boolean; audioOut: boolean }
@@ -31,7 +31,7 @@ export interface Capabilities {
 export const NO_CAPABILITIES: Capabilities = {
   sessions: { search: false, rename: false, pin: false },
   settings: { schemaDriven: false, model: false, providers: false },
-  extras: { cron: false, skills: false, mcp: false },
+  extras: { cron: false, skills: false, mcp: false, boards: false },
   approvals: { requests: false, policy: false },
   logs: { events: false },
   media: { images: false, audioIn: false, audioOut: false },
@@ -49,6 +49,7 @@ export function missingCapabilityLabels(caps: Capabilities): string[] {
   if (!caps.extras.skills) missing.push('Skills')
   if (!caps.extras.cron) missing.push('Cron')
   if (!caps.extras.mcp) missing.push('MCP')
+  if (!caps.extras.boards) missing.push('Boards')
   if (!caps.approvals.requests) missing.push('Approvals')
 
   return missing

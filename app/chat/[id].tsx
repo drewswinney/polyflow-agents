@@ -21,6 +21,7 @@ import { ScrollToBottomButton } from '@/ui/components/ScrollToBottomButton'
 import { StreamingTail } from '@/ui/components/StreamingTail'
 import { Text } from '@/ui/components/Text'
 import { AgentPill } from '@/ui/components/AgentPill'
+import { KanbanMentionProvider } from '@/ui/components/KanbanMentions'
 import { TranscriptEntryView } from '@/ui/components/TranscriptEntryView'
 import { compactTokens, usd } from '@/ui/format'
 import { KeyboardInset } from '@/ui/keyboard'
@@ -249,136 +250,138 @@ export default function ChatScreen() {
     .join(' · ')
 
   return (
-    <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
-      <ScreenHeader
-        title={stream.transcript?.title ?? 'Session'}
-        onMenu={openSidebar}
-        titleVariant="sub"
-        subtitle={
-          state === 'open' ? (
-            meta ? <Text variant="monoSmall">{meta}</Text> : null
-          ) : (
-            <Text variant="monoSmall" color={theme.color.warning700}>
-              {stream.approval || stream.clarify ? 'blocked on you' : 'reconnecting…'}
-            </Text>
-          )
-        }
-        center={
-          <AgentPill
-            agent={agent}
-            connection={connection}
-            open={false}
-            disabled={true}
-          />
-        }
-        right={<IconButton name="ellipsis" accessibilityLabel="Session options" edge="right" />}
-      />
-
-      <KeyboardInset style={styles.flex}>
-        {stream.loading ? (
-          <ActivityIndicator color={theme.color.secondary} style={styles.loading} />
-        ) : (
-          <View style={[styles.flex, placed ? null : styles.unplaced]}>
-            <FlashList
-              ref={listRef}
-              data={stream.entries}
-              keyExtractor={entry => entry.id}
-              renderItem={renderItem}
-              contentContainerStyle={styles.list}
-              // Only when there is something to say. An always-mounted header
-              // that grows and shrinks with the connection is a height change at
-              // the top of the list, which every scroll position below it then
-              // has to absorb — that is the flicker.
-              ListHeaderComponent={
-                stream.loadError ? (
-                  <View style={styles.header}>
-                    <Text variant="secondary" color={theme.color.error700}>
-                      {stream.loadError}
-                    </Text>
-                  </View>
-                ) : undefined
-              }
-              ListFooterComponent={
-                <View style={styles.entry}>
-                  <StreamingTail tail={stream.tail} />
-
-                  {/* In the transcript, not over it: the turn is halted, but only
-                      this session's, so nothing else needs to be blocked (§7.6). */}
-                  {stream.approval ? (
-                    <View style={styles.approval}>
-                      <ApprovalCard
-                        request={stream.approval}
-                        hostName={server.host}
-                        onRespond={stream.respondToApproval}
-                      />
-                    </View>
-                  ) : null}
-
-                  {/* A question halts the turn exactly as an approval does, so it
-                      belongs in the same place, in the same shape. */}
-                  {stream.clarify ? (
-                    <View style={styles.approval}>
-                      <ClarifyCard request={stream.clarify} onRespond={stream.respondToClarify} />
-                    </View>
-                  ) : null}
-                </View>
-              }
-              onScroll={onScroll}
-              scrollEventThrottle={16}
-              // Opens already at the last message rather than rendering from the
-              // top and animating down to it. Deliberately *without*
-              // `autoscrollToBottomThreshold`: following the end is what
-              // `onContentSizeChange` above does, and the two would fight every
-              // frame over which of them owns the offset.
-              maintainVisibleContentPosition={{ startRenderingFromBottom: true }}
-              onContentSizeChange={onContentSizeChange}
-              onScrollBeginDrag={onScrollBeginDrag}
-              onScrollEndDrag={onScrollEndDrag}
-              // Dragging the transcript down takes the keyboard with it, the way
-              // it does in Messages. Android has no interactive mode, so the
-              // keyboard leaves on the drag instead of tracking the finger.
-              keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
-              // With the keyboard up, the first tap on an approval button should
-              // answer it, not just close the keyboard.
-              keyboardShouldPersistTaps="handled"
-              // Fired once the first rows are actually laid out. Only then is
-              // there an end to scroll to: `startRenderingFromBottom` puts the
-              // last *entry* on screen, and the footer holding the streaming
-              // tail and any approval card lives below it.
-              onLoad={() => {
-                listRef.current?.scrollToEnd({ animated: false })
-                requestAnimationFrame(() => setPlaced(true))
-              }}
+    <KanbanMentionProvider>
+      <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
+        <ScreenHeader
+          title={stream.transcript?.title ?? 'Session'}
+          onMenu={openSidebar}
+          titleVariant="sub"
+          subtitle={
+            state === 'open' ? (
+              meta ? <Text variant="monoSmall">{meta}</Text> : null
+            ) : (
+              <Text variant="monoSmall" color={theme.color.warning700}>
+                {stream.approval || stream.clarify ? 'blocked on you' : 'reconnecting…'}
+              </Text>
+            )
+          }
+          center={
+            <AgentPill
+              agent={agent}
+              connection={connection}
+              open={false}
+              disabled={true}
             />
-
-            {/* Only in manual: in the resting state there is nothing below to
-                be taken back to, and a button pointing at where you already are
-                is chrome over the transcript for nothing.
-
-                Anchored to the transcript's own bottom edge, which *is* the top
-                of the composer: the list is the flex child above it. Pinning to
-                the screen instead would put the button under the composer. */}
-            {manual && placed ? (
-              <View style={styles.scrollButtonContainer}>
-                <ScrollToBottomButton onPress={follow} />
-              </View>
-            ) : null}
-          </View>
-        )}
-
-        {(stream.approval || stream.clarify) && manual ? <ApprovalNudge onPress={follow} /> : null}
-
-        <Composer
-          streaming={running}
-          offline={state !== 'open'}
-          queued={stream.outbox.length}
-          onSend={stream.send}
-          onStop={stream.cancel}
-          onVoice={backend?.capabilities.media.audioIn ? () => router.push(`/voice/${id}`) : undefined}
-          canAttach={backend?.capabilities.media.images ?? false}
+          }
+          right={<IconButton name="ellipsis" accessibilityLabel="Session options" edge="right" />}
         />
-      </KeyboardInset>
-    </View>
+
+        <KeyboardInset style={styles.flex}>
+          {stream.loading ? (
+            <ActivityIndicator color={theme.color.secondary} style={styles.loading} />
+          ) : (
+            <View style={[styles.flex, placed ? null : styles.unplaced]}>
+              <FlashList
+                ref={listRef}
+                data={stream.entries}
+                keyExtractor={entry => entry.id}
+                renderItem={renderItem}
+                contentContainerStyle={styles.list}
+                // Only when there is something to say. An always-mounted header
+                // that grows and shrinks with the connection is a height change at
+                // the top of the list, which every scroll position below it then
+                // has to absorb — that is the flicker.
+                ListHeaderComponent={
+                  stream.loadError ? (
+                    <View style={styles.header}>
+                      <Text variant="secondary" color={theme.color.error700}>
+                        {stream.loadError}
+                      </Text>
+                    </View>
+                  ) : undefined
+                }
+                ListFooterComponent={
+                  <View style={styles.entry}>
+                    <StreamingTail tail={stream.tail} />
+
+                    {/* In the transcript, not over it: the turn is halted, but only
+                        this session's, so nothing else needs to be blocked (§7.6). */}
+                    {stream.approval ? (
+                      <View style={styles.approval}>
+                        <ApprovalCard
+                          request={stream.approval}
+                          hostName={server.host}
+                          onRespond={stream.respondToApproval}
+                        />
+                      </View>
+                    ) : null}
+
+                    {/* A question halts the turn exactly as an approval does, so it
+                        belongs in the same place, in the same shape. */}
+                    {stream.clarify ? (
+                      <View style={styles.approval}>
+                        <ClarifyCard request={stream.clarify} onRespond={stream.respondToClarify} />
+                      </View>
+                    ) : null}
+                  </View>
+                }
+                onScroll={onScroll}
+                scrollEventThrottle={16}
+                // Opens already at the last message rather than rendering from the
+                // top and animating down to it. Deliberately *without*
+                // `autoscrollToBottomThreshold`: following the end is what
+                // `onContentSizeChange` above does, and the two would fight every
+                // frame over which of them owns the offset.
+                maintainVisibleContentPosition={{ startRenderingFromBottom: true }}
+                onContentSizeChange={onContentSizeChange}
+                onScrollBeginDrag={onScrollBeginDrag}
+                onScrollEndDrag={onScrollEndDrag}
+                // Dragging the transcript down takes the keyboard with it, the way
+                // it does in Messages. Android has no interactive mode, so the
+                // keyboard leaves on the drag instead of tracking the finger.
+                keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+                // With the keyboard up, the first tap on an approval button should
+                // answer it, not just close the keyboard.
+                keyboardShouldPersistTaps="handled"
+                // Fired once the first rows are actually laid out. Only then is
+                // there an end to scroll to: `startRenderingFromBottom` puts the
+                // last *entry* on screen, and the footer holding the streaming
+                // tail and any approval card lives below it.
+                onLoad={() => {
+                  listRef.current?.scrollToEnd({ animated: false })
+                  requestAnimationFrame(() => setPlaced(true))
+                }}
+              />
+
+              {/* Only in manual: in the resting state there is nothing below to
+                  be taken back to, and a button pointing at where you already are
+                  is chrome over the transcript for nothing.
+
+                  Anchored to the transcript's own bottom edge, which *is* the top
+                  of the composer: the list is the flex child above it. Pinning to
+                  the screen instead would put the button under the composer. */}
+              {manual && placed ? (
+                <View style={styles.scrollButtonContainer}>
+                  <ScrollToBottomButton onPress={follow} />
+                </View>
+              ) : null}
+            </View>
+          )}
+
+          {(stream.approval || stream.clarify) && manual ? <ApprovalNudge onPress={follow} /> : null}
+
+          <Composer
+            streaming={running}
+            offline={state !== 'open'}
+            queued={stream.outbox.length}
+            onSend={stream.send}
+            onStop={stream.cancel}
+            onVoice={backend?.capabilities.media.audioIn ? () => router.push(`/voice/${id}`) : undefined}
+            canAttach={backend?.capabilities.media.images ?? false}
+          />
+        </KeyboardInset>
+      </View>
+    </KanbanMentionProvider>
   )
 }
 

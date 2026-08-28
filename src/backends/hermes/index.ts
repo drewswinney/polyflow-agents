@@ -28,6 +28,7 @@ import {
   type ContentBlock,
   type CronJobSummary,
   type EventRecord,
+  type KanbanBoard,
   type McpServerStatus,
   type ModelOption,
   type NewSessionOptions,
@@ -117,7 +118,7 @@ const LOGIN_REUSE_MS = 300_000
 export const HERMES_CAPABILITIES: Capabilities = {
   sessions: { search: true, rename: true, pin: true },
   settings: { schemaDriven: true, model: true, providers: true },
-  extras: { cron: true, skills: true, mcp: true },
+  extras: { cron: true, skills: true, mcp: true, boards: true },
   approvals: { requests: true, policy: true },
   logs: { events: true },
   // Audio is request/response REST, not a duplex channel — push-to-talk only (§2.6, §7.9).
@@ -637,6 +638,10 @@ export class HermesBackend implements AgentBackend {
       toolCount: server.tools?.length ?? 0,
       tools: server.tools
     }))
+  }
+
+  async listKanbanBoard(): Promise<KanbanBoard> {
+    return this.rest.kanbanBoard()
   }
 
   async listSkills(): Promise<SkillSummary[]> {

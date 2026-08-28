@@ -31,6 +31,7 @@ import type {
   SkillInfo,
   StatusResponse
 } from '@hermes/types'
+import type { KanbanBoard } from '@/domain'
 
 export interface HermesRestConfig {
   /** `host:port`, no scheme. */
@@ -113,6 +114,7 @@ const DEFAULT_TIMEOUT_MS = 30_000
  * which is exactly the drift that plugin's README warns about.
  */
 const PUSH_ROUTE = '/api/plugins/polyflow_agents_push/devices'
+const KANBAN_ROUTE = '/api/plugins/polyflow_agents_push/kanban'
 
 /** Audio endpoints scale with payload size, between three and ten minutes. */
 function audioTimeoutMs(estimate: number): number {
@@ -279,6 +281,10 @@ export class HermesRest {
 
   cronJobs(): Promise<CronJob[]> {
     return this.request<CronJob[]>('/api/cron/jobs', { timeoutMs: 60_000 })
+  }
+
+  kanbanBoard(): Promise<KanbanBoard> {
+    return this.request<KanbanBoard>(KANBAN_ROUTE, { timeoutMs: 15_000 })
   }
 
   cronPause(id: string): Promise<void> {

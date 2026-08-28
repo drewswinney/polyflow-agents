@@ -4,6 +4,8 @@ import { Linking, ScrollView, StyleSheet, Text as RNText, View } from 'react-nat
 import { useTheme } from '../ThemeProvider'
 import type { Theme } from '../theme'
 
+import { type MentionRenderer, useMentionRenderer } from './MentionContext'
+import { splitMentions } from './mentions'
 import { looksLikeMarkdown, type MarkdownToken, parseMarkdown } from './parse'
 
 /**
@@ -17,14 +19,21 @@ import { looksLikeMarkdown, type MarkdownToken, parseMarkdown } from './parse'
  * Streaming text deliberately does not come through here (§7.3): the tail
  * renders as plain text and is re-rendered as markdown once the turn settles,
  * so a half-written fence or table never has to parse.
+ *
+ * `[[wiki-link]]` mentions are resolved by whoever is above this in the tree
+ * (see `MentionContext`) and are handled at the *token* level rather than by
+ * rewriting the source. That is what keeps `[[ -f "$x" ]]` inside a fenced
+ * block from being read as a ticket: only `text` tokens are searched, so code
+ * — inline or fenced — never is.
  */
 export const Markdown = memo(function Markdown({ source }: { source: string }) {
   const theme = useTheme()
+  const mention = useMentionRenderer()
   const blocks = useMemo(() => {
     if (!looksLikeMarkdown(source)) return null
 
-    return renderBlocks(parseMarkdown(source), theme)
-  }, [source, theme])
+    return renderBlocks(parseMarkdown(source), theme, mention)
+  }, [source, theme, mention])
 
   // Plain prose skips the parser entirely — most replies are exactly that.
   if (!blocks) {
@@ -33,7 +42,7 @@ export const Markdown = memo(function Markdown({ source }: { source: string }) {
         style={[styles.paragraph, { fontFamily: theme.font.body, color: theme.color.gray800 }]}
         selectable
       >
-        {source}
+        {renderText(source, mention)}
       </RNText>
     )
   }
@@ -46,7 +55,7 @@ export const Markdown = memo(function Markdown({ source }: { source: string }) {
 })
 
 /** Walks the flat token stream, consuming nested ranges as it goes. */
-function renderBlocks(tokens: MarkdownToken[], theme: Theme): ReactNode[] {
+function renderBlocks(tokens: MarkdownToken[], theme: Theme, mention: MentionRenderer | null): ReactNode[] {
   const out: ReactNode[] = []
   let i = 0
   let key = 0
@@ -71,7 +80,7 @@ function renderBlocks(tokens: MarkdownToken[], theme: Theme): ReactNode[] {
               }
             ]}
           >
-            {renderInline(inline?.children ?? [], theme)}
+            {renderInline(inline?.children ?? [], theme, mention)}
           </RNText>
         )
         i = skipTo(tokens, i, 'heading_close')
@@ -85,7 +94,7 @@ function renderBlocks(tokens: MarkdownToken[], theme: Theme): ReactNode[] {
             key={key++}
             style={[styles.paragraph, { fontFamily: theme.font.body, color: theme.color.gray800 }]}
           >
-            {renderInline(inline?.children ?? [], theme)}
+            {renderInline(inline?.children ?? [], theme, mention)}
           </RNText>
         )
         i = skipTo(tokens, i, 'paragraph_close')
@@ -105,7 +114,7 @@ function renderBlocks(tokens: MarkdownToken[], theme: Theme): ReactNode[] {
         const end = matchingClose(tokens, i, ordered ? 'ordered_list_close' : 'bullet_list_close')
         out.push(
           <View key={key++} style={styles.list}>
-            {renderListItems(tokens.slice(i + 1, end), theme, ordered, Number(token.attrGet('start') ?? 1) || 1)}
+            {renderListItems(tokens.slice(i + 1, end), theme, mention, ordered, Number(token.attrGet('start') ?? 1) || 1)}
           </View>
         )
         i = end + 1
@@ -116,7 +125,7 @@ function renderBlocks(tokens: MarkdownToken[], theme: Theme): ReactNode[] {
         const end = matchingClose(tokens, i, 'blockquote_close')
         out.push(
           <View key={key++} style={[styles.quote, { borderLeftColor: theme.color.secondaryMuted }]}>
-            {renderBlocks(tokens.slice(i + 1, end), theme)}
+            {renderBlocks(tokens.slice(i + 1, end), theme, mention)}
           </View>
         )
         i = end + 1
@@ -144,7 +153,13 @@ function renderBlocks(tokens: MarkdownToken[], theme: Theme): ReactNode[] {
   return out
 }
 
-function renderListItems(tokens: MarkdownToken[], theme: Theme, ordered: boolean, start: number): ReactNode[] {
+function renderListItems(
+  tokens: MarkdownToken[],
+  theme: Theme,
+  mention: MentionRenderer | null,
+  ordered: boolean,
+  start: number
+): ReactNode[] {
   const items: ReactNode[] = []
   let i = 0
   let index = start
@@ -167,7 +182,7 @@ function renderListItems(tokens: MarkdownToken[], theme: Theme, ordered: boolean
         >
           {ordered ? `${index++}.` : '•'}
         </RNText>
-        <View style={styles.listBody}>{renderBlocks(tokens.slice(i + 1, end), theme)}</View>
+        <View style={styles.listBody}>{renderBlocks(tokens.slice(i + 1, end), theme, mention)}</View>
       </View>
     )
 
@@ -177,7 +192,12 @@ function renderListItems(tokens: MarkdownToken[], theme: Theme, ordered: boolean
   return items
 }
 
-function renderInline(tokens: MarkdownToken[], theme: Theme, depth = 0): ReactNode[] {
+function renderInline(
+  tokens: MarkdownToken[],
+  theme: Theme,
+  mention: MentionRenderer | null,
+  depth = 0
+): ReactNode[] {
   const out: ReactNode[] = []
   let key = 0
 
@@ -188,7 +208,7 @@ function renderInline(tokens: MarkdownToken[], theme: Theme, depth = 0): ReactNo
 
     switch (token.type) {
       case 'text':
-        out.push(<Fragment key={key++}>{token.content}</Fragment>)
+        out.push(<Fragment key={key++}>{renderText(token.content, mention)}</Fragment>)
         break
 
       case 'softbreak':
@@ -211,7 +231,7 @@ function renderInline(tokens: MarkdownToken[], theme: Theme, depth = 0): ReactNo
         const end = closeIndex(tokens, i, 'strong_close')
         out.push(
           <RNText key={key++} style={{ fontFamily: theme.font.bodySemibold }}>
-            {renderInline(tokens.slice(i + 1, end), theme, depth + 1)}
+            {renderInline(tokens.slice(i + 1, end), theme, mention, depth + 1)}
           </RNText>
         )
         i = end
@@ -222,7 +242,7 @@ function renderInline(tokens: MarkdownToken[], theme: Theme, depth = 0): ReactNo
         const end = closeIndex(tokens, i, 'em_close')
         out.push(
           <RNText key={key++} style={styles.emphasis}>
-            {renderInline(tokens.slice(i + 1, end), theme, depth + 1)}
+            {renderInline(tokens.slice(i + 1, end), theme, mention, depth + 1)}
           </RNText>
         )
         i = end
@@ -233,7 +253,7 @@ function renderInline(tokens: MarkdownToken[], theme: Theme, depth = 0): ReactNo
         const end = closeIndex(tokens, i, 's_close')
         out.push(
           <RNText key={key++} style={styles.strike}>
-            {renderInline(tokens.slice(i + 1, end), theme, depth + 1)}
+            {renderInline(tokens.slice(i + 1, end), theme, mention, depth + 1)}
           </RNText>
         )
         i = end
@@ -252,7 +272,7 @@ function renderInline(tokens: MarkdownToken[], theme: Theme, depth = 0): ReactNo
               void Linking.openURL(href).catch(() => undefined)
             }}
           >
-            {renderInline(tokens.slice(i + 1, end), theme, depth + 1)}
+            {renderInline(tokens.slice(i + 1, end), theme, mention, depth + 1)}
           </RNText>
         )
         i = end
@@ -287,6 +307,7 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
 
 function MarkdownTable({ tokens }: { tokens: MarkdownToken[] }) {
   const theme = useTheme()
+  const mention = useMentionRenderer()
   const rows: Array<{ header: boolean; cells: MarkdownToken[][] }> = []
   let current: { header: boolean; cells: MarkdownToken[][] } | null = null
   let header = false
@@ -330,13 +351,33 @@ function MarkdownTable({ tokens }: { tokens: MarkdownToken[] }) {
                   }
                 ]}
               >
-                {renderInline(cell, theme)}
+                {renderInline(cell, theme, mention)}
               </RNText>
             ))}
           </View>
         ))}
       </View>
     </ScrollView>
+  )
+}
+
+/**
+ * One run of prose, with any `[[wiki-link]]` in it handed to the mention
+ * renderer.
+ *
+ * Without a renderer the mention stays exactly the literal text it was, which
+ * is what every screen outside Chat sees — and what Chat sees for a ticket that
+ * is not on the board.
+ */
+function renderText(text: string, mention: MentionRenderer | null): ReactNode {
+  if (!mention || !text.includes('[[')) return text
+
+  return splitMentions(text).map((segment, index) =>
+    segment.kind === 'text' ? (
+      <Fragment key={index}>{segment.text}</Fragment>
+    ) : (
+      mention(segment.mention, String(index))
+    )
   )
 }
 

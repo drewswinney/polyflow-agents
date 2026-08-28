@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { router } from 'expo-router'
+import { useState } from 'react'
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
@@ -95,7 +96,7 @@ export default function CronScreen() {
         visible={switcherOpen}
         onSelect={selectAgent}
         onDismissAgent={id => void dismissAgent(id)}
-        onAddServer={() => router.push('/servers/new')}
+        onAddServer={() => router.push('/servers/new' as never)}
         onDismiss={() => setSwitcherOpen(false)}
       />
     </View>

@@ -74,7 +74,7 @@ export default function WelcomeScreen() {
           </Text>
         ) : null}
 
-        <Pressable accessibilityRole="button" onPress={() => router.push('/servers/new')}>
+        <Pressable accessibilityRole="button" onPress={() => router.push('/servers/new' as never)}>
           <LinearGradient
             colors={gradient.colors}
             start={gradient.start}
