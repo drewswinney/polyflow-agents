@@ -15,6 +15,7 @@ import type {
   ContentBlock,
   CronJobSummary,
   EventRecord,
+  KanbanBoard,
   McpServerStatus,
   ModelOption,
   NewSessionOptions,
@@ -104,6 +105,8 @@ export interface AgentBackend {
   listEvents(limit?: number): Promise<EventRecord[]>
   /** Requires `capabilities.extras.mcp`. */
   listMcpServers(): Promise<McpServerStatus[]>
+  /** Requires `capabilities.extras.boards`. */
+  listKanbanBoard(): Promise<KanbanBoard>
   /** Requires `capabilities.extras.skills`. */
   listSkills(): Promise<SkillSummary[]>
   /** Requires `capabilities.settings.model`. */

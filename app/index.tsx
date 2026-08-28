@@ -121,7 +121,7 @@ export default function NewSessionScreen() {
         visible={switcherOpen}
         onSelect={selectAgent}
         onDismissAgent={id => void dismissAgent(id)}
-        onAddServer={() => router.push('/servers/new')}
+        onAddServer={() => router.push('/servers/new' as never)}
         onDismiss={() => setSwitcherOpen(false)}
       />
     </View>

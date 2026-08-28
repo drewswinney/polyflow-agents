@@ -179,6 +179,7 @@ export default function RootLayout() {
               <Stack.Screen name="index" />
               <Stack.Screen name="welcome" />
               <Stack.Screen name="sessions" />
+              <Stack.Screen name="boards" />
               <Stack.Screen name="settings" />
               <Stack.Screen name="chat/[id]" />
               <Stack.Screen name="logs" />
@@ -239,7 +240,7 @@ function AppSidebar() {
       onOpenSession={id => router.push(`/chat/${id}`)}
       // `navigate` returns to a top-level destination already on the stack
       // instead of stacking a second copy of it behind the drawer.
-      onNavigate={path => router.navigate(path)}
+      onNavigate={path => router.navigate(path as never)}
       onDismiss={hide}
     />
   )

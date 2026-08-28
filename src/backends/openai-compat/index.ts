@@ -14,6 +14,7 @@ import {
   type ConnectionState,
   createObservable,
   type EventRecord,
+  type KanbanBoard,
   type Observable,
   type PromptResult,
   type SessionUpdate,
@@ -23,7 +24,7 @@ import {
 export const OPENAI_COMPAT_CAPABILITIES: Capabilities = {
   sessions: { search: false, rename: true, pin: true },
   settings: { schemaDriven: false, model: true, providers: false },
-  extras: { cron: false, skills: false, mcp: false },
+  extras: { cron: false, skills: false, mcp: false, boards: false },
   approvals: { requests: false, policy: false },
   logs: { events: true },
   media: { images: true, audioIn: false, audioOut: false },
@@ -137,6 +138,10 @@ export class OpenAiCompatBackend implements AgentBackend {
 
   async listSkills(): Promise<never> {
     throw new NotImplemented('skills')
+  }
+
+  async listKanbanBoard(): Promise<KanbanBoard> {
+    throw new NotImplemented('boards')
   }
 
   async listModels(): Promise<never> {

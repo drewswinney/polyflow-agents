@@ -381,3 +381,32 @@ export interface CronJobSummary {
   lastError: string | null
   model: string | null
 }
+
+export type KanbanStatus = 'backlog' | 'in_progress' | 'testing' | 'done' | 'other'
+
+export interface KanbanCardSummary {
+  id: string
+  title: string
+  description: string
+  status: KanbanStatus
+  statusLabel: string
+  checked: boolean
+  branch?: string | null
+  pr?: string | null
+  risk?: string | null
+  updatedAt?: number | null
+  body?: string
+}
+
+export interface KanbanColumn {
+  id: KanbanStatus | string
+  title: string
+  cards: KanbanCardSummary[]
+}
+
+export interface KanbanBoard {
+  title: string
+  source: string
+  updatedAt: number | null
+  columns: KanbanColumn[]
+}

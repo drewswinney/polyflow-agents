@@ -19,7 +19,7 @@ import { Icon } from './Icon'
 import { Text } from './Text'
 
 /** The drawer's destinations, as expo-router's typed routes see them. */
-export type SidebarPath = '/' | '/sessions' | '/settings'
+export type SidebarPath = '/' | '/sessions' | '/boards' | '/settings'
 
 const MAX_WIDTH = 320
 const WIDTH_FRACTION = 0.84
@@ -146,6 +146,16 @@ export function Sidebar({
             onPress={() => {
               onDismiss()
               onNavigate('/sessions')
+            }}
+          />
+          <NavRow
+            icon="table-columns"
+            label="Boards"
+            disabled={!paired}
+            selected={activePath === '/boards'}
+            onPress={() => {
+              onDismiss()
+              onNavigate('/boards')
             }}
           />
         </View>

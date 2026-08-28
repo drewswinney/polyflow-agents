@@ -18,6 +18,7 @@ import {
   type PromptResult,
   type CronJobSummary,
   type EventRecord,
+  type KanbanBoard,
   type McpServerStatus,
   type ModelOption,
   type NewSessionOptions,
@@ -36,7 +37,7 @@ import {
 export const MOCK_CAPABILITIES: Capabilities = {
   sessions: { search: true, rename: true, pin: true },
   settings: { schemaDriven: true, model: true, providers: false },
-  extras: { cron: true, skills: true, mcp: true },
+  extras: { cron: true, skills: true, mcp: true, boards: true },
   approvals: { requests: true, policy: true },
   logs: { events: true },
   // Push-to-talk is exercisable against the mock; speech synthesis is not, and
@@ -369,6 +370,32 @@ export class MockBackend implements AgentBackend {
       { name: 'filesystem', enabled: true, transport: 'stdio', toolCount: 4, tools: ['read', 'write'] },
       { name: 'github', enabled: false, transport: 'http', toolCount: 0, tools: null }
     ]
+  }
+
+  async listKanbanBoard(): Promise<KanbanBoard> {
+    return {
+      title: 'DEV Kanban Board',
+      source: 'mock',
+      updatedAt: Date.now(),
+      columns: [
+        {
+          id: 'backlog',
+          title: 'Backlog',
+          cards: [
+            { id: 'settings-screen', title: 'Settings screen polish', description: 'Tighten grouped rows and empty states', status: 'backlog', statusLabel: 'Backlog', checked: false, risk: 'low' }
+          ]
+        },
+        {
+          id: 'in_progress',
+          title: 'In Progress',
+          cards: [
+            { id: 'kanban-board', title: 'Expose kanban board screen', description: 'Boards link, status columns, dense cards, and closeable detail modal', status: 'in_progress', statusLabel: 'In Progress', checked: false, branch: 'feat/expose-kanban-board-screen', pr: '#38', risk: 'medium' }
+          ]
+        },
+        { id: 'testing', title: 'Testing / QA', cards: [] },
+        { id: 'done', title: 'Done', cards: [{ id: 'push-notifications', title: 'Push notifications', description: 'Registered device endpoint and local notification routing', status: 'done', statusLabel: 'Done', checked: true }] }
+      ]
+    }
   }
 
   async listSkills(): Promise<SkillSummary[]> {
