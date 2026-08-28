@@ -382,7 +382,7 @@ export interface CronJobSummary {
   model: string | null
 }
 
-export type KanbanStatus = 'backlog' | 'in_progress' | 'testing' | 'done' | 'other'
+export type KanbanStatus = 'backlog' | 'in_progress' | 'testing' | 'done' | 'blocked' | 'other'
 
 export interface KanbanCardSummary {
   id: string
