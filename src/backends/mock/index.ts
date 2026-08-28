@@ -389,7 +389,33 @@ export class MockBackend implements AgentBackend {
           id: 'in_progress',
           title: 'In Progress',
           cards: [
-            { id: 'kanban-board', title: 'Expose kanban board screen', description: 'Boards link, status columns, dense cards, and closeable detail modal', status: 'in_progress', statusLabel: 'In Progress', checked: false, branch: 'feat/expose-kanban-board-screen', pr: '#38', risk: 'medium' }
+            {
+              id: 'kanban-board',
+              title: 'Expose kanban board screen',
+              description: 'Boards link, status columns, dense cards, and closeable detail modal',
+              status: 'in_progress',
+              statusLabel: 'In Progress',
+              checked: false,
+              branch: 'feat/expose-kanban-board-screen',
+              pr: '#38',
+              risk: 'medium',
+              // A real ticket body is markdown on disk, and the detail modal
+              // renders it as markdown — so the mock carries markdown, or the
+              // demo agent exercises a path the real one never takes.
+              body: [
+                '# Expose kanban board screen',
+                '',
+                'Read the Obsidian board over the push plugin and render it as lanes.',
+                '',
+                '## Checklist',
+                '',
+                '- [x] Plugin route + parser',
+                '- [x] Horizontal columns',
+                '- [ ] Drag between columns',
+                '',
+                '`GET /api/plugins/polyflow_agents_push/kanban`'
+              ].join('\n')
+            }
           ]
         },
         { id: 'testing', title: 'Testing / QA', cards: [] },
