@@ -27,6 +27,8 @@ export function statusTone(theme: Theme, status: string): StatusTone {
       return { text: theme.color.warning700, bg: theme.color.warning50, border: theme.color.warning200 }
     case 'done':
       return { text: theme.color.success700, bg: theme.color.success50, border: theme.color.success200 }
+    case 'blocked':
+      return { text: theme.color.error700, bg: theme.color.error50, border: theme.color.error200 }
     default:
       return { text: theme.color.gray600, bg: theme.color.bgSubtle, border: theme.color.border }
   }

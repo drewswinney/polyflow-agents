@@ -390,8 +390,8 @@ export class MockBackend implements AgentBackend {
 
   async listKanbanBoard(): Promise<KanbanBoard> {
     return {
-      title: 'DEV Kanban Board',
-      source: 'mock',
+      title: 'Agent Handheld',
+      source: 'hermes kanban board: agent-handheld',
       updatedAt: Date.now(),
       columns: [
         {
@@ -421,7 +421,7 @@ export class MockBackend implements AgentBackend {
               body: [
                 '# Expose kanban board screen',
                 '',
-                'Read the Obsidian board over the push plugin and render it as lanes.',
+                'Read the native Hermes kanban board over the push plugin and render it as lanes.',
                 '',
                 '## Checklist',
                 '',
@@ -435,6 +435,7 @@ export class MockBackend implements AgentBackend {
           ]
         },
         { id: 'testing', title: 'Testing / QA', cards: [] },
+        { id: 'blocked', title: 'Blocked', cards: [{ id: 'eas-build-slot', title: 'EAS build slot', description: 'Waiting on a free production build slot for the iOS preview', status: 'blocked', statusLabel: 'Blocked', checked: false }] },
         { id: 'done', title: 'Done', cards: [{ id: 'push-notifications', title: 'Push notifications', description: 'Registered device endpoint and local notification routing', status: 'done', statusLabel: 'Done', checked: true }] }
       ]
     }
