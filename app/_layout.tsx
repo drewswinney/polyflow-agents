@@ -237,6 +237,7 @@ function AppSidebar() {
       loading={sessions.isPending}
       activePath={pathname}
       paired={Boolean(agent)}
+      supportsBoards={backend?.capabilities.extras.boards === true}
       onOpenSession={id => router.push(`/chat/${id}`)}
       // `navigate` returns to a top-level destination already on the stack
       // instead of stacking a second copy of it behind the drawer.

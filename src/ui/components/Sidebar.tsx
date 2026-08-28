@@ -46,6 +46,7 @@ export function Sidebar({
   loading,
   activePath,
   paired,
+  supportsBoards,
   onOpenSession,
   onNavigate,
   onDismiss
@@ -65,6 +66,7 @@ export function Sidebar({
    * these at yet", not as features that vanished.
    */
   paired: boolean
+  supportsBoards: boolean
   onOpenSession: (id: string) => void
   onNavigate: (path: SidebarPath) => void
   onDismiss: () => void
@@ -148,16 +150,18 @@ export function Sidebar({
               onNavigate('/sessions')
             }}
           />
-          <NavRow
-            icon="table-columns"
-            label="Boards"
-            disabled={!paired}
-            selected={activePath === '/boards'}
-            onPress={() => {
-              onDismiss()
-              onNavigate('/boards')
-            }}
-          />
+          {supportsBoards ? (
+            <NavRow
+              icon="table-columns"
+              label="Boards"
+              disabled={!paired}
+              selected={activePath === '/boards'}
+              onPress={() => {
+                onDismiss()
+                onNavigate('/boards')
+              }}
+            />
+          ) : null}
         </View>
 
         {!paired ? (

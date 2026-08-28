@@ -24,6 +24,7 @@ export default function BoardsScreen() {
   const openSidebar = useSidebar(store => store.show)
   const [selectedCard, setSelectedCard] = useState<KanbanCardSummary | null>(null)
 
+  const supportsBoards = backend?.capabilities.extras.boards === true
   const board = useKanbanBoard(agent.scope ?? '', backend)
   const columns = useMemo(() => board.data?.columns.filter(column => column.cards.length > 0) ?? [], [board.data])
   const emptyColumns = useMemo(() => board.data?.columns.filter(column => column.cards.length === 0) ?? [], [board.data])
@@ -40,9 +41,16 @@ export default function BoardsScreen() {
 
       <ScrollView
         contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}
-        refreshControl={<RefreshControl refreshing={board.isFetching} onRefresh={() => void board.refetch()} />}
+        refreshControl={
+          <RefreshControl
+            refreshing={board.isFetching}
+            onRefresh={() => {
+              if (supportsBoards) void board.refetch()
+            }}
+          />
+        }
       >
-        {!backend?.capabilities.extras.boards ? (
+        {!supportsBoards ? (
           <MessageCard title="Boards unavailable" body="This agent does not expose a kanban board endpoint." />
         ) : board.data ? (
           <>
@@ -99,7 +107,7 @@ function BoardColumn({ column, onOpenCard }: { column: KanbanColumn; onOpenCard:
         <Text variant="sectionHeader" style={styles.columnTitle}>
           {column.title}
         </Text>
-        <View style={[styles.countBadge, { backgroundColor: theme.color.secondaryTint }]}> 
+        <View style={[styles.countBadge, { backgroundColor: theme.color.secondaryTint }]}>
           <Text variant="monoSmall" color={theme.color.secondaryDeep}>{column.cards.length}</Text>
         </View>
       </View>
@@ -166,7 +174,7 @@ function CardModal({ card, onDismiss }: { card: KanbanCardSummary | null; onDism
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onDismiss}>
-      <View style={[styles.modalRoot, { backgroundColor: theme.color.scrim, paddingTop: insets.top + 28, paddingBottom: insets.bottom + 28 }]}> 
+      <View style={[styles.modalRoot, { backgroundColor: theme.color.scrim, paddingTop: insets.top + 28, paddingBottom: insets.bottom + 28 }]}>
         <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} accessibilityLabel="Close card details" />
         <Card style={styles.modalCard}>
           <View style={styles.modalHeader}>
@@ -183,7 +191,7 @@ function CardModal({ card, onDismiss }: { card: KanbanCardSummary | null; onDism
             {details.length > 0 ? (
               <View style={styles.detailGrid}>
                 {details.map(([label, value]) => (
-                  <View key={label} style={[styles.detailPill, { borderColor: theme.color.border, backgroundColor: theme.color.bgSubtle }]}> 
+                  <View key={label} style={[styles.detailPill, { borderColor: theme.color.border, backgroundColor: theme.color.bgSubtle }]}>
                     <Text variant="sectionHeader">{label}</Text>
                     <Text variant="secondary" numberOfLines={1}>{value}</Text>
                   </View>

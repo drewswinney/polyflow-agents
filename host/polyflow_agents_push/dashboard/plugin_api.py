@@ -278,7 +278,7 @@ def _parse_card(line: str, status: str, status_label: str, backlog: Path) -> dic
 
     return {
         "id": slug,
-        "title": title,
+        "title": title or "DEV Kanban Board",
         "description": description,
         "status": status,
         "statusLabel": status_label,
@@ -317,7 +317,7 @@ def _parse_kanban(board_path: Path) -> dict[str, object]:
         raise HTTPException(status_code=500, detail=f"could not read kanban board: {exc}") from exc
 
     backlog = _backlog_dir(board_path)
-    title = "DEV Kanban Board"
+    title = ""
     columns: list[dict[str, object]] = []
     current: dict[str, object] | None = None
 
@@ -359,7 +359,7 @@ def _parse_kanban(board_path: Path) -> dict[str, object]:
             merged.append(column)
 
     return {
-        "title": title,
+        "title": title or "DEV Kanban Board",
         "source": str(board_path),
         "updatedAt": int(board_path.stat().st_mtime * 1000),
         "columns": merged,
