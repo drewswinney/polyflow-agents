@@ -1,11 +1,14 @@
 import { Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import * as Clipboard from 'expo-clipboard'
+import { useEffect, useState } from 'react'
 
 import type { KanbanCardSummary } from '@/domain'
 
 import { Markdown } from '../markdown/Markdown'
 import { useTheme } from '../ThemeProvider'
 import { Card } from './Card'
+import { Icon } from './Icon'
 import { IconButton } from './IconButton'
 import { Text } from './Text'
 
@@ -16,6 +19,13 @@ import { Text } from './Text'
 export function KanbanCardDetail({ card, onDismiss }: { card: KanbanCardSummary | null; onDismiss: () => void }) {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  const [copied, setCopied] = useState(false)
+  // The sheet can swap cards while open; a check from the previous copy must
+  // not hang off the new card's ID.
+  useEffect(() => {
+    setCopied(false)
+  }, [card?.id])
+
   if (!card) return null
 
   const details = [
@@ -24,6 +34,14 @@ export function KanbanCardDetail({ card, onDismiss }: { card: KanbanCardSummary 
     ['Branch', card.branch],
     ['PR', card.pr]
   ].filter(([, value]) => Boolean(value))
+
+  // Same pattern as the transcript's copy buttons: write, flip to a check for
+  // two seconds, and let the next tap start fresh.
+  const copyId = async () => {
+    await Clipboard.setStringAsync(card.id)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
 
   return (
     <Modal transparent visible animationType="fade" onRequestClose={onDismiss}>
@@ -44,6 +62,26 @@ export function KanbanCardDetail({ card, onDismiss }: { card: KanbanCardSummary 
           </View>
 
           <ScrollView contentContainerStyle={styles.body}>
+            {/* The ticket id, copyable: it is the handle for this card in chat,
+                PRs, and the `hermes kanban` CLI, and nowhere else in the app
+                it was previously surfaced. */}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={copied ? 'Copied ticket id' : `Copy ticket id ${card.id}`}
+              onPress={() => void copyId()}
+              hitSlop={8}
+              style={[
+                styles.idPill,
+                { borderColor: copied ? theme.color.primary : theme.color.border, backgroundColor: theme.color.bgSubtle }
+              ]}
+            >
+              <Text variant="sectionHeader">ID</Text>
+              <Text variant="monoSmall" numberOfLines={1} style={styles.idValue}>
+                {card.id}
+              </Text>
+              <Icon name={copied ? 'check' : 'copy'} size={12} color={copied ? theme.color.primary : theme.color.gray400} />
+            </Pressable>
+
             {details.length > 0 ? (
               <View style={styles.detailGrid}>
                 {details.map(([label, value]) => (
@@ -87,6 +125,16 @@ const styles = StyleSheet.create({
   titleWrap: { flex: 1, minWidth: 0, gap: 4 },
   body: { paddingHorizontal: 16, paddingBottom: 18, gap: 12 },
   detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  idPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 8
+  },
+  idValue: { flex: 1 },
   detailPill: {
     minWidth: '46%',
     flexGrow: 1,
