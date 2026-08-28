@@ -42,6 +42,7 @@ import importlib.util
 import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict
@@ -177,23 +178,29 @@ async def unregister_device(body: dict) -> Dict[str, Any]:
 # created and completed with `hermes kanban ...`, so the phone reads the
 # same rows.
 #
-# Board resolution:
-#   1. POLYFLOW_KANBAN_BOARD (board slug, e.g. "agent-handheld")
-#   2. <hermes-root>/kanban/current (written by `hermes kanban boards switch`)
-#   3. "default"
-#
-# DB location (mirrors hermes_cli.kanban_db):
-#   "default"            -> <hermes-root>/kanban.db          (legacy path)
-#   any other slug       -> <hermes-root>/kanban/boards/<slug>/kanban.db
+# Board/DB resolution mirrors hermes_cli.kanban_db:
+#   DB path:   HERMES_KANBAN_DB env (pins the file, highest precedence)
+#   active:    HERMES_KANBAN_BOARD env -> <root>/kanban/current -> "default",
+#              each layer validated (slug shape + board exists); malformed or
+#              stale values fall through to the next layer, never a crash.
+#   DB file:   "default" -> <root>/kanban.db (back-compat)
+#              others    -> <root>/kanban/boards/<slug>/kanban.db
+#   metadata:  ALL boards -> <root>/kanban/boards/<slug>/board.json
 #
 # Hermes root: HERMES_KANBAN_HOME (explicit override) else the directory two
 # levels above <HERMES_HOME> when the active home is <root>/profiles/<name>,
 # else HERMES_HOME itself (Docker / custom deployments).
 # ---------------------------------------------------------------------------
 
-_HERMES_ROOT_OVERRIDE = "HERMES_KANBAN_HOME"
-_CURRENT_BOARD_ENV = "HERMES_KANBAN_BOARD"
+_HERMES_ROOT_ENV = "HERMES_KANBAN_HOME"
+_DB_PATH_ENV = "HERMES_KANBAN_DB"
+_BOARD_ENV = "HERMES_KANBAN_BOARD"
 _CURRENT_BOARD_FILE = "current"
+_DEFAULT_BOARD = "default"
+
+# Mirrors hermes_cli.kanban_db._BOARD_SLUG_RE: strict enough to stop
+# traversal (`..`) and embedded path separators, loose enough for kebab-case.
+_BOARD_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9\-_]{0,63}$")
 
 # Native task status -> (app column id, column label).
 # triage/todo/scheduled/ready are all "waiting to be picked up" from the
@@ -216,7 +223,7 @@ _COLUMN_ORDER = ["backlog", "in_progress", "testing", "done", "blocked", "other"
 
 
 def _hermes_root() -> Path:
-    override = (os.environ.get(_HERMES_ROOT_OVERRIDE) or "").strip()
+    override = (os.environ.get(_HERMES_ROOT_ENV) or "").strip()
     if override:
         return Path(override).expanduser()
     home = (os.environ.get("HERMES_HOME") or "").strip()
@@ -229,31 +236,67 @@ def _hermes_root() -> Path:
     return Path.home() / ".hermes"
 
 
+def _boards_root() -> Path:
+    return _hermes_root() / "kanban" / "boards"
+
+
+def _normalize_slug(slug: str | None) -> str | None:
+    """Lowercase + strip; None for empty or malformed (mirrors kanban_db).
+
+    Returning None instead of raising keeps a hand-edited env var or
+    ``kanban/current`` from taking the route down — the caller just falls
+    through to the next resolution layer.
+    """
+    if slug is None:
+        return None
+    s = str(slug).strip().lower()
+    if not s or not _BOARD_SLUG_RE.match(s):
+        return None
+    return s
+
+
+def _board_exists(slug: str) -> bool:
+    """Mirrors kanban_db.board_exists: default always exists (its DB is
+    created on first connect); named boards need board.json or kanban.db."""
+    if slug == _DEFAULT_BOARD:
+        return True
+    d = _boards_root() / slug
+    return (d / "board.json").exists() or (d / "kanban.db").exists()
+
+
 def _native_board_slug() -> str:
-    slug = (os.environ.get(_CURRENT_BOARD_ENV) or "").strip()
-    if not slug:
-        current_file = _hermes_root() / "kanban" / _CURRENT_BOARD_FILE
-        if current_file.exists():
-            try:
-                slug = current_file.read_text(encoding="utf-8").strip()
-            except OSError:
-                slug = ""
-    return slug or "default"
+    """Active board slug, mirroring kanban_db.get_current_board():
+    HERMES_KANBAN_BOARD env -> <root>/kanban/current -> "default"."""
+    slug = _normalize_slug(os.environ.get(_BOARD_ENV))
+    if slug and _board_exists(slug):
+        return slug
+    try:
+        f = _hermes_root() / "kanban" / _CURRENT_BOARD_FILE
+        if f.exists():
+            slug = _normalize_slug(f.read_text(encoding="utf-8").strip())
+            if slug and _board_exists(slug):
+                return slug
+    except OSError:
+        pass
+    return _DEFAULT_BOARD
 
 
-def _native_db_path(board_slug: str) -> Path:
-    root = _hermes_root()
-    if board_slug == "default":
-        return root / "kanban.db"
-    return root / "kanban" / "boards" / board_slug / "kanban.db"
+def _native_db_path() -> Path:
+    """Mirrors kanban_db.kanban_db_path(board=None -> active board)."""
+    override = (os.environ.get(_DB_PATH_ENV) or "").strip()
+    if override:
+        return Path(override).expanduser()
+    slug = _native_board_slug()
+    if slug == _DEFAULT_BOARD:
+        return _hermes_root() / "kanban.db"
+    return _boards_root() / slug / "kanban.db"
 
 
-def _board_display_name(root: Path, board_slug: str) -> str:
-    """Human name from board.json if present, else the slug (prettified)."""
-    if board_slug == "default":
-        meta = root / "board.json"
-    else:
-        meta = root / "kanban" / "boards" / board_slug / "board.json"
+def _board_display_name(slug: str) -> str:
+    """Display name from board.json if present, else a presentable slug.
+    Mirrors read_board_metadata: every board (including default) keeps
+    metadata at <root>/kanban/boards/<slug>/board.json."""
+    meta = _boards_root() / slug / "board.json"
     if meta.exists():
         try:
             data = json.loads(meta.read_text(encoding="utf-8"))
@@ -262,7 +305,7 @@ def _board_display_name(root: Path, board_slug: str) -> str:
                 return name
         except (OSError, json.JSONDecodeError):
             pass
-    return board_slug.replace("-", " ").replace("_", " ").title()
+    return " ".join(p.capitalize() for p in slug.replace("_", "-").split("-") if p) or slug
 
 
 def _card_description(body: str | None) -> str:
@@ -334,11 +377,10 @@ def _read_native_board(db_path: Path, board_slug: str, display_name: str) -> dic
 async def kanban_board() -> Dict[str, Any]:
     """Read the native Hermes kanban board for the mobile Boards screen."""
     board_slug = _native_board_slug()
-    db_path = _native_db_path(board_slug)
+    db_path = _native_db_path()
     if not db_path.exists():
         raise HTTPException(status_code=404, detail=f"kanban board not found: {db_path}")
-    root = _hermes_root()
-    return _read_native_board(db_path, board_slug, _board_display_name(root, board_slug))
+    return _read_native_board(db_path, board_slug, _board_display_name(board_slug))
 
 
 @router.post("/test")
