@@ -191,15 +191,21 @@ function AgentRow({
         <AgentGlyph name={agent.icon} size={13} />
       </View>
 
-      {/* name flexes and never wraps; the token never shrinks (design §13). */}
-      <Text
-        variant={selected ? 'rowLabelStrong' : 'rowLabel'}
-        numberOfLines={1}
-        color={dimmed ? theme.color.gray400 : theme.color.gray900}
-        style={styles.name}
-      >
-        {agent.displayName}
-      </Text>
+      <View style={styles.agentText}>
+        <Text
+          variant={selected ? 'rowLabelStrong' : 'rowLabel'}
+          color={dimmed ? theme.color.gray400 : theme.color.gray900}
+          style={styles.name}
+        >
+          {agent.displayName}
+        </Text>
+
+        {agent.hint && !missing ? (
+          <Text variant="monoSmall" color={theme.color.gray400} style={styles.hint}>
+            {agent.hint}
+          </Text>
+        ) : null}
+      </View>
 
       {missing ? (
         <Pressable
@@ -207,16 +213,17 @@ function AgentRow({
           accessibilityLabel={`Forget ${agent.displayName}`}
           hitSlop={8}
           onPress={onDismiss}
+          style={styles.trailingAction}
         >
           <Icon name="trash" size={11} color={theme.color.warning700} />
         </Pressable>
-      ) : agent.hint ? (
-        <Text variant="monoSmall" numberOfLines={1} color={theme.color.gray400}>
-          {agent.hint}
-        </Text>
       ) : null}
 
-      {selected ? <Icon name="check" size={11} color={theme.color.secondary} /> : null}
+      {selected ? (
+        <View style={styles.trailingAction}>
+          <Icon name="check" size={11} color={theme.color.secondary} />
+        </View>
+      ) : null}
     </Pressable>
   )
 }
@@ -224,13 +231,16 @@ function AgentRow({
 const styles = StyleSheet.create({
   scrim: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   anchor: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
-  popover: { width: 256, paddingVertical: 5, overflow: 'hidden' },
-  groupHead: { height: 26, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 11 },
+  popover: { width: '92%', maxWidth: 360, paddingVertical: 5, overflow: 'hidden' },
+  groupHead: { minHeight: 26, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 11, paddingVertical: 4 },
   groupName: { flex: 1, minWidth: 0 },
-  row: { height: 38, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 11 },
+  row: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 11, paddingVertical: 7 },
   dotSlot: { width: 8, alignItems: 'center' },
   dot: { width: 5, height: 5, borderRadius: 2.5 },
   glyphSlot: { width: 13, alignItems: 'center' },
-  name: { flex: 1, minWidth: 0, fontSize: 13.5 },
+  agentText: { flex: 1, minWidth: 0, gap: 2 },
+  name: { minWidth: 0, fontSize: 13.5 },
+  hint: { minWidth: 0, flexShrink: 1, lineHeight: 15 },
+  trailingAction: { alignSelf: 'center' },
   addLabel: { flex: 1, fontSize: 13.5 }
 })
