@@ -1,8 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import {
   ActivityIndicator,
-  Modal,
-  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -17,39 +15,16 @@ import { useBackend, useConnectionFault, useConnectionState } from '@/state/Conn
 import { useKanbanBoard } from '@/state/boards'
 import { useSidebar } from '@/state/sidebar'
 import { Card } from '@/ui/components/Card'
-import { Icon } from '@/ui/components/Icon'
-import { IconButton } from '@/ui/components/IconButton'
+import { KanbanCardDetail } from '@/ui/components/KanbanCardDetail'
+import { KanbanCardTile } from '@/ui/components/KanbanCardTile'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
-import { Markdown } from '@/ui/markdown/Markdown'
+import { statusTone } from '@/ui/kanban'
 import { useTheme } from '@/ui/ThemeProvider'
-import type { Theme } from '@/ui/theme'
 
 /** Gap between columns, and the horizontal padding the board sits in. */
 const COLUMN_GAP = 12
 const BOARD_INSET = 16
-
-/**
- * A column's tone comes from the **status ramp**, not the agent accent.
- *
- * The accent (`secondary*`) marks what belongs to the selected agent — the
- * pill, the composer, the sidebar. A board column is not the agent's identity,
- * it is a state a ticket is in, so it reads off the same info/warning/success
- * tokens `ToolCard` uses. That keeps this screen in the app's palette instead
- * of washing it violet.
- */
-function statusTone(theme: Theme, status: string): { text: string; bg: string; border: string } {
-  switch (status) {
-    case 'in_progress':
-      return { text: theme.color.info700, bg: theme.color.info50, border: theme.color.info200 }
-    case 'testing':
-      return { text: theme.color.warning700, bg: theme.color.warning50, border: theme.color.warning200 }
-    case 'done':
-      return { text: theme.color.success700, bg: theme.color.success50, border: theme.color.success200 }
-    default:
-      return { text: theme.color.gray600, bg: theme.color.bgSubtle, border: theme.color.border }
-  }
-}
 
 export default function BoardsScreen() {
   const theme = useTheme()
@@ -131,7 +106,7 @@ export default function BoardsScreen() {
         <ActivityIndicator color={theme.color.gray500} style={styles.loading} />
       )}
 
-      <CardModal card={selectedCard} onDismiss={() => setSelectedCard(null)} />
+      <KanbanCardDetail card={selectedCard} onDismiss={() => setSelectedCard(null)} />
     </View>
   )
 }
@@ -189,131 +164,10 @@ function BoardColumn({
             <Text variant="secondary">Nothing here.</Text>
           </View>
         ) : (
-          column.cards.map(card => <KanbanCard key={card.id} card={card} onPress={() => onOpenCard(card)} />)
+          column.cards.map(card => <KanbanCardTile key={card.id} card={card} onPress={() => onOpenCard(card)} />)
         )}
       </ScrollView>
     </View>
-  )
-}
-
-function KanbanCard({ card, onPress }: { card: KanbanCardSummary; onPress: () => void }) {
-  const theme = useTheme()
-  const chips = [card.risk ? `risk:${card.risk}` : null, card.branch, card.pr].filter(Boolean) as string[]
-
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={`Open ${card.title}`}
-      onPress={onPress}
-      style={({ pressed }) => [
-        styles.kanbanCard,
-        theme.shadow.card,
-        {
-          borderRadius: theme.radius.card,
-          borderColor: theme.color.border,
-          backgroundColor: pressed ? theme.color.bgSubtle : theme.color.surface
-        }
-      ]}
-    >
-      <View style={styles.cardTopRow}>
-        <Text variant="rowLabelStrong" numberOfLines={3} style={styles.cardTitle}>
-          {card.title}
-        </Text>
-        <Icon
-          name={card.checked ? 'circle-check' : 'circle'}
-          size={12}
-          color={card.checked ? theme.color.success700 : theme.color.gray400}
-        />
-      </View>
-
-      {card.description ? (
-        <Text variant="secondary" numberOfLines={3}>
-          {card.description}
-        </Text>
-      ) : null}
-
-      {chips.length > 0 ? (
-        <View style={styles.chipRow}>
-          {chips.map(chip => (
-            <View
-              key={chip}
-              style={[styles.chip, { backgroundColor: theme.color.bgSubtle, borderColor: theme.color.border }]}
-            >
-              <Text variant="monoSmall" color={theme.color.gray600} numberOfLines={1}>
-                {chip}
-              </Text>
-            </View>
-          ))}
-        </View>
-      ) : null}
-    </Pressable>
-  )
-}
-
-function CardModal({ card, onDismiss }: { card: KanbanCardSummary | null; onDismiss: () => void }) {
-  const theme = useTheme()
-  const insets = useSafeAreaInsets()
-  if (!card) return null
-
-  const details = [
-    ['Status', card.statusLabel],
-    ['Risk', card.risk],
-    ['Branch', card.branch],
-    ['PR', card.pr]
-  ].filter(([, value]) => Boolean(value))
-
-  return (
-    <Modal transparent visible animationType="fade" onRequestClose={onDismiss}>
-      <View
-        style={[
-          styles.modalRoot,
-          { backgroundColor: theme.color.scrim, paddingTop: insets.top + 28, paddingBottom: insets.bottom + 28 }
-        ]}
-      >
-        <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} accessibilityLabel="Close card details" />
-        <Card style={styles.modalCard}>
-          <View style={styles.modalHeader}>
-            <View style={styles.modalTitleWrap}>
-              <Text variant="sectionHeader">{card.statusLabel}</Text>
-              <Text variant="sheetTitle">{card.title}</Text>
-            </View>
-            <IconButton name="xmark" accessibilityLabel="Close card details" onPress={onDismiss} />
-          </View>
-
-          <ScrollView contentContainerStyle={styles.modalBody}>
-            {details.length > 0 ? (
-              <View style={styles.detailGrid}>
-                {details.map(([label, value]) => (
-                  <View
-                    key={label}
-                    style={[styles.detailPill, { borderColor: theme.color.border, backgroundColor: theme.color.bgSubtle }]}
-                  >
-                    <Text variant="sectionHeader">{label}</Text>
-                    <Text variant="secondary" numberOfLines={1}>
-                      {value}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            ) : null}
-
-            {/* The ticket body is markdown on disk, so it renders as markdown
-                here — same component the transcript uses, so a heading, a
-                checklist and a fenced block land in the app's type scale
-                rather than arriving as one wall of escaped text. The
-                description is the body's first prose line, so showing both
-                would just repeat it. */}
-            {card.body ? (
-              <Markdown source={card.body} />
-            ) : card.description ? (
-              <Text variant="body">{card.description}</Text>
-            ) : (
-              <Text variant="secondary">No ticket file for this card.</Text>
-            )}
-          </ScrollView>
-        </Card>
-      </View>
-    </Modal>
   )
 }
 
@@ -364,25 +218,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 14
   },
-  kanbanCard: { borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
-  cardTopRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  cardTitle: { flex: 1, minWidth: 0 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 1 },
-  chip: { borderWidth: StyleSheet.hairlineWidth, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3, maxWidth: '100%' },
-  messageCard: { padding: 14, gap: 4 },
-  modalRoot: { flex: 1, justifyContent: 'center', paddingHorizontal: 16 },
-  modalCard: { maxHeight: '82%' },
-  modalHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 10 },
-  modalTitleWrap: { flex: 1, minWidth: 0, gap: 4 },
-  modalBody: { paddingHorizontal: 16, paddingBottom: 18, gap: 12 },
-  detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  detailPill: {
-    minWidth: '46%',
-    flexGrow: 1,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    gap: 2
-  }
+  messageCard: { padding: 14, gap: 4 }
 })

@@ -92,6 +92,22 @@ function seedSessions(now: number): MockSession[] {
       messageCount: 8,
       blockedOn: null,
       reply: 'The MCP server is refusing connections. Its container exited 12 minutes ago.'
+    },
+    {
+      id: 'ses-board',
+      title: 'Kanban board screen',
+      preview: 'Lanes are in; a mentioned ticket now unfurls in the transcript',
+      updatedAt: now - 12 * MINUTE,
+      pinned: false,
+      unread: false,
+      model: 'sonnet-4.5',
+      messageCount: 6,
+      blockedOn: null,
+      // Wiki-links, because that is what an agent working an Obsidian board
+      // writes — and what the transcript now resolves into cards.
+      reply:
+        'Lanes are in on [[kanban-board]] — swipe between columns, tap a card for the ticket. ' +
+        'That leaves [[push-notifications]] as the last thing that shipped.'
     }
   ]
 
