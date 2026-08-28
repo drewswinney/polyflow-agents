@@ -194,17 +194,19 @@ def _kanban_db_path() -> Path:
 
     Delegates to Hermes's own resolver (`hermes_cli.kanban_db`) when
     importable, so the phone shows the *active* board — the same file the
-    CLI, the dispatcher and the dashboard all read: `HERMES_KANBAN_DB`
-    override → `HERMES_KANBAN_BOARD` → `kanban/current` → the legacy
-    default board at `<root>/kanban.db`. A hand-rolled fallback below
-    covers hosts where `hermes_cli` is not importable (bare Python with no
-    Hermes install), reproducing the same chain against the resolved root.
-    `POLYFLOW_KANBAN_DB` is the plugin-level override (offline dev,
+    CLI, the dispatcher and the dashboard all read. Otherwise the
+    fallback below reproduces the same chain by hand: `HERMES_KANBAN_DB`
+    pins the path, `HERMES_KANBAN_BOARD` names a board, `kanban/current`
+    persists the last switch, and only a *board that actually exists*
+    wins — a stale or hand-edited slug falls through to the legacy
+    default board at `<root>/kanban.db`, exactly like `get_current_board`
+    does. `POLYFLOW_KANBAN_DB` is the plugin-level override (offline dev,
     alternate installs) and always wins.
     """
-    configured = os.environ.get("POLYFLOW_KANBAN_DB")
-    if configured:
-        return Path(configured).expanduser()
+    for var in ("POLYFLOW_KANBAN_DB", "HERMES_KANBAN_DB"):
+        configured = os.environ.get(var)
+        if configured:
+            return Path(configured).expanduser()
     try:
         from hermes_cli import kanban_db  # the host IS a hermes process
 
@@ -226,9 +228,13 @@ def _kanban_db_path() -> Path:
             slug = (root / "kanban" / "current").read_text(encoding="utf-8").strip()
         except OSError:
             slug = ""
-    if not slug or slug == "default":
-        return root / "kanban.db"
-    return root / "kanban" / "boards" / slug / "kanban.db"
+    if slug and slug != "default":
+        board_dir = root / "kanban" / "boards" / slug
+        # Existence check mirrors `board_exists`: a stale slug must not
+        # 404 a board the CLI happily serves from the default.
+        if (board_dir / "board.json").exists() or (board_dir / "kanban.db").exists():
+            return board_dir / "kanban.db"
+    return root / "kanban.db"
 
 
 def _kanban_board_title(db_path: Path) -> str:

@@ -22,9 +22,14 @@ export interface StatusTone {
 export function statusTone(theme: Theme, status: string): StatusTone {
   switch (status) {
     case 'in_progress':
+    case 'ready':
+    case 'running':
       return { text: theme.color.info700, bg: theme.color.info50, border: theme.color.info200 }
     case 'testing':
+    case 'review':
       return { text: theme.color.warning700, bg: theme.color.warning50, border: theme.color.warning200 }
+    case 'blocked':
+      return { text: theme.color.error700, bg: theme.color.error50, border: theme.color.error200 }
     case 'done':
       return { text: theme.color.success700, bg: theme.color.success50, border: theme.color.success200 }
     default:

@@ -382,7 +382,20 @@ export interface CronJobSummary {
   model: string | null
 }
 
-export type KanbanStatus = 'backlog' | 'in_progress' | 'testing' | 'done' | 'other'
+export type KanbanStatus =
+  | 'backlog'
+  | 'in_progress'
+  | 'testing'
+  | 'done'
+  | 'other'
+  // Native Hermes kanban statuses (the board the dispatcher runs).
+  | 'triage'
+  | 'todo'
+  | 'scheduled'
+  | 'ready'
+  | 'running'
+  | 'review'
+  | 'blocked'
 
 export interface KanbanCardSummary {
   id: string
