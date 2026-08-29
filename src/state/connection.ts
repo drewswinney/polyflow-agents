@@ -71,6 +71,20 @@ export function useConnection(server: Server | null, agent: Agent | null): Conne
   const failures = useRef(0)
 
   /**
+   * Set when the last attempt failed for a reason dialling again cannot fix.
+   *
+   * Only one thing qualifies today: no stored credential, which is a pairing
+   * problem and is fixed by adding the server again, not by retrying. It has to
+   * be distinguished because the automatic redial below now covers `error` as
+   * well as `closed`, and without this it would sit in a tight loop re-reading
+   * the keychain for a secret that is not there.
+   *
+   * Cleared by anything that changes the answer: an explicit Reconnect, or a
+   * redial for a different server or identity.
+   */
+  const fatal = useRef(false)
+
+  /**
    * The live socket state, and whether this hook is mid-dial.
    *
    * Both are read by the triggers below, which must not re-subscribe every time
@@ -110,6 +124,7 @@ export function useConnection(server: Server | null, agent: Agent | null): Conne
     async function open() {
       setError(null)
       dialing.current = true
+      fatal.current = false
 
       const agent = agentRef.current
       const server = serverRef.current
@@ -152,6 +167,7 @@ export function useConnection(server: Server | null, agent: Agent | null): Conne
       if (cancelled) return
 
       if (!credential) {
+        fatal.current = true
         setState('error')
         setError('No credentials stored for this server. Add it again to re-pair.')
 
@@ -250,6 +266,9 @@ export function useConnection(server: Server | null, agent: Agent | null): Conne
   // is that its identity does not change when the socket's state does.
   const reconnect = useCallback(() => {
     failures.current = 0
+    // A person asking is new information — the credential may have just been
+    // added — so an unretryable failure is worth one more look.
+    fatal.current = false
     setNonce(value => value + 1)
   }, [])
 
@@ -277,22 +296,36 @@ export function useConnection(server: Server | null, agent: Agent | null): Conne
   }, [])
 
   /**
-   * A socket that drops while the app is open gets redialled on its own.
+   * A connection that is not up gets redialled on its own, from `closed` *and*
+   * from `error`.
    *
    * This is what makes the foreground check above safe to skip: the recovery
    * no longer hangs off returning to the app, so it also covers the socket that
    * dies with the app in front of you, which nothing used to redial at all.
    *
-   * Only from `closed` — a socket that was up and went away. A failed dial ends
-   * in `error`, and redialling on that is a loop with a network outage as its
-   * exit condition. The delay and the `dialing` guard keep this off our own
-   * teardown, which closes the previous socket on the way to opening the next.
+   * `error` used to be excluded, on the reasoning that retrying a failed dial
+   * is a loop whose exit condition is a network outage. It is — but it was the
+   * wrong thing to protect against, because the cost of *not* looping is worse:
+   * one failed dial (a hop between wifi and cell, the host still booting, a
+   * five-second tunnel) left the app parked on "reconnecting…" until the person
+   * noticed and pressed the button. The loop is the point; what matters is that
+   * it is slow. `open()` already widens the gap after each consecutive failure,
+   * 1s to a 30s ceiling, and resets it on success — so an outage settles at one
+   * attempt every 30 seconds, and a blip recovers in one.
+   *
+   * The retry is held while the app is backgrounded, where a dial would fail on
+   * principle and only spend battery; coming back to the foreground redials
+   * through the trigger above. The delay and the `dialing` guard keep this off
+   * our own teardown, which closes the previous socket on the way to the next.
    */
   useEffect(() => {
-    if (state !== 'closed' || dialing.current) return
+    if ((state !== 'closed' && state !== 'error') || dialing.current || fatal.current) return
 
+    // A dial that failed has already waited out its own backoff inside
+    // `open()`; this is only the beat between noticing and asking again.
     const timer = setTimeout(() => {
-      if (dialing.current || stateRef.current !== 'closed') return
+      if (dialing.current || fatal.current) return
+      if (stateRef.current !== 'closed' && stateRef.current !== 'error') return
       if (AppState.currentState !== 'active') return
 
       setNonce(value => value + 1)

@@ -5,7 +5,8 @@
  * or `tool.complete`. Payload field names were read from the Hermes desktop
  * client and its gateway-event handler, not guessed:
  *
- * - `message.delta` / `message.interim` → `payload.text`
+ * - `message.delta` → `payload.text` (incremental)
+ * - `message.interim` → `payload.text` (cumulative — the message so far)
  * - `thinking.delta` / `reasoning.delta` → `payload.text`
  * - `tool.*`   → `payload.{tool_id, name, context, args, result, error}`
  * - `approval.request` → `payload.{command, description, request_id,
@@ -127,11 +128,26 @@ export function mapGatewayEvent(event: GatewayEvent, ctx: MapContext): SessionUp
   const updates: SessionUpdate[] = []
 
   switch (event.type) {
-    case 'message.delta':
-    case 'message.interim': {
+    case 'message.delta': {
       const text = coerceText(payload?.text)
 
       if (text) updates.push({ kind: 'agent_message_chunk', text })
+      break
+    }
+
+    // The cumulative message so far, **not** the piece that just arrived. The
+    // host emits it beside `message.delta` when
+    // `display.interim_assistant_messages` is on, so appending it the way a
+    // delta is appended wrote the whole reply a second time on top of the
+    // deltas that had already streamed it — the doubled bubble.
+    //
+    // Sent as a snapshot, it is idempotent under either arrangement: with
+    // deltas flowing it restates text the tail already holds, and with deltas
+    // off it is the only thing filling the tail.
+    case 'message.interim': {
+      const text = coerceText(payload?.text)
+
+      if (text) updates.push({ kind: 'agent_message_snapshot', text })
       break
     }
 

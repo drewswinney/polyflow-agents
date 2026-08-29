@@ -33,8 +33,19 @@ import type { PickedImage } from '@/platform/image-attachments'
 import { cacheSentImage, cachedImageUri } from './attachment-cache'
 import { createStreamTail, type StreamTail } from './stream-tail'
 
-/** A message waiting on a reconnect, images and all. */
+/**
+ * A message waiting on a reconnect, images and all.
+ *
+ * Carries the id of the bubble it is drawn in. The reconnect that drains the
+ * outbox also refetches the transcript (§5.4), and that refetch replaces
+ * `entries` wholesale with rows the host knows about — which cannot include a
+ * message that has not been sent yet. The bubble was therefore wiped off the
+ * screen at the exact moment it was finally going out, and stayed gone until
+ * the *next* reload. Knowing its id lets the drain put it back.
+ */
 interface Outgoing {
+  id: string
+  at: number
   text: string
   images: PickedImage[]
 }
@@ -169,14 +180,19 @@ export function useSessionStream(
         // check, only a redundant append is skipped.
         const lastMessage = [...current].reverse().find(entry => entry.kind === 'message')
 
-        if (text && lastMessage?.kind === 'message' && lastMessage.role === 'agent' && lastMessage.text === text) {
+        // Compared trimmed on both sides, and stored trimmed below, so the two
+        // halves agree. They did not: the guard tested the trimmed tail while
+        // the row it had appended a moment earlier held the *untrimmed* one, so
+        // a reply ending in the newline a model almost always ends on failed
+        // its own check and sealed a second copy of itself.
+        if (text && lastMessage?.kind === 'message' && lastMessage.role === 'agent' && lastMessage.text.trim() === text) {
           return current
         }
 
         return [
           ...current,
-          ...(thinking ? [{ kind: 'thinking' as const, id: `think-${at}`, text: settled.thinking, at }] : []),
-          ...(text ? [{ kind: 'message' as const, id: `agent-${at}`, role: 'agent' as const, text: settled.text, at }] : [])
+          ...(thinking ? [{ kind: 'thinking' as const, id: `think-${at}`, text: thinking, at }] : []),
+          ...(text ? [{ kind: 'message' as const, id: `agent-${at}`, role: 'agent' as const, text, at }] : [])
         ]
       })
     }
@@ -195,6 +211,14 @@ export function useSessionStream(
           wasStreaming.current = true
           setTurnActive(true)
           tail.appendText(update.text)
+          break
+
+        // The message so far, restated. Replaces the tail rather than extending
+        // it — see `agent_message_snapshot` in the domain union.
+        case 'agent_message_snapshot':
+          wasStreaming.current = true
+          setTurnActive(true)
+          tail.setText(update.text)
           break
 
         case 'agent_thought_chunk':
@@ -290,12 +314,42 @@ export function useSessionStream(
     )
   }, [connectionState, tail])
 
+  /**
+   * Messages already handed to `dispatch`, by id.
+   *
+   * `setOutbox([])` below does not take effect until the next render, so the
+   * drain effect could run a second time — on a re-render, or on React's own
+   * double-invocation in development — still holding the array it had just
+   * cleared, and send every queued message twice. A ref settles it inside the
+   * same tick the send is made in.
+   *
+   * Never cleared: ids are minted per message from the clock, so this only
+   * grows by what the user actually typed while offline.
+   */
+  const sent = useRef(new Set<string>())
+
   // --- Outbox drain -------------------------------------------------------
   useEffect(() => {
     if (connectionState !== 'open' || !backend || outbox.length === 0) return
 
-    const queued = outbox
+    const queued = outbox.filter(message => !sent.current.has(message.id))
+
     setOutbox([])
+
+    if (queued.length === 0) return
+
+    for (const message of queued) sent.current.add(message.id)
+
+    // Put back any bubble the reconnect's transcript refetch took with it, so
+    // the message is on screen while it goes out rather than reappearing a
+    // reload later. Appended at the end, which is where it belongs: it is the
+    // newest thing said.
+    setEntries(current => {
+      const known = new Set(current.map(entry => entry.id))
+      const missing = queued.filter(message => !known.has(message.id))
+
+      return missing.length === 0 ? current : [...current, ...missing.map(bubbleFor)]
+    })
 
     for (const message of queued) {
       void dispatch(backend, sessionId, message, setEntries)
@@ -310,22 +364,9 @@ export function useSessionStream(
       if (!trimmed && images.length === 0) return
 
       const at = Date.now()
-      const message: Outgoing = { text: trimmed, images }
+      const message: Outgoing = { id: entryIdFor(images, at), at, text: trimmed, images }
 
-      setEntries(current => [
-        ...current,
-        {
-          kind: 'message',
-          id: entryIdFor(message, at),
-          role: 'user',
-          text: trimmed,
-          at,
-          // Shown from the picked file straight away. The names are provisional
-          // until the agent answers with what it filed them under — see
-          // `dispatch`, which rewrites them in place.
-          ...(images.length ? { images: images.map(image => ({ name: image.name, uri: image.uri })) } : {})
-        }
-      ])
+      setEntries(current => [...current, bubbleFor(message)])
 
       if (!backend || connectionState !== 'open') {
         setOutbox(current => [...current, message])
@@ -333,6 +374,7 @@ export function useSessionStream(
         return
       }
 
+      sent.current.add(message.id)
       void dispatch(backend, sessionId, message, setEntries)
     },
     [backend, connectionState, sessionId]
@@ -392,9 +434,34 @@ export function useSessionStream(
  *
  * Indexing would not do: a turn that lands while this one is in flight shifts
  * every position after it.
+ *
+ * The counter is what makes it unique. The clock alone is not: two messages can
+ * be composed in the same millisecond — an outbox that queued while offline is
+ * a normal way to get there — and once the id also decides which messages the
+ * drain has already sent, a collision stops being a duplicated React key and
+ * starts being a message silently never sent.
  */
-function entryIdFor(message: Outgoing, at: number): string {
-  return `user-${at}-${message.images.length}`
+let nextEntrySeq = 0
+
+function entryIdFor(images: PickedImage[], at: number): string {
+  return `user-${at}-${images.length}-${(nextEntrySeq += 1)}`
+}
+
+/** The bubble a queued or just-sent message is drawn in. */
+function bubbleFor(message: Outgoing): TranscriptEntry {
+  return {
+    kind: 'message',
+    id: message.id,
+    role: 'user',
+    text: message.text,
+    at: message.at,
+    // Shown from the picked file straight away. The names are provisional
+    // until the agent answers with what it filed them under — see `dispatch`,
+    // which rewrites them in place.
+    ...(message.images.length
+      ? { images: message.images.map(image => ({ name: image.name, uri: image.uri })) }
+      : {})
+  }
 }
 
 /**
