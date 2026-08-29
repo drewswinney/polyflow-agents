@@ -31,7 +31,7 @@ import type {
   SkillInfo,
   StatusResponse
 } from '@hermes/types'
-import type { KanbanBoard } from '@/domain'
+import type { KanbanBoard, KanbanCardCreate, KanbanCardUpdate } from '@/domain'
 
 export interface HermesRestConfig {
   /** `host:port`, no scheme. */
@@ -285,6 +285,28 @@ export class HermesRest {
 
   kanbanBoard(): Promise<KanbanBoard> {
     return this.request<KanbanBoard>(KANBAN_ROUTE, { timeoutMs: 15_000 })
+  }
+
+  /**
+   * Edit title/body and/or move a card between columns (or archive it). The
+   * host performs the move through the native board's own transition
+   * functions, so a refused transition arrives as a 409 whose detail is
+   * user-readable — surface it, don't normalize it away.
+   */
+  kanbanCardUpdate(id: string, update: KanbanCardUpdate): Promise<void> {
+    return this.request<void>(`${KANBAN_ROUTE}/cards/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: update,
+      timeoutMs: 15_000
+    })
+  }
+
+  kanbanCardCreate(card: KanbanCardCreate): Promise<void> {
+    return this.request<void>(`${KANBAN_ROUTE}/cards`, {
+      method: 'POST',
+      body: card,
+      timeoutMs: 15_000
+    })
   }
 
   cronPause(id: string): Promise<void> {

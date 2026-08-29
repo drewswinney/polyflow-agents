@@ -144,6 +144,14 @@ export class OpenAiCompatBackend implements AgentBackend {
     throw new NotImplemented('boards')
   }
 
+  async updateKanbanCard(): Promise<never> {
+    throw new NotImplemented('boards')
+  }
+
+  async createKanbanCard(): Promise<never> {
+    throw new NotImplemented('boards')
+  }
+
   async listModels(): Promise<never> {
     throw new NotImplemented('model listing')
   }

@@ -19,6 +19,9 @@ import {
   type CronJobSummary,
   type EventRecord,
   type KanbanBoard,
+  type KanbanCardCreate,
+  type KanbanCardSummary,
+  type KanbanCardUpdate,
   type McpServerStatus,
   type ModelOption,
   type NewSessionOptions,
@@ -179,6 +182,12 @@ export class MockBackend implements AgentBackend {
   private readonly eventSinks = new Set<(record: EventRecord) => void>()
   private readonly cancelled = new Set<SessionId>()
   private sessions: MockSession[]
+  /**
+   * The board the demo agent renders. A field, not a per-call literal, because
+   * the write methods mutate it — create/edit/move/archive must be
+   * exercisable on the demo agent, not just readable.
+   */
+  private board: KanbanBoard
   private models: ModelOption[] = [
     { id: 'sonnet-4.5', provider: 'anthropic', selected: true },
     { id: 'opus-4.5', provider: 'anthropic', selected: false },
@@ -189,6 +198,7 @@ export class MockBackend implements AgentBackend {
   /** Set false to skip the approval beat — used by the empty-agent fixture. */
   constructor(private readonly options: { withApproval?: boolean; seed?: boolean } = {}) {
     this.sessions = options.seed === false ? [] : seedSessions(Date.now())
+    this.board = this.seedBoard()
   }
 
   get connectionState(): Observable<ConnectionState> {
@@ -389,6 +399,10 @@ export class MockBackend implements AgentBackend {
   }
 
   async listKanbanBoard(): Promise<KanbanBoard> {
+    return this.board
+  }
+
+  private seedBoard(): KanbanBoard {
     return {
       title: 'Agent Handheld',
       source: 'hermes kanban board: agent-handheld',
@@ -439,6 +453,75 @@ export class MockBackend implements AgentBackend {
         { id: 'done', title: 'Done', cards: [{ id: 'push-notifications', title: 'Push notifications', description: 'Registered device endpoint and local notification routing', status: 'done', statusLabel: 'Done', checked: true }] }
       ]
     }
+  }
+
+  private findMockCard(id: string): { card: KanbanCardSummary; columnId: string } | null {
+    for (const column of this.board.columns) {
+      const card = column.cards.find(candidate => candidate.id === id)
+      if (card) return { card, columnId: column.id }
+    }
+    return null
+  }
+
+  async updateKanbanCard(id: string, update: KanbanCardUpdate): Promise<void> {
+    await tick(120)
+    const located = this.findMockCard(id)
+    if (!located) throw new Error(`No kanban card "${id}"`)
+    const { card, columnId } = located
+
+    if (update.title !== undefined) card.title = update.title
+    if (update.body !== undefined) {
+      card.body = update.body
+      card.description = update.body
+        .split('\n')
+        .find(line => line.trim() && !line.trim().startsWith('#'))
+        ?.trim() ?? card.description
+    }
+
+    const move = update.move
+    if (!move) return
+
+    if (move.kind === 'archive') {
+      const column = this.board.columns.find(candidate => candidate.id === columnId)
+      if (column) column.cards = column.cards.filter(candidate => candidate.id !== id)
+      this.board.updatedAt = Date.now()
+      return
+    }
+
+    // Mirror the host's rule: the dispatcher owns In Progress, so a card can
+    // land there but never be moved there.
+    if (move.status === 'in_progress') throw new Error('Cannot move a card to In Progress from the phone — the host assigns workers to cards')
+    if (columnId === move.status) return
+
+    const from = this.board.columns.find(candidate => candidate.id === columnId)
+    const to = this.board.columns.find(candidate => candidate.id === move.status)
+    if (!from || !to) throw new Error(`Unknown column ${move.status}`)
+
+    from.cards = from.cards.filter(candidate => candidate.id !== id)
+    card.status = move.status
+    card.statusLabel = to.title
+    card.checked = move.status === 'done'
+    to.cards = [...to.cards, card]
+    this.board.updatedAt = Date.now()
+  }
+
+  async createKanbanCard(card: KanbanCardCreate): Promise<void> {
+    await tick(120)
+    const column = this.board.columns.find(candidate => candidate.id === 'backlog')
+    if (!column) throw new Error('No Backlog column on the mock board')
+    column.cards = [
+      ...column.cards,
+      {
+        id: `mock-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+        title: card.title,
+        description: card.body?.split('\n').find(line => line.trim())?.trim() ?? card.title,
+        status: 'backlog',
+        statusLabel: column.title,
+        checked: false,
+        body: card.body
+      }
+    ]
+    this.board.updatedAt = Date.now()
   }
 
   async listSkills(): Promise<SkillSummary[]> {

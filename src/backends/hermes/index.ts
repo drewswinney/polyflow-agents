@@ -29,6 +29,8 @@ import {
   type CronJobSummary,
   type EventRecord,
   type KanbanBoard,
+  type KanbanCardCreate,
+  type KanbanCardUpdate,
   type McpServerStatus,
   type ModelOption,
   type NewSessionOptions,
@@ -642,6 +644,14 @@ export class HermesBackend implements AgentBackend {
 
   async listKanbanBoard(): Promise<KanbanBoard> {
     return this.rest.kanbanBoard()
+  }
+
+  async updateKanbanCard(id: string, update: KanbanCardUpdate): Promise<void> {
+    await this.rest.kanbanCardUpdate(id, update)
+  }
+
+  async createKanbanCard(card: KanbanCardCreate): Promise<void> {
+    await this.rest.kanbanCardCreate(card)
   }
 
   async listSkills(): Promise<SkillSummary[]> {
