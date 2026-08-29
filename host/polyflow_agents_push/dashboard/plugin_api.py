@@ -576,6 +576,15 @@ def _apply_move(conn, slug: str, task_id: str, current_status: str, column: str)
                 "SELECT status FROM tasks WHERE id = ?", (task_id,)
             ).fetchone()
             current_status = row["status"] if row else current_status
+        if current_status == "todo":
+            # Same re-entry-through-ready rule as every other column (see the
+            # docstring): request_review only accepts running|ready, so a
+            # native todo card must be promoted first, with the parent gate
+            # naming any not-done parent.
+            ok, detail = _promote_to_ready(conn, task_id)
+            if not ok:
+                return False, f"cannot move to Testing: {detail}"
+            current_status = "ready"
         if current_status not in ("running", "ready"):
             return False, f"cannot move to Testing from current state ({current_status}) — move the card to Backlog first"
         # Explicit human "request review" — dashboard-style, so it never

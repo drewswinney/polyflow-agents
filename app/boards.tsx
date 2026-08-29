@@ -23,7 +23,7 @@ import { KanbanCardTile } from '@/ui/components/KanbanCardTile'
 import { IconButton } from '@/ui/components/IconButton'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
-import { statusTone } from '@/ui/kanban'
+import { kanbanErrorText, statusTone } from '@/ui/kanban'
 import { useTheme } from '@/ui/ThemeProvider'
 
 /** Gap between columns, and the horizontal padding the board sits in. */
@@ -133,7 +133,7 @@ export default function BoardsScreen() {
         <CreateCardSheet
           theme={theme}
           busy={createCard.isPending}
-          error={createCard.error ? String(createCard.error.message) : null}
+          error={createCard.error ? kanbanErrorText(createCard.error) : null}
           onSubmit={(title, body) => {
             createCard.mutate({ title, body: body || undefined }, { onSuccess: () => setCreating(false) })
           }}

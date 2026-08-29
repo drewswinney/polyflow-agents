@@ -13,6 +13,8 @@ import { Icon } from './Icon'
 import { IconButton } from './IconButton'
 import { Text } from './Text'
 
+import { kanbanErrorText } from '../kanban'
+
 /**
  * The whole ticket, from either place it can be opened: its lane on the Boards
  * screen, or a mention in the transcript.
@@ -86,7 +88,7 @@ export function KanbanCardDetail({
   const attemptMove = (status: KanbanStatus) => {
     setError(null)
     move.mutate({ id: card.id, update: { move: { kind: 'column', status } } }, {
-      onError: e => setError(errorText(e))
+      onError: e => setError(kanbanErrorText(e))
     })
   }
 
@@ -94,7 +96,7 @@ export function KanbanCardDetail({
     setError(null)
     move.mutate({ id: card.id, update: { move: { kind: 'archive' } } }, {
       onSuccess: onDismiss,
-      onError: e => setError(errorText(e))
+      onError: e => setError(kanbanErrorText(e))
     })
   }
 
@@ -106,7 +108,7 @@ export function KanbanCardDetail({
       { id: card.id, update: { title, body: editBody } },
       {
         onSuccess: () => setEditing(false),
-        onError: e => setError(errorText(e))
+        onError: e => setError(kanbanErrorText(e))
       }
     )
   }
@@ -320,24 +322,6 @@ export function KanbanCardDetail({
       </View>
     </Modal>
   )
-}
-
-/**
- * The host writes 409/400 details as user-readable sentences ("cannot move a
- * card to In Progress from the phone — the host's dispatcher assigns workers
- * to cards"), so parse the FastAPI `{"detail": "…"}` shape and show the text
- * as-is.
- */
-function errorText(e: unknown): string {
-  if (e && typeof e === 'object' && 'body' in e) {
-    try {
-      const detail = (JSON.parse(String((e as { body: string }).body)) as { detail?: unknown }).detail
-      if (typeof detail === 'string' && detail) return detail
-    } catch {
-      // Fall through to the raw message.
-    }
-  }
-  return e instanceof Error ? e.message : String(e)
 }
 
 const styles = StyleSheet.create({
