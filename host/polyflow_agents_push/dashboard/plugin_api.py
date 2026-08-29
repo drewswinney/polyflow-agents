@@ -44,6 +44,7 @@ import logging
 import os
 import re
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict
 
@@ -381,6 +382,355 @@ async def kanban_board() -> Dict[str, Any]:
     if not db_path.exists():
         raise HTTPException(status_code=404, detail=f"kanban board not found: {db_path}")
     return _read_native_board(db_path, board_slug, _board_display_name(board_slug))
+
+
+# ---------------------------------------------------------------------------
+# Kanban write routes (create / edit / move / archive) for the mobile Boards
+# screen. These mutate the SAME native board the GET route above reads,
+# through hermes_cli.kanban_db's own transition functions — never a raw
+# `UPDATE tasks SET status` — so run closing, parent re-gating, audit
+# events, and the dispatcher all see a consistent history.
+#
+# LOAD-ORDER PITFALL (this module is imported standalone, not as part of a
+# package — see the module docstring): `hermes_cli` is NOT importable in the
+# bare python that `scripts/plugin-api-check.py` loads this file with. So
+# every `hermes_cli` reference lives INSIDE a function body, exactly like
+# the `import sqlite3` inside `_read_native_board` above. `py_compile` will
+# not catch a top-level import; only `npm run check:plugin` does.
+# ---------------------------------------------------------------------------
+
+
+def _kanban_write_conn():
+    """Writable connection to the ACTIVE board's native DB, via kanban_db.
+
+    Resolves the same slug the GET route shows the phone (HERMES_KANBAN_DB
+    env / HERMES_KANBAN_BOARD env / <root>/kanban/current / default), so a
+    write always lands on the board the user is looking at. `connect` brings
+    WAL, schema auto-init, and the cross-process init lock with it — the
+    same guarantees the first-party dashboard plugin's `_conn` relies on.
+    """
+    from hermes_cli import kanban_db  # lazy: standalone check has no hermes_cli
+
+    return kanban_db.connect(board=_native_board_slug())
+
+
+def _parents_not_done(conn, task_id: str) -> list:
+    """Parent rows (id/title/status) that are not done, i.e. the reasons a
+    move into the ready family is refused. Used to name the blockers in a
+    409 so the phone can show an actionable message instead of a silent
+    no-op (mirrors the first-party dashboard's _parents_blocking_ready)."""
+    rows = conn.execute(
+        "SELECT t.id, t.title, t.status FROM tasks t "
+        "JOIN task_links l ON l.parent_id = t.id "
+        "WHERE l.child_id = ? AND t.status != 'done'",
+        (task_id,),
+    ).fetchall()
+    return [{"id": r["id"], "title": r["title"], "status": r["status"]} for r in rows]
+
+
+def _set_status_direct(conn, task_id: str, new_status: str) -> bool:
+    """Direct status write for moves with no structured verb (here: -> todo
+    when the task is not in review). Copied from the first-party kanban
+    dashboard plugin (plugins/kanban/dashboard/plugin_api.py): closes an
+    active run with outcome='reclaimed' when leaving running, re-gates
+    promotion to ready on parent completion, appends a `status` event row,
+    invalidates descendants when re-opening a satisfied parent, recomputes
+    the ready lane, and terminates the reclaimed worker post-commit.
+
+    `kanban_db` is resolved by the caller, which is the only place in this
+    module that imports it (see the load-order pitfall note above).
+    """
+    from hermes_cli import kanban_db  # lazy: standalone check has no hermes_cli
+    import json as _json
+
+    terminations = []
+    effective_status = new_status
+    with kanban_db.write_txn(conn):
+        prev = conn.execute(
+            "SELECT status, current_run_id, worker_pid, claim_lock "
+            "FROM tasks WHERE id = ?",
+            (task_id,),
+        ).fetchone()
+        if prev is None:
+            return False
+
+        # Promoting to 'ready' is refused while any parent is not done —
+        # otherwise the dispatcher would spawn a child whose upstream work
+        # is still in flight.
+        if effective_status == "ready":
+            parent_statuses = conn.execute(
+                "SELECT t.status FROM tasks t "
+                "JOIN task_links l ON l.parent_id = t.id "
+                "WHERE l.child_id = ?",
+                (task_id,),
+            ).fetchall()
+            if parent_statuses and not all(
+                p["status"] in {"done", "archived"} for p in parent_statuses
+            ):
+                return False
+
+        was_running = prev["status"] == "running"
+        reopening_satisfied_parent = (
+            prev["status"] in {"done", "archived"}
+            and effective_status not in {"done", "archived"}
+        )
+
+        cur = conn.execute(
+            "UPDATE tasks SET status = ?, "
+            "  claim_lock = CASE WHEN ? = 'running' THEN claim_lock ELSE NULL END, "
+            "  claim_expires = CASE WHEN ? = 'running' THEN claim_expires ELSE NULL END, "
+            "  worker_pid = CASE WHEN ? = 'running' THEN worker_pid ELSE NULL END "
+            "WHERE id = ?",
+            (effective_status, effective_status, effective_status, effective_status, task_id),
+        )
+        if cur.rowcount != 1:
+            return False
+        run_id = None
+        if was_running and effective_status != "running" and prev["current_run_id"]:
+            run_id = kanban_db._end_run(
+                conn, task_id,
+                outcome="reclaimed", status="reclaimed",
+                summary=f"status changed to {effective_status} (mobile-app/direct)",
+            )
+            terminations.append((prev["worker_pid"], prev["claim_lock"]))
+        conn.execute(
+            "INSERT INTO task_events (task_id, run_id, kind, payload, created_at) "
+            "VALUES (?, ?, 'status', ?, ?)",
+            (
+                task_id,
+                run_id,
+                _json.dumps({"status": effective_status, "requested_status": new_status}),
+                int(time.time()),
+            ),
+        )
+        if reopening_satisfied_parent:
+            result = kanban_db.invalidate_descendants_for_parent_reopen(
+                conn, task_id, author="mobile-app",
+            )
+            terminations.extend(result["terminations"])
+    for pid, claim_lock in terminations:
+        kanban_db._terminate_reclaimed_worker(pid, claim_lock)
+    if effective_status in {"done", "ready", "review"}:
+        kanban_db.recompute_ready(conn)
+    return True
+
+
+def _promote_to_ready(conn, task_id: str) -> tuple[bool, str]:
+    """todo -> ready with the parent gate, naming any not-done parents."""
+    ok = _set_status_direct(conn, task_id, "ready")
+    if not ok:
+        blockers = _parents_not_done(conn, task_id)
+        if blockers:
+            names = ", ".join(
+                f"{p['title']!r} ({p['id']}, status={p['status']})" for p in blockers
+            )
+            return False, f"blocked by parent(s) not done — {names}"
+        return False, "cannot move the card into the ready lane"
+    return True, ""
+
+
+def _apply_move(conn, slug: str, task_id: str, current_status: str, column: str) -> tuple[bool, str]:
+    """Map an app column move to the native transition that performs it.
+
+    Returns ``(ok, detail)``; when ``ok`` is False, ``detail`` is
+    user-readable and is surfaced verbatim by the app. Mirrors the
+    first-party dashboard PATCH handler's status dispatch, adapted to the
+    app's five columns. The app's Backlog is the native ``ready`` lane:
+    ``block_task``/``request_review``/``complete_task`` only accept
+    ``running|ready`` (plus their own source states), so a native ``todo``
+    card would be a dead end — every move therefore re-enters the card
+    through ``ready``.
+    """
+    from hermes_cli import kanban_db  # lazy: standalone check has no hermes_cli
+
+    if column == "in_progress":
+        return False, "cannot move a card to In Progress from the phone — the host's dispatcher assigns workers to cards"
+
+    if column == "backlog":
+        if current_status == "ready":
+            return True, ""
+        # Leaving `review` goes through the reopen transition (stale-run
+        # recovery + parent re-gate); everything else is a direct write
+        # (run closing, parent gate, events, descendant invalidation).
+        if current_status == "review":
+            ok = kanban_db.reopen_review_task(conn, task_id)
+        else:
+            ok = _set_status_direct(conn, task_id, "ready")
+        if not ok:
+            blockers = _parents_not_done(conn, task_id)
+            if blockers:
+                names = ", ".join(
+                    f"{p['title']!r} ({p['id']}, status={p['status']})" for p in blockers
+                )
+                return False, f"cannot move to Backlog: parent(s) not done — {names}"
+            return False, f"cannot move to Backlog from current state ({current_status})"
+        return True, ""
+
+    if column == "testing":
+        if current_status == "blocked":
+            # Resume first (blocked -> its safe resumable phase); the review
+            # transition itself only accepts running/ready.
+            if not kanban_db.unblock_task(conn, task_id):
+                return False, f"cannot unblock card in current state ({current_status})"
+            row = conn.execute(
+                "SELECT status FROM tasks WHERE id = ?", (task_id,)
+            ).fetchone()
+            current_status = row["status"] if row else current_status
+        if current_status == "todo":
+            # Same re-entry-through-ready rule as every other column (see the
+            # docstring): request_review only accepts running|ready, so a
+            # native todo card must be promoted first, with the parent gate
+            # naming any not-done parent.
+            ok, detail = _promote_to_ready(conn, task_id)
+            if not ok:
+                return False, f"cannot move to Testing: {detail}"
+            current_status = "ready"
+        if current_status not in ("running", "ready"):
+            return False, f"cannot move to Testing from current state ({current_status}) — move the card to Backlog first"
+        # Explicit human "request review" — dashboard-style, so it never
+        # trips unblock-loop detection.
+        ok = kanban_db.request_review(conn, task_id, force=True)
+        if not ok:
+            blockers = _parents_not_done(conn, task_id)
+            if blockers:
+                names = ", ".join(
+                    f"{p['title']!r} ({p['id']}, status={p['status']})" for p in blockers
+                )
+                return False, f"cannot move to Testing: parent(s) not done — {names}"
+            return False, f"cannot move to Testing from current state ({current_status})"
+        return True, ""
+
+    if column == "done":
+        if current_status == "done":
+            return True, ""
+        if current_status == "todo":
+            ok, detail = _promote_to_ready(conn, task_id)
+            if not ok:
+                return False, f"cannot complete the card: {detail}"
+        if not kanban_db.complete_task(conn, task_id):
+            return False, f"cannot move to Done from current state ({current_status})"
+        return True, ""
+
+    if column == "blocked":
+        if current_status == "blocked":
+            return True, ""
+        if current_status == "todo":
+            ok, detail = _promote_to_ready(conn, task_id)
+            if not ok:
+                return False, f"cannot block the card: {detail}"
+        elif current_status not in ("running", "ready"):
+            return False, f"cannot move to Blocked from current state ({current_status}) — move the card to Backlog first"
+        if not kanban_db.block_task(conn, task_id, reason="Blocked from the mobile app"):
+            return False, f"cannot move to Blocked from current state ({current_status})"
+        return True, ""
+
+    return False, f"unknown column: {column}"
+
+
+@router.post("/kanban/cards")
+async def kanban_card_create(body: dict | None = None) -> Dict[str, Any]:
+    """Create a card on the active native board (from the phone)."""
+    from hermes_cli import kanban_db  # lazy: standalone check has no hermes_cli
+
+    body = body or {}
+    title = str(body.get("title") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="title is required")
+    body_text = body.get("body")
+    body_text = str(body_text) if body_text is not None else None
+
+    conn = _kanban_write_conn()
+    try:
+        task_id = kanban_db.create_task(
+            conn,
+            title=title,
+            body=body_text,
+            created_by="mobile-app",
+        )
+    finally:
+        conn.close()
+    return {"ok": True, "id": task_id}
+
+
+@router.patch("/kanban/cards/{task_id}")
+async def kanban_card_update(task_id: str, body: dict | None = None) -> Dict[str, Any]:
+    """Edit a card's title/body and/or move it between columns.
+
+    Payload: ``{"title"?: str, "body"?: str, "move"?: {"status": column_id}
+    | {"kind": "archive"}}``. The move is applied first so field edits land
+    on the task in its new state; the response carries the fresh row.
+    """
+    from hermes_cli import kanban_db  # lazy: standalone check has no hermes_cli
+
+    body = body or {}
+    if not body:
+        raise HTTPException(status_code=400, detail="nothing to update")
+    title = body.get("title")
+    body_text = body.get("body")
+    move = body.get("move")
+
+    conn = _kanban_write_conn()
+    try:
+        task = kanban_db.get_task(conn, task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail=f"task {task_id} not found")
+        if task.status == "archived":
+            # The Boards screen never shows archived cards, so this is
+            # defense in depth against a stale id; revival is a CLI act.
+            raise HTTPException(status_code=409, detail="card is archived — restore it with the CLI to edit it again")
+
+        slug = _native_board_slug()
+
+        if move is not None:
+            if not isinstance(move, dict):
+                raise HTTPException(status_code=400, detail="move must be an object")
+            if move.get("kind") == "archive":
+                if not kanban_db.archive_task(conn, task_id):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"cannot archive from current state ({task.status})",
+                    )
+                return {"ok": True}
+            column = str(move.get("status") or "")
+            if column not in ("backlog", "in_progress", "testing", "done", "blocked"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"unknown column: {column!r}",
+                )
+            ok, detail = _apply_move(conn, slug, task_id, task.status, column)
+            if not ok:
+                raise HTTPException(status_code=409, detail=detail)
+
+        if title is not None or body_text is not None:
+            with kanban_db.write_txn(conn):
+                sets, vals = [], []
+                if title is not None:
+                    if not str(title).strip():
+                        raise HTTPException(status_code=400, detail="title cannot be empty")
+                    sets.append("title = ?")
+                    vals.append(str(title).strip())
+                if body_text is not None:
+                    sets.append("body = ?")
+                    vals.append(str(body_text))
+                vals.append(task_id)
+                conn.execute(f"UPDATE tasks SET {', '.join(sets)} WHERE id = ?", vals)
+                conn.execute(
+                    "INSERT INTO task_events (task_id, kind, payload, created_at) "
+                    "VALUES (?, 'edited', NULL, ?)",
+                    (task_id, int(time.time())),
+                )
+            # Mutation-boundary observer (RFC #58548), post-commit — this
+            # direct-SQL write bypasses every kanban_db mutator.
+            kanban_db.notify_task_updated(
+                conn, task_id,
+                [f for f in ("title", "body") if body.get(f) is not None],
+                board=slug,
+            )
+
+        updated = kanban_db.get_task(conn, task_id)
+        return {"ok": True, "id": task_id, "status": updated.status if updated else None}
+    finally:
+        conn.close()
 
 
 @router.post("/test")

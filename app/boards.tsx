@@ -1,9 +1,12 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import {
   ActivityIndicator,
+  Modal,
+  Pressable,
   RefreshControl,
   ScrollView,
   StyleSheet,
+  TextInput,
   useWindowDimensions,
   View
 } from 'react-native'
@@ -12,14 +15,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { KanbanCardSummary, KanbanColumn } from '@/domain'
 import { useSelectedAgent } from '@/state/agents'
 import { useBackend, useConnectionFault, useConnectionState } from '@/state/ConnectionProvider'
-import { useKanbanBoard } from '@/state/boards'
+import { useKanbanBoard, useKanbanCardCreate } from '@/state/boards'
 import { useSidebar } from '@/state/sidebar'
 import { Card } from '@/ui/components/Card'
 import { KanbanCardDetail } from '@/ui/components/KanbanCardDetail'
 import { KanbanCardTile } from '@/ui/components/KanbanCardTile'
+import { IconButton } from '@/ui/components/IconButton'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
-import { statusTone } from '@/ui/kanban'
+import { kanbanErrorText, statusTone } from '@/ui/kanban'
 import { useTheme } from '@/ui/ThemeProvider'
 
 /** Gap between columns, and the horizontal padding the board sits in. */
@@ -36,9 +40,12 @@ export default function BoardsScreen() {
   const fault = useConnectionFault()
   const openSidebar = useSidebar(store => store.show)
   const [selectedCard, setSelectedCard] = useState<KanbanCardSummary | null>(null)
+  const [creating, setCreating] = useState(false)
 
   const supportsBoards = backend?.capabilities.extras.boards === true
   const board = useKanbanBoard(agent.scope ?? '', backend)
+  const scope = agent.scope ?? ''
+  const createCard = useKanbanCardCreate(scope, backend)
   // Every column, empty ones included: a board with a hole where "Testing"
   // should be reads as a parse failure, and the empty state is information.
   const columns = useMemo(() => board.data?.columns ?? [], [board.data])
@@ -56,7 +63,15 @@ export default function BoardsScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
-      <ScreenHeader title="Boards" onMenu={openSidebar} />
+      <ScreenHeader
+        title="Boards"
+        onMenu={openSidebar}
+        right={
+          supportsBoards ? (
+            <IconButton name="plus" slot={38} size={17} accessibilityLabel="New card" onPress={() => setCreating(true)} />
+          ) : null
+        }
+      />
 
       {!supportsBoards ? (
         <MessagePane>
@@ -106,7 +121,25 @@ export default function BoardsScreen() {
         <ActivityIndicator color={theme.color.gray500} style={styles.loading} />
       )}
 
-      <KanbanCardDetail card={selectedCard} onDismiss={() => setSelectedCard(null)} />
+      <KanbanCardDetail
+        card={selectedCard}
+        onDismiss={() => setSelectedCard(null)}
+        scope={scope}
+        backend={backend}
+        editable={supportsBoards}
+      />
+
+      {creating ? (
+        <CreateCardSheet
+          theme={theme}
+          busy={createCard.isPending}
+          error={createCard.error ? kanbanErrorText(createCard.error) : null}
+          onSubmit={(title, body) => {
+            createCard.mutate({ title, body: body || undefined }, { onSuccess: () => setCreating(false) })
+          }}
+          onDismiss={() => setCreating(false)}
+        />
+      ) : null}
     </View>
   )
 }
@@ -184,6 +217,125 @@ function MessageCard({ title, body }: { title: string; body: string }) {
   )
 }
 
+/**
+ * New card from the phone: a title, an optional body, done. The card lands on
+ * the board's not-yet-started lane (Backlog); the host's dispatcher owns
+ * everything after that, so the sheet deliberately has no column or assignee
+ * of its own — offering them would be a second source of truth for the same
+ * state.
+ */
+function CreateCardSheet({
+  theme,
+  busy,
+  error,
+  onSubmit,
+  onDismiss
+}: {
+  theme: ReturnType<typeof useTheme>
+  busy: boolean
+  error: string | null
+  onSubmit: (title: string, body: string) => void
+  onDismiss: () => void
+}) {
+  const insets = useSafeAreaInsets()
+  const [title, setTitle] = useState('')
+  const [body, setBody] = useState('')
+
+  return (
+    <Modal transparent visible animationType="fade" onRequestClose={onDismiss}>
+      <View
+        style={[
+          styles.sheetRoot,
+          { backgroundColor: theme.color.scrim, paddingTop: insets.top + 28, paddingBottom: insets.bottom + 28 }
+        ]}
+      >
+        <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} accessibilityLabel="Dismiss new card" />
+        <Card style={styles.sheetCard}>
+          <Text variant="sheetTitle">New card</Text>
+          <Text variant="secondary" style={styles.sheetSubtitle}>
+            Lands in Backlog. The dispatcher picks it up from there.
+          </Text>
+
+          <TextInput
+            value={title}
+            onChangeText={setTitle}
+            placeholder="Title"
+            placeholderTextColor={theme.color.gray400}
+            maxLength={120}
+            style={[
+              styles.sheetInput,
+              {
+                borderColor: theme.color.border,
+                backgroundColor: theme.color.bgSubtle,
+                color: theme.color.gray900,
+                fontFamily: theme.font.bodyMedium
+              }
+            ]}
+          />
+          <TextInput
+            value={body}
+            onChangeText={setBody}
+            placeholder="Body — markdown is fine"
+            placeholderTextColor={theme.color.gray400}
+            multiline
+            style={[
+              styles.sheetInput,
+              styles.sheetBodyInput,
+              {
+                borderColor: theme.color.border,
+                backgroundColor: theme.color.bgSubtle,
+                color: theme.color.gray800,
+                fontFamily: theme.font.body
+              }
+            ]}
+          />
+
+          {error ? (
+            <Text variant="secondary" color={theme.color.error700}>
+              {error}
+            </Text>
+          ) : null}
+
+          <View style={styles.sheetActions}>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Cancel new card"
+              disabled={busy}
+              onPress={onDismiss}
+              style={({ pressed }) => [
+                styles.sheetButton,
+                { backgroundColor: theme.color.bgSubtle, borderColor: theme.color.border, opacity: pressed ? 0.6 : 1 }
+              ]}
+            >
+              <Text variant="rowLabelStrong" color={theme.color.gray600}>
+                Cancel
+              </Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Create card"
+              disabled={busy || !title.trim()}
+              onPress={() => onSubmit(title.trim(), body)}
+              style={({ pressed }) => [
+                styles.sheetButton,
+                {
+                  backgroundColor: busy || !title.trim() ? theme.color.bgSubtle : theme.color.accentFill,
+                  borderColor: busy || !title.trim() ? theme.color.border : theme.color.accentFill,
+                  opacity: pressed ? 0.8 : 1
+                }
+              ]}
+            >
+              <Text variant="rowLabelStrong" color={busy || !title.trim() ? theme.color.gray400 : theme.color.onAccent}>
+                {busy ? 'Creating…' : 'Create'}
+              </Text>
+            </Pressable>
+          </View>
+        </Card>
+      </View>
+    </Modal>
+  )
+}
+
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   board: { flex: 1, gap: 12, paddingTop: 14 },
@@ -218,5 +370,22 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 14
   },
-  messageCard: { padding: 14, gap: 4 }
+  messageCard: { padding: 14, gap: 4 },
+  sheetRoot: { flex: 1, justifyContent: 'center', paddingHorizontal: 16 },
+  sheetCard: { padding: 16, gap: 12, maxHeight: '82%' },
+  sheetSubtitle: { marginTop: -6 },
+  sheetInput: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10
+  },
+  sheetBodyInput: { minHeight: 140, textAlignVertical: 'top' },
+  sheetActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 8 },
+  sheetButton: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 9
+  }
 })

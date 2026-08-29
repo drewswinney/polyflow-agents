@@ -1,7 +1,7 @@
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo } from 'react'
 
-import type { AgentBackend, KanbanCardSummary } from '@/domain'
+import type { AgentBackend, KanbanCardCreate, KanbanCardSummary, KanbanCardUpdate } from '@/domain'
 
 export const kanbanBoardKey = (scope: string) => ['agent', scope, 'kanban-board'] as const
 
@@ -47,4 +47,45 @@ export function useKanbanCardIndex(
 
     return index
   }, [board.data])
+}
+
+/**
+ * Edit (title/body) and/or move one card on the agent's board.
+ *
+ * The invalidation is the important half: the card the user just changed is
+ * rendered by *every* mounted consumer of the board — its lane on the Boards
+ * screen and any mention unfurl in an open chat — so all of them have to see
+ * the new position, not just the one that fired the request.
+ */
+export function useKanbanCardUpdate(scope: string, backend: AgentBackend | null) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async ({ id, update }: { id: string; update: KanbanCardUpdate }) => {
+      if (!backend) throw new Error('Not connected')
+      return backend.updateKanbanCard(id, update)
+    },
+    onSuccess: () => {
+      // The host returns 200 on success; the card has already moved
+      // server-side, so a refetch is what actually shows it.
+      void queryClient.invalidateQueries({ queryKey: kanbanBoardKey(scope) })
+    }
+  })
+}
+
+/**
+ * Add a card to the agent's board. The host lands it on the board's
+ * not-yet-started lane (native `ready`, the app's Backlog) — the dispatcher
+ * picks it up from there, the phone never assigns a worker.
+ */
+export function useKanbanCardCreate(scope: string, backend: AgentBackend | null) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (card: KanbanCardCreate) => {
+      if (!backend) throw new Error('Not connected')
+      return backend.createKanbanCard(card)
+    },
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: kanbanBoardKey(scope) })
+  })
 }

@@ -16,6 +16,8 @@ import type {
   CronJobSummary,
   EventRecord,
   KanbanBoard,
+  KanbanCardCreate,
+  KanbanCardUpdate,
   McpServerStatus,
   ModelOption,
   NewSessionOptions,
@@ -107,6 +109,10 @@ export interface AgentBackend {
   listMcpServers(): Promise<McpServerStatus[]>
   /** Requires `capabilities.extras.boards`. */
   listKanbanBoard(): Promise<KanbanBoard>
+  /** Requires `capabilities.extras.boards`. Edit title/body and/or move a card. */
+  updateKanbanCard(id: string, update: KanbanCardUpdate): Promise<void>
+  /** Requires `capabilities.extras.boards`. Create a card on the active board. */
+  createKanbanCard(card: KanbanCardCreate): Promise<void>
   /** Requires `capabilities.extras.skills`. */
   listSkills(): Promise<SkillSummary[]>
   /** Requires `capabilities.settings.model`. */

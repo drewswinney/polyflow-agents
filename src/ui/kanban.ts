@@ -33,3 +33,24 @@ export function statusTone(theme: Theme, status: string): StatusTone {
       return { text: theme.color.gray600, bg: theme.color.bgSubtle, border: theme.color.border }
   }
 }
+
+/**
+ * The host writes 409/400 details as user-readable sentences (e.g. "cannot
+ * move a card to In Progress from the phone — the host's dispatcher assigns
+ * workers to cards"). The REST layer wraps the FastAPI ``{"detail": "…"}``
+ * body in its own ``Hermes API <status> on <url>: <body>`` message, so parse
+ * it off and show the host's text verbatim instead of the wrapper — every
+ * kanban write surface (detail sheet moves/edits, create sheet) must read
+ * host errors the same way.
+ */
+export function kanbanErrorText(e: unknown): string {
+  if (e && typeof e === 'object' && 'body' in e) {
+    try {
+      const detail = (JSON.parse(String((e as { body: string }).body)) as { detail?: unknown }).detail
+      if (typeof detail === 'string' && detail) return detail
+    } catch {
+      // Not a JSON body — fall through to the raw message.
+    }
+  }
+  return e instanceof Error ? e.message : String(e)
+}

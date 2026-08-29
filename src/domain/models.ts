@@ -410,3 +410,18 @@ export interface KanbanBoard {
   updatedAt: number | null
   columns: KanbanColumn[]
 }
+
+export interface KanbanCardCreate {
+  title: string
+  body?: string
+}
+
+export type KanbanMoveTarget =
+  | { kind: 'column'; status: KanbanStatus }
+  | { kind: 'archive' }
+
+export interface KanbanCardUpdate {
+  title?: string
+  body?: string
+  move?: KanbanMoveTarget
+}
