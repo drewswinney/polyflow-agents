@@ -16,9 +16,11 @@ import { looksLikeMarkdown, type MarkdownToken, parseMarkdown } from './parse'
  * tables — in Space Mono, per the design's three-way split. A general-purpose
  * markdown component would have to be fought back into that scale rule by rule.
  *
- * Streaming text deliberately does not come through here (§7.3): the tail
- * renders as plain text and is re-rendered as markdown once the turn settles,
- * so a half-written fence or table never has to parse.
+ * Streaming text comes through here live (§7.3, revised 2026-08): the tail
+ * re-parses on each ~60ms flush, and markdown-it reads a half-written fence
+ * as a fence that grows until its close arrives. Plain prose skips the parser
+ * entirely via `looksLikeMarkdown`, so the cost is paid only by messages that
+ * actually carry markdown.
  *
  * `[[wiki-link]]` mentions are resolved by whoever is above this in the tree
  * (see `MentionContext`) and are handled at the *token* level rather than by
