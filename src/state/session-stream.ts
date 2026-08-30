@@ -31,10 +31,23 @@ import type {
 import type { PickedImage } from '@/platform/image-attachments'
 
 import { cacheSentImage, cachedImageUri } from './attachment-cache'
+import { useTranscript } from './queries'
 import { createStreamTail, type StreamTail } from './stream-tail'
+import { turnLooksSettled } from './turn-settled'
 
-/** A message waiting on a reconnect, images and all. */
+/**
+ * A message waiting on a reconnect, images and all.
+ *
+ * Carries the id of the bubble it is drawn in. The reconnect that drains the
+ * outbox also refetches the transcript (§5.4), and that refetch replaces
+ * `entries` wholesale with rows the host knows about — which cannot include a
+ * message that has not been sent yet. The bubble was therefore wiped off the
+ * screen at the exact moment it was finally going out, and stayed gone until
+ * the *next* reload. Knowing its id lets the drain put it back.
+ */
 interface Outgoing {
+  id: string
+  at: number
   text: string
   images: PickedImage[]
 }
@@ -62,13 +75,11 @@ export interface SessionStream {
 
 export function useSessionStream(
   backend: AgentBackend | null,
+  scope: string,
   sessionId: SessionId,
   connectionState: ConnectionState
 ): SessionStream {
-  const [transcript, setTranscript] = useState<SessionTranscript | null>(null)
   const [entries, setEntries] = useState<TranscriptEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
   const [usage, setUsage] = useState<Usage | null>(null)
   const [approval, setApproval] = useState<PermissionRequest | null>(null)
   const [clarify, setClarify] = useState<ClarifyRequest | null>(null)
@@ -82,71 +93,145 @@ export function useSessionStream(
    * long tool run is exactly when cancelling matters most.
    */
   const [turnActive, setTurnActive] = useState(false)
-  const [reloadNonce, setReloadNonce] = useState(0)
 
   const tail = useMemo(() => createStreamTail(), [sessionId])
   const wasStreaming = useRef(false)
 
   /**
-   * The session whose transcript is already on screen.
+   * The rows, readable from an effect that must not re-run when they change.
    *
-   * A reload is routine — every reconnect refetches, because the delta stream
-   * is not resumable (§5.4) — and it must not blank what is already rendered.
-   * Chat swaps the whole list for a spinner while `loading` is true, so a
-   * reconnect used to tear the transcript down and rebuild it at the bottom,
-   * losing the read position for a refetch that usually returns the same rows.
-   * Only the first load of a session is worth showing as loading.
+   * The transcript sync below asks whether a tool is still running before it
+   * settles `turnActive`. Depending on `entries` for that would re-run the
+   * whole sync on every token that seals, which is both wasteful and wrong —
+   * the sync exists to fold in a *fetch*, not to react to the stream.
    */
-  const shownSession = useRef<SessionId | null>(null)
+  const entriesRef = useRef<TranscriptEntry[]>(entries)
+  entriesRef.current = entries
 
   useEffect(() => () => tail.dispose(), [tail])
 
   // --- Transcript load ----------------------------------------------------
-  // Re-fetched on every reconnect too: the delta stream is not resumable, so
-  // the transcript is the only thing that closes a gap (§5.4).
+  /**
+   * Cached across mounts, refetched on every one.
+   *
+   * Both halves matter and they pull in opposite directions. Reopening a chat
+   * used to start from nothing — the fetch lived in an effect here and its
+   * result died with the screen — so the back gesture, the sidebar and a
+   * notification all led to a spinner over a conversation the app had rendered
+   * seconds earlier. The query cache outlives the screen, so what you were
+   * reading is on screen before the network is asked anything.
+   *
+   * And it is still asked, every time. The delta stream is not resumable
+   * (§5.4), so refetching is the only thing that closes the gap a disconnect
+   * leaves; the cache paints *during* that fetch and never in place of it. See
+   * `useTranscript`, where the two options that guarantee it live.
+   */
+  const query = useTranscript(scope, backend, sessionId)
+  const transcript = query.data ?? null
+
+  /**
+   * Loading is "nothing to show", not "nothing in flight".
+   *
+   * A refetch with a cached transcript behind it must not raise the spinner:
+   * chat swaps the whole list out while this is true, and a reconnect — which
+   * refetches by design — would tear the transcript down and rebuild it at the
+   * bottom, losing the read position for a fetch that usually returns the same
+   * rows. `isPending` is false the moment there is a cached answer, which is
+   * exactly the distinction wanted.
+   */
+  const loading = query.isPending
+  const loadError = query.error ? (query.error instanceof Error ? query.error.message : String(query.error)) : null
+
+  /**
+   * Fold a loaded transcript into what is on screen.
+   *
+   * Runs when the fetched data changes identity — which, thanks to React
+   * Query's structural sharing, a refetch returning the same rows does not do
+   * at all.
+   */
+  useEffect(() => {
+    if (!transcript) return
+
+    // Keep the existing array when the content is the same. A reload is
+    // routine — every reconnect refetches, because the delta stream is not
+    // resumable (§5.4) — and handing the list a new array of identical rows
+    // makes it re-key and jump to the top, throwing away wherever you were
+    // reading for no gain.
+    const restored = withCachedImages(sessionId, transcript.entries)
+
+    setEntries(current => (sameEntries(current, restored) ? current : restored))
+    setUsage(transcript.usage)
+
+    // An approval raised while the app was closed has no live event left to
+    // deliver it — the notification is the only reason you are here, and the
+    // snapshot is the only place it still exists. Never clobber a live one:
+    // the socket is more current than the load it raced.
+    if (transcript.pendingApproval) setApproval(current => current ?? transcript.pendingApproval)
+    if (transcript.pendingClarify) setClarify(current => current ?? transcript.pendingClarify)
+
+    /**
+     * A turn that ended while the socket was down never reported it.
+     *
+     * `turnActive` is cleared by `turn_complete`, which arrives on the stream —
+     * so a turn that finished while the app was backgrounded, or during any
+     * other drop, cleared nothing. The transcript refetch brought the reply
+     * back, the composer went on offering Stop for a turn that was long over,
+     * and nothing ever took it away: the next `turn_complete` belongs to the
+     * *next* turn, so the button sat there until you started one.
+     *
+     * The refetch is the right place to settle it, because the refetch is what
+     * closes the gap the drop left. What it may not do is contradict the live
+     * stream, so this only speaks when the stream has nothing to say:
+     *
+     * - **Connected**, so events can reach us again. Mid-drop the honest answer
+     *   is still "a turn was running", and Stop is unusable anyway — cancelling
+     *   needs the socket.
+     * - **Nothing streaming**, so a reply arriving right now is not cut off.
+     * - **Nothing halted on you** — an approval or a question means the turn is
+     *   stopped but very much alive, waiting on an answer.
+     * - **No tool still running.** This is the one that matters: a tool can run
+     *   for minutes with no tokens, and that is exactly when Stop earns its
+     *   place. A drop marks in-flight tools `unknown` (§7.16), so a card left
+     *   `running` means the live stream still believes in it.
+     *
+     * Being wrong in this direction is cheap and self-correcting: if the turn
+     * really is still going, its next chunk or tool call sets this true again.
+     * Being wrong in the other direction is the stuck button.
+     */
+    if (
+      turnLooksSettled({
+        connectionState,
+        streaming: wasStreaming.current || tail.getSnapshot().streaming,
+        entries: entriesRef.current,
+        transcript
+      })
+    ) {
+      setTurnActive(false)
+    }
+  }, [transcript, sessionId, connectionState, tail])
+
+  /**
+   * A new socket means a gap to close, so the transcript is refetched.
+   *
+   * The backend's identity is the signal: `useConnection` builds a new one per
+   * dial, so this fires exactly when a reconnect has happened. It was implicit
+   * before — `backend` sat in the load effect's dependencies — and is spelled
+   * out here because the fetch no longer lives in an effect of its own, and a
+   * reconnect that quietly stopped refetching is a chat missing whatever
+   * happened while it was down.
+   */
+  const refetch = query.refetch
+  const dialledWith = useRef<AgentBackend | null>(null)
+
   useEffect(() => {
     if (!backend) return
 
-    let cancelled = false
+    const reconnected = dialledWith.current !== null && dialledWith.current !== backend
 
-    if (shownSession.current !== sessionId) setLoading(true)
+    dialledWith.current = backend
 
-    backend
-      .loadSession(sessionId)
-      .then(loaded => {
-        if (cancelled) return
-
-        shownSession.current = sessionId
-        setTranscript(loaded)
-        // Keep the existing array when the content is the same. A reload is
-        // routine — every reconnect refetches, because the delta stream is not
-        // resumable (§5.4) — and handing the list a new array of identical rows
-        // makes it re-key and jump to the top, throwing away wherever you were
-        // reading for no gain.
-        const restored = withCachedImages(sessionId, loaded.entries)
-
-        setEntries(current => (sameEntries(current, restored) ? current : restored))
-        setUsage(loaded.usage)
-        setLoadError(null)
-
-        // An approval raised while the app was closed has no live event left to
-        // deliver it — the notification is the only reason you are here, and the
-        // snapshot is the only place it still exists. Never clobber a live one:
-        // the socket is more current than the load it raced.
-        if (loaded.pendingApproval) setApproval(current => current ?? loaded.pendingApproval)
-        if (loaded.pendingClarify) setClarify(current => current ?? loaded.pendingClarify)
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setLoadError(cause instanceof Error ? cause.message : String(cause))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [backend, sessionId, reloadNonce])
+    if (reconnected) void refetch()
+  }, [backend, refetch])
 
 
 /** Seal the streaming tail into a settled entry. */
@@ -169,14 +254,19 @@ export function useSessionStream(
         // check, only a redundant append is skipped.
         const lastMessage = [...current].reverse().find(entry => entry.kind === 'message')
 
-        if (text && lastMessage?.kind === 'message' && lastMessage.role === 'agent' && lastMessage.text === text) {
+        // Compared trimmed on both sides, and stored trimmed below, so the two
+        // halves agree. They did not: the guard tested the trimmed tail while
+        // the row it had appended a moment earlier held the *untrimmed* one, so
+        // a reply ending in the newline a model almost always ends on failed
+        // its own check and sealed a second copy of itself.
+        if (text && lastMessage?.kind === 'message' && lastMessage.role === 'agent' && lastMessage.text.trim() === text) {
           return current
         }
 
         return [
           ...current,
-          ...(thinking ? [{ kind: 'thinking' as const, id: `think-${at}`, text: settled.thinking, at }] : []),
-          ...(text ? [{ kind: 'message' as const, id: `agent-${at}`, role: 'agent' as const, text: settled.text, at }] : [])
+          ...(thinking ? [{ kind: 'thinking' as const, id: `think-${at}`, text: thinking, at }] : []),
+          ...(text ? [{ kind: 'message' as const, id: `agent-${at}`, role: 'agent' as const, text, at }] : [])
         ]
       })
     }
@@ -195,6 +285,14 @@ export function useSessionStream(
           wasStreaming.current = true
           setTurnActive(true)
           tail.appendText(update.text)
+          break
+
+        // The message so far, restated. Replaces the tail rather than extending
+        // it — see `agent_message_snapshot` in the domain union.
+        case 'agent_message_snapshot':
+          wasStreaming.current = true
+          setTurnActive(true)
+          tail.setText(update.text)
           break
 
         case 'agent_thought_chunk':
@@ -290,12 +388,42 @@ export function useSessionStream(
     )
   }, [connectionState, tail])
 
+  /**
+   * Messages already handed to `dispatch`, by id.
+   *
+   * `setOutbox([])` below does not take effect until the next render, so the
+   * drain effect could run a second time — on a re-render, or on React's own
+   * double-invocation in development — still holding the array it had just
+   * cleared, and send every queued message twice. A ref settles it inside the
+   * same tick the send is made in.
+   *
+   * Never cleared: ids are minted per message from the clock, so this only
+   * grows by what the user actually typed while offline.
+   */
+  const sent = useRef(new Set<string>())
+
   // --- Outbox drain -------------------------------------------------------
   useEffect(() => {
     if (connectionState !== 'open' || !backend || outbox.length === 0) return
 
-    const queued = outbox
+    const queued = outbox.filter(message => !sent.current.has(message.id))
+
     setOutbox([])
+
+    if (queued.length === 0) return
+
+    for (const message of queued) sent.current.add(message.id)
+
+    // Put back any bubble the reconnect's transcript refetch took with it, so
+    // the message is on screen while it goes out rather than reappearing a
+    // reload later. Appended at the end, which is where it belongs: it is the
+    // newest thing said.
+    setEntries(current => {
+      const known = new Set(current.map(entry => entry.id))
+      const missing = queued.filter(message => !known.has(message.id))
+
+      return missing.length === 0 ? current : [...current, ...missing.map(bubbleFor)]
+    })
 
     for (const message of queued) {
       void dispatch(backend, sessionId, message, setEntries)
@@ -310,22 +438,9 @@ export function useSessionStream(
       if (!trimmed && images.length === 0) return
 
       const at = Date.now()
-      const message: Outgoing = { text: trimmed, images }
+      const message: Outgoing = { id: entryIdFor(images, at), at, text: trimmed, images }
 
-      setEntries(current => [
-        ...current,
-        {
-          kind: 'message',
-          id: entryIdFor(message, at),
-          role: 'user',
-          text: trimmed,
-          at,
-          // Shown from the picked file straight away. The names are provisional
-          // until the agent answers with what it filed them under — see
-          // `dispatch`, which rewrites them in place.
-          ...(images.length ? { images: images.map(image => ({ name: image.name, uri: image.uri })) } : {})
-        }
-      ])
+      setEntries(current => [...current, bubbleFor(message)])
 
       if (!backend || connectionState !== 'open') {
         setOutbox(current => [...current, message])
@@ -333,6 +448,7 @@ export function useSessionStream(
         return
       }
 
+      sent.current.add(message.id)
       void dispatch(backend, sessionId, message, setEntries)
     },
     [backend, connectionState, sessionId]
@@ -365,7 +481,7 @@ export function useSessionStream(
     [backend, clarify]
   )
 
-  const reload = useCallback(() => setReloadNonce(value => value + 1), [])
+  const reload = useCallback(() => void refetch(), [refetch])
 
   return {
     entries,
@@ -392,9 +508,34 @@ export function useSessionStream(
  *
  * Indexing would not do: a turn that lands while this one is in flight shifts
  * every position after it.
+ *
+ * The counter is what makes it unique. The clock alone is not: two messages can
+ * be composed in the same millisecond — an outbox that queued while offline is
+ * a normal way to get there — and once the id also decides which messages the
+ * drain has already sent, a collision stops being a duplicated React key and
+ * starts being a message silently never sent.
  */
-function entryIdFor(message: Outgoing, at: number): string {
-  return `user-${at}-${message.images.length}`
+let nextEntrySeq = 0
+
+function entryIdFor(images: PickedImage[], at: number): string {
+  return `user-${at}-${images.length}-${(nextEntrySeq += 1)}`
+}
+
+/** The bubble a queued or just-sent message is drawn in. */
+function bubbleFor(message: Outgoing): TranscriptEntry {
+  return {
+    kind: 'message',
+    id: message.id,
+    role: 'user',
+    text: message.text,
+    at: message.at,
+    // Shown from the picked file straight away. The names are provisional
+    // until the agent answers with what it filed them under — see `dispatch`,
+    // which rewrites them in place.
+    ...(message.images.length
+      ? { images: message.images.map(image => ({ name: image.name, uri: image.uri })) }
+      : {})
+  }
 }
 
 /**

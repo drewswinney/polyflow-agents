@@ -27,6 +27,14 @@ export interface StreamTail {
   subscribe(listener: () => void): () => void
   getSnapshot(): TailSnapshot
   appendText(chunk: string): void
+  /**
+   * Replace the streamed text with the whole message so far.
+   *
+   * For `message.interim`, which restates the message rather than extending it.
+   * Any buffered deltas are discarded: the snapshot already includes them, and
+   * letting them flush afterwards would append text the snapshot had covered.
+   */
+  setText(text: string): void
   appendThinking(chunk: string): void
   /** Flush anything buffered and stop streaming; returns the settled text. */
   finish(): TailSnapshot
@@ -40,8 +48,6 @@ export function createStreamTail(): StreamTail {
   let pendingThinking = ''
   let timer: ReturnType<typeof setTimeout> | null = null
   const listeners = new Set<() => void>()
-  /** Track the last appended text to deduplicate consecutive identical chunks. */
-  let lastAppendedText = ''
 
   const emit = () => {
     for (const listener of listeners) listener()
@@ -74,14 +80,13 @@ export function createStreamTail(): StreamTail {
     },
     getSnapshot: () => snapshot,
     appendText(chunk) {
-      // Skip if this chunk is identical to the last one appended (deduplication).
-      // This handles cases where the backend emits both message.delta and message.interim
-      // with the same content, or re-emits chunks during reconnection.
-      if (chunk === lastAppendedText) {
-        return
-      }
-      
-      lastAppendedText = chunk
+      // Every chunk counts. This used to drop any delta identical to the one
+      // before it, as a guess at the doubled reply — but a stream repeats
+      // itself constantly (" ", "\n", ", ", an indent, a common word), so the
+      // guess deleted real tokens out of the middle of the answer while the
+      // actual duplication went on happening. The doubling was `message.interim`
+      // being folded in as a delta; that is fixed where it is mapped, and
+      // `setText` below is what a restatement goes through now.
       pendingText += chunk
 
       if (!snapshot.streaming) {
@@ -92,6 +97,15 @@ export function createStreamTail(): StreamTail {
       }
 
       schedule()
+    },
+    setText(text) {
+      // Nothing new to show. Common: the deltas have already delivered exactly
+      // this, and repainting on every restatement would be churn for no change.
+      if (text === snapshot.text && !pendingText) return
+
+      pendingText = ''
+      snapshot = { ...snapshot, text, streaming: true }
+      emit()
     },
     appendThinking(chunk) {
       pendingThinking += chunk
@@ -117,7 +131,6 @@ export function createStreamTail(): StreamTail {
 
       pendingText = ''
       pendingThinking = ''
-      lastAppendedText = ''
       snapshot = EMPTY
       emit()
     },

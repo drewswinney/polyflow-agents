@@ -50,6 +50,16 @@ export interface Observable<T> {
  */
 export type SessionUpdate =
   | { kind: 'agent_message_chunk'; text: string }
+  /**
+   * The whole assistant message so far, not the piece that just arrived.
+   *
+   * Hermes emits `message.interim` alongside `message.delta` when
+   * `display.interim_assistant_messages` is on, and it carries the *cumulative*
+   * text. Folding it in as another chunk is what made every such reply render
+   * twice, so it is a distinct update that replaces the tail rather than
+   * extending it.
+   */
+  | { kind: 'agent_message_snapshot'; text: string }
   | { kind: 'agent_thought_chunk'; text: string }
   | { kind: 'tool_call'; call: ToolCall }
   | { kind: 'tool_call_update'; id: string; status: ToolStatus; output?: string }

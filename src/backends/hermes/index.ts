@@ -15,6 +15,7 @@ import {
   type ConnectionState as GatewayConnectionState,
   type GatewayEvent,
   JsonRpcGatewayClient,
+  JsonRpcGatewayError,
   resolveGatewayWsUrl
 } from '@hermes/shared'
 
@@ -108,6 +109,32 @@ const IMAGE_ATTACH_TIMEOUT_MS = 120_000
 const IMPLIED_IMAGE_PROMPT = 'What do you see in this image?'
 
 /**
+ * How long the socket may sit silent before its liveness is checked.
+ *
+ * A phone loses a WebSocket without being told: a carrier NAT reaps an idle
+ * mapping, a wifi hop changes the path, the OS freezes the radio in background.
+ * None of those produce a close frame, so the client goes on believing it is
+ * connected while nothing can reach it — the chat that quietly stops updating
+ * and never comes back, because the redial only ever fires on a socket that
+ * announced its own death.
+ *
+ * Counted from the last frame *received*, so a busy session is never probed.
+ */
+const IDLE_PROBE_AFTER_MS = 45_000
+
+/** How often idleness is reassessed. Well under the window it guards. */
+const LIVENESS_TICK_MS = 15_000
+
+/**
+ * How long the liveness probe waits for an answer.
+ *
+ * Short on purpose: this is asked of a socket that has already been silent for
+ * a while, and the useful outcome is finding out quickly that it is dead. A
+ * live-but-slow host costs one redial, which reconnects.
+ */
+const LIVENESS_PROBE_TIMEOUT_MS = 10_000
+
+/**
  * How long a password login is assumed good for.
  *
  * Deliberately short of any real session lifetime: the cost of being wrong is
@@ -185,6 +212,12 @@ export class HermesBackend implements AgentBackend {
    */
   private lastLoginAt = 0
 
+  /** When a frame last arrived from the host. The liveness watchdog reads it. */
+  private lastFrameAt = 0
+  private livenessTimer: ReturnType<typeof setInterval> | null = null
+  /** True while a probe is outstanding, so ticks do not pile them up. */
+  private probing = false
+
   constructor(config: HermesBackendConfig) {
     this.config = config
     this.rest = new HermesRest(config)
@@ -235,12 +268,16 @@ export class HermesBackend implements AgentBackend {
 
     await this.gateway.connect(wsUrl)
 
+    this.lastFrameAt = Date.now()
+    this.startLivenessWatch()
+
     // Not awaited: a slow or unavailable config read must not hold up the
     // socket. The countdown is absent until it lands, never wrong.
     void this.loadApprovalTimeout()
   }
 
   disconnect(): void {
+    this.stopLivenessWatch()
     this.detachGateway?.()
     this.detachGateway = null
     this.gateway.close()
@@ -387,8 +424,62 @@ export class HermesBackend implements AgentBackend {
     }
   }
 
+  // --- Liveness -----------------------------------------------------------
+
+  /**
+   * Notice a socket that died without saying so, and report it as closed.
+   *
+   * The vendored gateway client has no keepalive and this file does not add one
+   * to it — upstream stays unmodified. Instead: if nothing has arrived for a
+   * while, ask the host something cheap. An answer of *any* kind proves the
+   * socket carries traffic, an error reply included — the point is the round
+   * trip, not the result. Silence past the probe timeout means the connection
+   * is gone, and calling `disconnect()` puts the state machine into `closed`,
+   * which is what the redial watcher in `useConnection` is already waiting for.
+   */
+  private startLivenessWatch(): void {
+    this.stopLivenessWatch()
+
+    this.livenessTimer = setInterval(() => {
+      void this.checkLiveness()
+    }, LIVENESS_TICK_MS)
+  }
+
+  private stopLivenessWatch(): void {
+    if (this.livenessTimer !== null) clearInterval(this.livenessTimer)
+
+    this.livenessTimer = null
+    this.probing = false
+  }
+
+  private async checkLiveness(): Promise<void> {
+    if (this.probing || this.state.get() !== 'open') return
+    if (Date.now() - this.lastFrameAt < IDLE_PROBE_AFTER_MS) return
+
+    this.probing = true
+
+    try {
+      await this.gateway.request('config.get', { key: APPROVAL_MODE_KEY }, LIVENESS_PROBE_TIMEOUT_MS)
+      this.lastFrameAt = Date.now()
+    } catch (cause) {
+      // The host answering "no such key", or anything else it has an opinion
+      // about, is a healthy socket. Only a timeout or a send that could not
+      // leave says the connection is gone.
+      if (cause instanceof JsonRpcGatewayError) {
+        this.lastFrameAt = Date.now()
+      } else if (this.state.get() === 'open') {
+        this.disconnect()
+      }
+    } finally {
+      this.probing = false
+    }
+  }
+
   private dispatch(event: GatewayEvent): void {
     this.mapContext.now = Date.now()
+
+    // Any frame at all is proof of life, whatever it turns out to say.
+    this.lastFrameAt = this.mapContext.now
 
     // Activity and Logs are agent-scoped: every event reaches them, including
     // ones for a session nobody has open.

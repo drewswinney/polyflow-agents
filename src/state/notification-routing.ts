@@ -20,10 +20,12 @@
 import * as Notifications from 'expo-notifications'
 import { router } from 'expo-router'
 import { useEffect, useRef } from 'react'
+import { AppState } from 'react-native'
 
 import { ensureNotificationHandler } from '@/platform/notifications'
 
 import { useAgents } from './agents'
+import { forgetAnnouncement, markAnnounced, notificationKey } from './notification-ledger'
 
 interface NotificationPayload {
   agentId?: string
@@ -76,6 +78,15 @@ export function useNotificationRouting(): void {
       handle(response.notification.request.content.data as NotificationPayload)
     })
 
+    // Everything the host delivers is written into the ledger, so the socket
+    // does not announce it a second time when the app next wakes and sees the
+    // same happening on the live stream. That second banner — the same finished
+    // turn, hours later, at whatever moment the app happened to reconnect — is
+    // what made notifications look random.
+    const received = Notifications.addNotificationReceivedListener(notification => {
+      remember(notification.request.content.data as NotificationPayload)
+    })
+
     if (!coldStartHandled.current) {
       coldStartHandled.current = true
 
@@ -84,6 +95,75 @@ export function useNotificationRouting(): void {
       })
     }
 
-    return () => subscription.remove()
+    return () => {
+      subscription.remove()
+      received.remove()
+    }
   }, [agents, select, selectedId])
+
+  /**
+   * Read the tray on every wake, and treat what is in it as already said.
+   *
+   * The received-listener above only fires for a push that lands while this
+   * process is alive. The case that actually produces the duplicate is the
+   * other one: the phone was in a pocket, the host pushed, and the app was
+   * asleep or gone. Nothing told it. But the banner is still sitting in
+   * Notification Center, which is a record of what the person has already been
+   * shown — so it is read back on launch and on every return to the app.
+   */
+  useEffect(() => {
+    const seed = () => {
+      void Notifications.getPresentedNotificationsAsync()
+        .then(presented => {
+          for (const notification of presented) {
+            remember(notification.request.content.data as NotificationPayload)
+          }
+        })
+        .catch(() => {
+          // Unsupported on old Android, and refusable anywhere. A ledger that
+          // could not be seeded costs a repeat, which is what we had before.
+        })
+    }
+
+    seed()
+
+    const subscription = AppState.addEventListener('change', next => {
+      if (next === 'active') seed()
+    })
+
+    return () => subscription.remove()
+  }, [])
 }
+
+/**
+ * Record a delivered notification against the same key the socket would use.
+ *
+ * A blocking notification is keyed by its request id, which every path carries
+ * and which is the reason a still-pending approval no longer rings on each
+ * reconnect. `approval` and `clarify` are both written because the payload's
+ * `kind` does not distinguish them — it collapses to `approval` for routing —
+ * and a request id is unique either way, so writing both cannot suppress
+ * anything it did not describe.
+ */
+function remember(payload: NotificationPayload | null | undefined): void {
+  if (!payload) return
+
+  if (payload.requestId) {
+    // Answered elsewhere. The banner exists to be cleared, not to stand in for
+    // a question that is still open.
+    if (payload.resolved) {
+      forgetAnnouncement(notificationKey('approval', payload.requestId))
+      forgetAnnouncement(notificationKey('clarify', payload.requestId))
+
+      return
+    }
+
+    markAnnounced(notificationKey('approval', payload.requestId))
+    markAnnounced(notificationKey('clarify', payload.requestId))
+  }
+
+  if (payload.kind === 'complete' && payload.sessionId && !payload.resolved) {
+    markAnnounced(notificationKey('complete', payload.sessionId))
+  }
+}
+
