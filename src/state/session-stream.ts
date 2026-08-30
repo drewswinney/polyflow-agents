@@ -33,6 +33,7 @@ import type { PickedImage } from '@/platform/image-attachments'
 import { cacheSentImage, cachedImageUri } from './attachment-cache'
 import { useTranscript } from './queries'
 import { createStreamTail, type StreamTail } from './stream-tail'
+import { turnLooksSettled } from './turn-settled'
 
 /**
  * A message waiting on a reconnect, images and all.
@@ -96,6 +97,17 @@ export function useSessionStream(
   const tail = useMemo(() => createStreamTail(), [sessionId])
   const wasStreaming = useRef(false)
 
+  /**
+   * The rows, readable from an effect that must not re-run when they change.
+   *
+   * The transcript sync below asks whether a tool is still running before it
+   * settles `turnActive`. Depending on `entries` for that would re-run the
+   * whole sync on every token that seals, which is both wasteful and wrong —
+   * the sync exists to fold in a *fetch*, not to react to the stream.
+   */
+  const entriesRef = useRef<TranscriptEntry[]>(entries)
+  entriesRef.current = entries
+
   useEffect(() => () => tail.dispose(), [tail])
 
   // --- Transcript load ----------------------------------------------------
@@ -156,7 +168,47 @@ export function useSessionStream(
     // the socket is more current than the load it raced.
     if (transcript.pendingApproval) setApproval(current => current ?? transcript.pendingApproval)
     if (transcript.pendingClarify) setClarify(current => current ?? transcript.pendingClarify)
-  }, [transcript, sessionId])
+
+    /**
+     * A turn that ended while the socket was down never reported it.
+     *
+     * `turnActive` is cleared by `turn_complete`, which arrives on the stream —
+     * so a turn that finished while the app was backgrounded, or during any
+     * other drop, cleared nothing. The transcript refetch brought the reply
+     * back, the composer went on offering Stop for a turn that was long over,
+     * and nothing ever took it away: the next `turn_complete` belongs to the
+     * *next* turn, so the button sat there until you started one.
+     *
+     * The refetch is the right place to settle it, because the refetch is what
+     * closes the gap the drop left. What it may not do is contradict the live
+     * stream, so this only speaks when the stream has nothing to say:
+     *
+     * - **Connected**, so events can reach us again. Mid-drop the honest answer
+     *   is still "a turn was running", and Stop is unusable anyway — cancelling
+     *   needs the socket.
+     * - **Nothing streaming**, so a reply arriving right now is not cut off.
+     * - **Nothing halted on you** — an approval or a question means the turn is
+     *   stopped but very much alive, waiting on an answer.
+     * - **No tool still running.** This is the one that matters: a tool can run
+     *   for minutes with no tokens, and that is exactly when Stop earns its
+     *   place. A drop marks in-flight tools `unknown` (§7.16), so a card left
+     *   `running` means the live stream still believes in it.
+     *
+     * Being wrong in this direction is cheap and self-correcting: if the turn
+     * really is still going, its next chunk or tool call sets this true again.
+     * Being wrong in the other direction is the stuck button.
+     */
+    if (
+      turnLooksSettled({
+        connectionState,
+        streaming: wasStreaming.current || tail.getSnapshot().streaming,
+        entries: entriesRef.current,
+        transcript
+      })
+    ) {
+      setTurnActive(false)
+    }
+  }, [transcript, sessionId, connectionState, tail])
 
   /**
    * A new socket means a gap to close, so the transcript is refetched.
