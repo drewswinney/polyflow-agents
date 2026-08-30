@@ -31,6 +31,7 @@ import type {
 import type { PickedImage } from '@/platform/image-attachments'
 
 import { cacheSentImage, cachedImageUri } from './attachment-cache'
+import { useTranscript } from './queries'
 import { createStreamTail, type StreamTail } from './stream-tail'
 
 /**
@@ -73,13 +74,11 @@ export interface SessionStream {
 
 export function useSessionStream(
   backend: AgentBackend | null,
+  scope: string,
   sessionId: SessionId,
   connectionState: ConnectionState
 ): SessionStream {
-  const [transcript, setTranscript] = useState<SessionTranscript | null>(null)
   const [entries, setEntries] = useState<TranscriptEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState<string | null>(null)
   const [usage, setUsage] = useState<Usage | null>(null)
   const [approval, setApproval] = useState<PermissionRequest | null>(null)
   const [clarify, setClarify] = useState<ClarifyRequest | null>(null)
@@ -93,71 +92,94 @@ export function useSessionStream(
    * long tool run is exactly when cancelling matters most.
    */
   const [turnActive, setTurnActive] = useState(false)
-  const [reloadNonce, setReloadNonce] = useState(0)
 
   const tail = useMemo(() => createStreamTail(), [sessionId])
   const wasStreaming = useRef(false)
 
-  /**
-   * The session whose transcript is already on screen.
-   *
-   * A reload is routine — every reconnect refetches, because the delta stream
-   * is not resumable (§5.4) — and it must not blank what is already rendered.
-   * Chat swaps the whole list for a spinner while `loading` is true, so a
-   * reconnect used to tear the transcript down and rebuild it at the bottom,
-   * losing the read position for a refetch that usually returns the same rows.
-   * Only the first load of a session is worth showing as loading.
-   */
-  const shownSession = useRef<SessionId | null>(null)
-
   useEffect(() => () => tail.dispose(), [tail])
 
   // --- Transcript load ----------------------------------------------------
-  // Re-fetched on every reconnect too: the delta stream is not resumable, so
-  // the transcript is the only thing that closes a gap (§5.4).
+  /**
+   * Cached across mounts, refetched on every one.
+   *
+   * Both halves matter and they pull in opposite directions. Reopening a chat
+   * used to start from nothing — the fetch lived in an effect here and its
+   * result died with the screen — so the back gesture, the sidebar and a
+   * notification all led to a spinner over a conversation the app had rendered
+   * seconds earlier. The query cache outlives the screen, so what you were
+   * reading is on screen before the network is asked anything.
+   *
+   * And it is still asked, every time. The delta stream is not resumable
+   * (§5.4), so refetching is the only thing that closes the gap a disconnect
+   * leaves; the cache paints *during* that fetch and never in place of it. See
+   * `useTranscript`, where the two options that guarantee it live.
+   */
+  const query = useTranscript(scope, backend, sessionId)
+  const transcript = query.data ?? null
+
+  /**
+   * Loading is "nothing to show", not "nothing in flight".
+   *
+   * A refetch with a cached transcript behind it must not raise the spinner:
+   * chat swaps the whole list out while this is true, and a reconnect — which
+   * refetches by design — would tear the transcript down and rebuild it at the
+   * bottom, losing the read position for a fetch that usually returns the same
+   * rows. `isPending` is false the moment there is a cached answer, which is
+   * exactly the distinction wanted.
+   */
+  const loading = query.isPending
+  const loadError = query.error ? (query.error instanceof Error ? query.error.message : String(query.error)) : null
+
+  /**
+   * Fold a loaded transcript into what is on screen.
+   *
+   * Runs when the fetched data changes identity — which, thanks to React
+   * Query's structural sharing, a refetch returning the same rows does not do
+   * at all.
+   */
+  useEffect(() => {
+    if (!transcript) return
+
+    // Keep the existing array when the content is the same. A reload is
+    // routine — every reconnect refetches, because the delta stream is not
+    // resumable (§5.4) — and handing the list a new array of identical rows
+    // makes it re-key and jump to the top, throwing away wherever you were
+    // reading for no gain.
+    const restored = withCachedImages(sessionId, transcript.entries)
+
+    setEntries(current => (sameEntries(current, restored) ? current : restored))
+    setUsage(transcript.usage)
+
+    // An approval raised while the app was closed has no live event left to
+    // deliver it — the notification is the only reason you are here, and the
+    // snapshot is the only place it still exists. Never clobber a live one:
+    // the socket is more current than the load it raced.
+    if (transcript.pendingApproval) setApproval(current => current ?? transcript.pendingApproval)
+    if (transcript.pendingClarify) setClarify(current => current ?? transcript.pendingClarify)
+  }, [transcript, sessionId])
+
+  /**
+   * A new socket means a gap to close, so the transcript is refetched.
+   *
+   * The backend's identity is the signal: `useConnection` builds a new one per
+   * dial, so this fires exactly when a reconnect has happened. It was implicit
+   * before — `backend` sat in the load effect's dependencies — and is spelled
+   * out here because the fetch no longer lives in an effect of its own, and a
+   * reconnect that quietly stopped refetching is a chat missing whatever
+   * happened while it was down.
+   */
+  const refetch = query.refetch
+  const dialledWith = useRef<AgentBackend | null>(null)
+
   useEffect(() => {
     if (!backend) return
 
-    let cancelled = false
+    const reconnected = dialledWith.current !== null && dialledWith.current !== backend
 
-    if (shownSession.current !== sessionId) setLoading(true)
+    dialledWith.current = backend
 
-    backend
-      .loadSession(sessionId)
-      .then(loaded => {
-        if (cancelled) return
-
-        shownSession.current = sessionId
-        setTranscript(loaded)
-        // Keep the existing array when the content is the same. A reload is
-        // routine — every reconnect refetches, because the delta stream is not
-        // resumable (§5.4) — and handing the list a new array of identical rows
-        // makes it re-key and jump to the top, throwing away wherever you were
-        // reading for no gain.
-        const restored = withCachedImages(sessionId, loaded.entries)
-
-        setEntries(current => (sameEntries(current, restored) ? current : restored))
-        setUsage(loaded.usage)
-        setLoadError(null)
-
-        // An approval raised while the app was closed has no live event left to
-        // deliver it — the notification is the only reason you are here, and the
-        // snapshot is the only place it still exists. Never clobber a live one:
-        // the socket is more current than the load it raced.
-        if (loaded.pendingApproval) setApproval(current => current ?? loaded.pendingApproval)
-        if (loaded.pendingClarify) setClarify(current => current ?? loaded.pendingClarify)
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setLoadError(cause instanceof Error ? cause.message : String(cause))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [backend, sessionId, reloadNonce])
+    if (reconnected) void refetch()
+  }, [backend, refetch])
 
 
 /** Seal the streaming tail into a settled entry. */
@@ -407,7 +429,7 @@ export function useSessionStream(
     [backend, clarify]
   )
 
-  const reload = useCallback(() => setReloadNonce(value => value + 1), [])
+  const reload = useCallback(() => void refetch(), [refetch])
 
   return {
     entries,

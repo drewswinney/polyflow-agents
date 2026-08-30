@@ -61,7 +61,7 @@ export default function ChatScreen() {
    * it is the screen in front of you.
    */
   const stale = useAgentScopedRoute()
-  const stream = useSessionStream(stale ? null : backend, id, state)
+  const stream = useSessionStream(stale ? null : backend, agent.scope ?? '', id, state)
   const streaming = useIsStreaming(stream.tail)
   // The composer offers Stop for the whole turn, not just while tokens land: a
   // tool can run for minutes with nothing streaming, and that is precisely when
