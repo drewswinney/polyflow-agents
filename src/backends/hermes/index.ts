@@ -54,6 +54,7 @@ import {
 } from '@/domain'
 
 import { mapGatewayEvent, type MapContext, toEventRecord } from './event-map'
+import { createHeldEvents } from './held-events'
 import { toSearchHit, toSessionSummary, toTranscriptEntries, usableTitle } from './normalize'
 import { HermesRest, type HermesRestConfig, HermesRestError } from './rest'
 
@@ -155,24 +156,6 @@ const LIVENESS_FOREGROUND_TIMEOUT_MS = 4_000
  */
 const LOGIN_REUSE_MS = 300_000
 
-/**
- * How many events may wait on a session id that has not been learned yet.
- *
- * Only ever filled during a resume round trip, so a handful is the realistic
- * depth and this is a ceiling against a host that streams hard into a resume
- * that never answers — not a buffer anything is expected to reach.
- */
-const HELD_EVENT_LIMIT = 200
-
-/**
- * How long a held event may still be replayed.
- *
- * Past this it is not a chunk arriving a moment early, it is a chunk from a
- * turn the transcript refetch has already covered — and replaying it would
- * append text the settled rows already carry.
- */
-const HELD_EVENT_TTL_MS = 30_000
-
 /** Hermes reports nearly everything (§4.1). */
 export const HERMES_CAPABILITIES: Capabilities = {
   sessions: { search: true, rename: true, pin: true },
@@ -225,10 +208,9 @@ export class HermesBackend implements AgentBackend {
   /**
    * Events that arrived naming a runtime id this client cannot translate yet.
    *
-   * See `dispatch`. Not readonly: `flushHeld` swaps the array rather than
-   * splicing it, so a replay cannot be re-entered by the sinks it is feeding.
+   * See `dispatch`, and `held-events.ts` for what it keeps and for how long.
    */
-  private held: { event: GatewayEvent; at: number }[] = []
+  private readonly held = createHeldEvents<GatewayEvent>()
   /**
    * Approvals recovered from a resume snapshot, by session.
    *
@@ -328,7 +310,7 @@ export class HermesBackend implements AgentBackend {
     // Anything still waiting was waiting on a resume over the socket that has
     // just gone. The reconnect refetches the transcript, which is what closes
     // that gap now (§5.4).
-    this.held = []
+    this.held.clear()
   }
 
   /**
@@ -565,7 +547,7 @@ export class HermesBackend implements AgentBackend {
     // Held rather than dropped, and only while a resume is actually in flight:
     // outside that window an unknown id really is a session nobody has open,
     // which is what the event sinks above are for.
-    if (this.resuming.size > 0) this.holdForResume(event)
+    if (this.resuming.size > 0) this.held.hold(event, this.mapContext.now)
   }
 
   /**
@@ -589,39 +571,34 @@ export class HermesBackend implements AgentBackend {
     return true
   }
 
-  /** Queue an event whose session id cannot be translated yet. */
-  private holdForResume(event: GatewayEvent): void {
-    this.held.push({ event, at: Date.now() })
-
-    // A bound, because this queue is fed by the host and drained by a round
-    // trip that may never come back. Oldest first: on a turn that is mid-reply
-    // the newest chunks are the ones worth keeping.
-    if (this.held.length > HELD_EVENT_LIMIT) this.held.splice(0, this.held.length - HELD_EVENT_LIMIT)
-  }
-
   /**
    * Replay whatever was waiting on a session id that has just been learned.
    *
-   * Anything still unroutable is kept only while it could plausibly still
-   * belong to a resume in flight; past that it is stale and goes. Replay runs
-   * through `routeToSession` alone — the event sinks were served on the way in,
+   * Through `routeToSession` alone: the event sinks were served on the way in,
    * and Activity must not show the same row twice.
    */
   private flushHeld(): void {
-    if (this.held.length === 0) return
+    this.held.flush(
+      (event, at) => {
+        if (!event.session_id) return true
 
-    const cutoff = Date.now() - HELD_EVENT_TTL_MS
-    const waiting = this.held
+        // Map against the clock the event *arrived* on. `mapContext.now` is
+        // what a tool's duration and an approval's deadline are measured from,
+        // and replaying against the current time would silently charge them
+        // for however long the resume took.
+        const resumed = this.mapContext.now
 
-    this.held = []
+        this.mapContext.now = at
 
-    for (const { event, at } of waiting) {
-      const runtimeId = event.session_id
-
-      if (!runtimeId) continue
-      if (this.routeToSession(event, runtimeId)) continue
-      if (at >= cutoff && this.resuming.size > 0) this.held.push({ event, at })
-    }
+        try {
+          return this.routeToSession(event, event.session_id)
+        } finally {
+          this.mapContext.now = resumed
+        }
+      },
+      Date.now(),
+      this.resuming.size > 0
+    )
   }
 
   // --- Sessions -----------------------------------------------------------
