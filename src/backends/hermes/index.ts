@@ -289,6 +289,7 @@ export class HermesBackend implements AgentBackend {
 
     this.lastFrameAt = Date.now()
     this.startLivenessWatch()
+    this.resumeWatchedSessions()
 
     // Not awaited: a slow or unavailable config read must not hold up the
     // socket. The countdown is absent until it lands, never wrong.
@@ -384,6 +385,22 @@ export class HermesBackend implements AgentBackend {
     this.resuming.set(stored, pending)
 
     return pending
+  }
+
+  /**
+   * Give every session still on screen a runtime id for *this* connection.
+   *
+   * Runtime ids belong to the socket that minted them and `disconnect` drops
+   * them, so a reconnect leaves each open chat subscribed under a stored id
+   * the host will never name. This is what rebuilds the mapping, and it runs
+   * on the way up rather than on subscribe because the subscription is
+   * normally already in place by then — the screen outlives the socket.
+   *
+   * Unawaited and individually caught: a session that will not resume must not
+   * hold up the connection or take its neighbours down with it.
+   */
+  private resumeWatchedSessions(): void {
+    for (const id of this.sinks.keys()) void this.runtimeIdFor(id).catch(() => undefined)
   }
 
   private rememberRuntime(stored: SessionId, runtime: string): void {
@@ -774,7 +791,19 @@ export class HermesBackend implements AgentBackend {
   subscribe(id: SessionId, sink: (u: SessionUpdate) => void): Unsubscribe {
     // Resolve the runtime id now rather than at first prompt, so a turn started
     // from elsewhere — a cron job, the desktop app — streams into this view too.
-    void this.runtimeIdFor(id).catch(() => undefined)
+    //
+    // Only when there is a socket to ask over. `useConnection` publishes a new
+    // backend to React *before* it dials, so on a reconnect this runs against a
+    // gateway that is not open yet: the resume threw "not connected", the throw
+    // was swallowed here, and nothing ever asked again. The session then had no
+    // runtime id for the whole life of that connection, so every event named an
+    // id that matched no sink and the chat went permanently silent — a turn
+    // still running showed no thinking indicator, no tokens and no completion,
+    // and only reopening the screen brought it back.
+    //
+    // `connect` re-mints for everything being watched, so a subscription made
+    // before the socket is up is picked up there rather than lost here.
+    if (this.state.get() === 'open') void this.runtimeIdFor(id).catch(() => undefined)
 
     let sinks = this.sinks.get(id)
 
