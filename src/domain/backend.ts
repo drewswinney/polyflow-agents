@@ -78,6 +78,23 @@ export interface AgentBackend {
   disconnect(): void
   readonly connectionState: Observable<ConnectionState>
 
+  /**
+   * Ask, right now, whether the socket still carries traffic.
+   *
+   * Optional because it only means something to a backend holding a real
+   * duplex connection — the mock and the OpenAI-compatible shim have nothing
+   * to probe. A backend that implements it must resolve once the answer is
+   * known and report a dead socket the same way a close frame would, by
+   * driving `connectionState` to `closed`; the caller reads the state, not the
+   * return.
+   *
+   * Exists because a phone loses a socket without being told, and the periodic
+   * watchdog that normally catches that cannot run while the app is frozen.
+   * Returning to the foreground is the moment the answer is both stale and
+   * wanted — see the AppState trigger in `useConnection`.
+   */
+  checkLiveness?(): Promise<void>
+
   // Sessions
   listSessions(query?: SessionQuery): Promise<SessionSummary[]>
   createSession(opts: NewSessionOptions): Promise<SessionId>

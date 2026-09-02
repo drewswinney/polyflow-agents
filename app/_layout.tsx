@@ -6,6 +6,7 @@ import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold } from '@expo-goog
 import { Outfit_500Medium } from '@expo-google-fonts/outfit'
 import { SpaceMono_400Regular, SpaceMono_700Bold } from '@expo-google-fonts/space-mono'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import Constants from 'expo-constants'
 import { useFonts } from 'expo-font'
 import { router, Stack, usePathname } from 'expo-router'
 import * as SplashScreen from 'expo-splash-screen'
@@ -19,6 +20,7 @@ import { useAgents, useSelectedAgentOrNull, useSelectedServerOrNull } from '@/st
 import { useNotificationRouting } from '@/state/notification-routing'
 import { useNotificationTap } from '@/state/notification-tap'
 import { useSessions } from '@/state/queries'
+import { restoreQueryCache, startPersistingQueryCache } from '@/state/query-cache-persistence'
 import { useSidebar } from '@/state/sidebar'
 import { Sidebar } from '@/ui/components/Sidebar'
 import { useIsDarkMode } from '@/state/theme-prefs'
@@ -49,6 +51,16 @@ const FONT_TIMEOUT_MS = 4_000
 // install and lands on onboarding, which is recoverable and on screen. A
 // splash screen is neither.
 const STARTUP_DEADLINE_MS = 8_000
+
+/**
+ * What busts the persisted query cache.
+ *
+ * A release is the most likely reason a stored transcript no longer matches
+ * the shape the app expects, so the version does the work and nobody has to
+ * remember. `dev` when there is no manifest, which is Metro — where the schema
+ * constant in `query-cache-policy` is the one to bump.
+ */
+const APP_VERSION = Constants.expoConfig?.version ?? 'dev'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -82,6 +94,28 @@ export default function RootLayout() {
     void hydrate()
   }, [hydrate])
 
+  /**
+   * Bring back what was on screen last time, then keep it up to date.
+   *
+   * Gated on rather than fired and forgotten, because the case this exists for
+   * is a cold start that lands *straight* in a chat — a notification tap, a
+   * deep link — and a restore that arrives after that screen has mounted has
+   * already missed it. It carries its own timeout so the term always settles;
+   * `STARTUP_DEADLINE_MS` stays the backstop rather than the mechanism.
+   */
+  const [cacheRestored, setCacheRestored] = useState(false)
+
+  useEffect(() => {
+    let stop: (() => void) | undefined
+
+    void restoreQueryCache(queryClient, APP_VERSION).finally(() => {
+      stop = startPersistingQueryCache(queryClient, APP_VERSION)
+      setCacheRestored(true)
+    })
+
+    return () => stop?.()
+  }, [])
+
   const [fontsTimedOut, setFontsTimedOut] = useState(false)
   const [deadlinePassed, setDeadlinePassed] = useState(false)
 
@@ -100,7 +134,7 @@ export default function RootLayout() {
   const fontsSettled = fontsLoaded || fontError !== null || fontsTimedOut
   // The deadline is an override, not another term: it opens the gate even when
   // something upstream never answered at all.
-  const ready = (fontsSettled && hydrated) || deadlinePassed
+  const ready = (fontsSettled && hydrated && cacheRestored) || deadlinePassed
 
   // The navigator's own background sits behind every screen, so it has to track
   // the theme too; left light it showed as a white flash between screens.

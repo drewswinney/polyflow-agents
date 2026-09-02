@@ -54,6 +54,7 @@ import {
 } from '@/domain'
 
 import { mapGatewayEvent, type MapContext, toEventRecord } from './event-map'
+import { createHeldEvents } from './held-events'
 import { toSearchHit, toSessionSummary, toTranscriptEntries, usableTitle } from './normalize'
 import { HermesRest, type HermesRestConfig, HermesRestError } from './rest'
 
@@ -135,6 +136,18 @@ const LIVENESS_TICK_MS = 15_000
 const LIVENESS_PROBE_TIMEOUT_MS = 10_000
 
 /**
+ * How long the *foreground* liveness probe waits.
+ *
+ * Shorter than the watchdog's, because the two are asked under different
+ * circumstances. The watchdog runs unprompted and can afford to be generous;
+ * this one runs because someone has just opened the app and is looking at a
+ * chat that has to start working. Being wrong costs one redial onto a socket
+ * that was merely slow, which reconnects; being slow costs the person the
+ * whole wait.
+ */
+const LIVENESS_FOREGROUND_TIMEOUT_MS = 4_000
+
+/**
  * How long a password login is assumed good for.
  *
  * Deliberately short of any real session lifetime: the cost of being wrong is
@@ -192,6 +205,12 @@ export class HermesBackend implements AgentBackend {
   private readonly runtimeByStored = new Map<SessionId, string>()
   private readonly storedByRuntime = new Map<string, SessionId>()
   private readonly resuming = new Map<SessionId, Promise<string>>()
+  /**
+   * Events that arrived naming a runtime id this client cannot translate yet.
+   *
+   * See `dispatch`, and `held-events.ts` for what it keeps and for how long.
+   */
+  private readonly held = createHeldEvents<GatewayEvent>()
   /**
    * Approvals recovered from a resume snapshot, by session.
    *
@@ -270,6 +289,7 @@ export class HermesBackend implements AgentBackend {
 
     this.lastFrameAt = Date.now()
     this.startLivenessWatch()
+    this.resumeWatchedSessions()
 
     // Not awaited: a slow or unavailable config read must not hold up the
     // socket. The countdown is absent until it lands, never wrong.
@@ -288,6 +308,10 @@ export class HermesBackend implements AgentBackend {
     this.runtimeByStored.clear()
     this.storedByRuntime.clear()
     this.resuming.clear()
+    // Anything still waiting was waiting on a resume over the socket that has
+    // just gone. The reconnect refetches the transcript, which is what closes
+    // that gap now (§5.4).
+    this.held.clear()
   }
 
   /**
@@ -363,9 +387,28 @@ export class HermesBackend implements AgentBackend {
     return pending
   }
 
+  /**
+   * Give every session still on screen a runtime id for *this* connection.
+   *
+   * Runtime ids belong to the socket that minted them and `disconnect` drops
+   * them, so a reconnect leaves each open chat subscribed under a stored id
+   * the host will never name. This is what rebuilds the mapping, and it runs
+   * on the way up rather than on subscribe because the subscription is
+   * normally already in place by then — the screen outlives the socket.
+   *
+   * Unawaited and individually caught: a session that will not resume must not
+   * hold up the connection or take its neighbours down with it.
+   */
+  private resumeWatchedSessions(): void {
+    for (const id of this.sinks.keys()) void this.runtimeIdFor(id).catch(() => undefined)
+  }
+
   private rememberRuntime(stored: SessionId, runtime: string): void {
     this.runtimeByStored.set(stored, runtime)
     this.storedByRuntime.set(runtime, stored)
+
+    // The mapping is the thing anything held was waiting for.
+    this.flushHeld()
   }
 
   /**
@@ -441,7 +484,7 @@ export class HermesBackend implements AgentBackend {
     this.stopLivenessWatch()
 
     this.livenessTimer = setInterval(() => {
-      void this.checkLiveness()
+      void this.probeLiveness()
     }, LIVENESS_TICK_MS)
   }
 
@@ -452,14 +495,29 @@ export class HermesBackend implements AgentBackend {
     this.probing = false
   }
 
-  private async checkLiveness(): Promise<void> {
+  /**
+   * Ask the socket whether it is still there, on demand (`AgentBackend`).
+   *
+   * Same probe the watchdog runs, with two differences that matter only when a
+   * person is waiting on the answer: it uses a shorter timeout, and it is
+   * allowed to skip the idle window's *tick*, not the window itself. A socket
+   * that has carried a frame within `IDLE_PROBE_AFTER_MS` is still taken at its
+   * word — a two-second trip out of the app must not cost a round trip — so
+   * this is free in the common case and only spends anything when the silence
+   * is already long enough to be suspicious.
+   */
+  checkLiveness(): Promise<void> {
+    return this.probeLiveness(LIVENESS_FOREGROUND_TIMEOUT_MS)
+  }
+
+  private async probeLiveness(timeoutMs: number = LIVENESS_PROBE_TIMEOUT_MS): Promise<void> {
     if (this.probing || this.state.get() !== 'open') return
     if (Date.now() - this.lastFrameAt < IDLE_PROBE_AFTER_MS) return
 
     this.probing = true
 
     try {
-      await this.gateway.request('config.get', { key: APPROVAL_MODE_KEY }, LIVENESS_PROBE_TIMEOUT_MS)
+      await this.gateway.request('config.get', { key: APPROVAL_MODE_KEY }, timeoutMs)
       this.lastFrameAt = Date.now()
     } catch (cause) {
       // The host answering "no such key", or anything else it has an opinion
@@ -483,8 +541,18 @@ export class HermesBackend implements AgentBackend {
 
     // Activity and Logs are agent-scoped: every event reaches them, including
     // ones for a session nobody has open.
+    //
+    // Named by the *stored* id wherever it is known. Events carry the runtime
+    // id, which is minted fresh by every `session.resume` — so a completion
+    // announced under it was keyed by something that changes each time a chat
+    // is reopened. The notification ledger therefore never recognised the turn
+    // it had already announced, and rang again for it; and the id it attached
+    // to the banner was one no REST route can look up, so tapping it opened an
+    // empty chat. It is also the id the host's own push uses, which is what
+    // lets the two paths finally agree on one key for one happening.
     if (this.eventSinks.size) {
-      const record = toEventRecord(event, this.mapContext.now)
+      const stored = event.session_id ? this.storedByRuntime.get(event.session_id) : undefined
+      const record = toEventRecord(event, this.mapContext.now, stored)
 
       for (const sink of this.eventSinks) sink(record)
     }
@@ -492,17 +560,72 @@ export class HermesBackend implements AgentBackend {
     const runtimeId = event.session_id
 
     if (!runtimeId) return
+    if (this.routeToSession(event, runtimeId)) return
 
+    // Nobody is listening under that id *yet*.
+    //
+    // A reconnect clears the id maps and re-mints them with a `session.resume`
+    // that `subscribe` deliberately does not await. Until it lands, every event
+    // for the session names a runtime id this client cannot translate, matches
+    // no sink, and used to be dropped on the floor — so a turn that was already
+    // running when the socket came back streamed to nobody for the length of a
+    // round trip, and the chat sat there looking idle while the agent worked.
+    //
+    // Held rather than dropped, and only while a resume is actually in flight:
+    // outside that window an unknown id really is a session nobody has open,
+    // which is what the event sinks above are for.
+    if (this.resuming.size > 0) this.held.hold(event, this.mapContext.now)
+  }
+
+  /**
+   * Deliver one event to the session that is listening for it.
+   *
+   * Returns whether anyone was. The caller uses that to decide between holding
+   * the event for a resume and letting it go.
+   */
+  private routeToSession(event: GatewayEvent, runtimeId: string): boolean {
     // Events are keyed by runtime id; the UI subscribes by stored id. Fall back
     // to the raw id so a session the app only knows by one name still matches.
     const sessionId = this.storedByRuntime.get(runtimeId) ?? runtimeId
     const sinks = this.sinks.get(sessionId)
 
-    if (!sinks?.size) return
+    if (!sinks?.size) return false
 
     for (const update of mapGatewayEvent(event, this.mapContext)) {
       for (const sink of sinks) sink(update)
     }
+
+    return true
+  }
+
+  /**
+   * Replay whatever was waiting on a session id that has just been learned.
+   *
+   * Through `routeToSession` alone: the event sinks were served on the way in,
+   * and Activity must not show the same row twice.
+   */
+  private flushHeld(): void {
+    this.held.flush(
+      (event, at) => {
+        if (!event.session_id) return true
+
+        // Map against the clock the event *arrived* on. `mapContext.now` is
+        // what a tool's duration and an approval's deadline are measured from,
+        // and replaying against the current time would silently charge them
+        // for however long the resume took.
+        const resumed = this.mapContext.now
+
+        this.mapContext.now = at
+
+        try {
+          return this.routeToSession(event, event.session_id)
+        } finally {
+          this.mapContext.now = resumed
+        }
+      },
+      Date.now(),
+      this.resuming.size > 0
+    )
   }
 
   // --- Sessions -----------------------------------------------------------
@@ -678,7 +801,19 @@ export class HermesBackend implements AgentBackend {
   subscribe(id: SessionId, sink: (u: SessionUpdate) => void): Unsubscribe {
     // Resolve the runtime id now rather than at first prompt, so a turn started
     // from elsewhere — a cron job, the desktop app — streams into this view too.
-    void this.runtimeIdFor(id).catch(() => undefined)
+    //
+    // Only when there is a socket to ask over. `useConnection` publishes a new
+    // backend to React *before* it dials, so on a reconnect this runs against a
+    // gateway that is not open yet: the resume threw "not connected", the throw
+    // was swallowed here, and nothing ever asked again. The session then had no
+    // runtime id for the whole life of that connection, so every event named an
+    // id that matched no sink and the chat went permanently silent — a turn
+    // still running showed no thinking indicator, no tokens and no completion,
+    // and only reopening the screen brought it back.
+    //
+    // `connect` re-mints for everything being watched, so a subscription made
+    // before the socket is up is picked up there rather than lost here.
+    if (this.state.get() === 'open') void this.runtimeIdFor(id).catch(() => undefined)
 
     let sinks = this.sinks.get(id)
 
