@@ -135,6 +135,18 @@ const LIVENESS_TICK_MS = 15_000
 const LIVENESS_PROBE_TIMEOUT_MS = 10_000
 
 /**
+ * How long the *foreground* liveness probe waits.
+ *
+ * Shorter than the watchdog's, because the two are asked under different
+ * circumstances. The watchdog runs unprompted and can afford to be generous;
+ * this one runs because someone has just opened the app and is looking at a
+ * chat that has to start working. Being wrong costs one redial onto a socket
+ * that was merely slow, which reconnects; being slow costs the person the
+ * whole wait.
+ */
+const LIVENESS_FOREGROUND_TIMEOUT_MS = 4_000
+
+/**
  * How long a password login is assumed good for.
  *
  * Deliberately short of any real session lifetime: the cost of being wrong is
@@ -142,6 +154,24 @@ const LIVENESS_PROBE_TIMEOUT_MS = 10_000
  * too eager is a rate-limit lockout.
  */
 const LOGIN_REUSE_MS = 300_000
+
+/**
+ * How many events may wait on a session id that has not been learned yet.
+ *
+ * Only ever filled during a resume round trip, so a handful is the realistic
+ * depth and this is a ceiling against a host that streams hard into a resume
+ * that never answers — not a buffer anything is expected to reach.
+ */
+const HELD_EVENT_LIMIT = 200
+
+/**
+ * How long a held event may still be replayed.
+ *
+ * Past this it is not a chunk arriving a moment early, it is a chunk from a
+ * turn the transcript refetch has already covered — and replaying it would
+ * append text the settled rows already carry.
+ */
+const HELD_EVENT_TTL_MS = 30_000
 
 /** Hermes reports nearly everything (§4.1). */
 export const HERMES_CAPABILITIES: Capabilities = {
@@ -192,6 +222,13 @@ export class HermesBackend implements AgentBackend {
   private readonly runtimeByStored = new Map<SessionId, string>()
   private readonly storedByRuntime = new Map<string, SessionId>()
   private readonly resuming = new Map<SessionId, Promise<string>>()
+  /**
+   * Events that arrived naming a runtime id this client cannot translate yet.
+   *
+   * See `dispatch`. Not readonly: `flushHeld` swaps the array rather than
+   * splicing it, so a replay cannot be re-entered by the sinks it is feeding.
+   */
+  private held: { event: GatewayEvent; at: number }[] = []
   /**
    * Approvals recovered from a resume snapshot, by session.
    *
@@ -288,6 +325,10 @@ export class HermesBackend implements AgentBackend {
     this.runtimeByStored.clear()
     this.storedByRuntime.clear()
     this.resuming.clear()
+    // Anything still waiting was waiting on a resume over the socket that has
+    // just gone. The reconnect refetches the transcript, which is what closes
+    // that gap now (§5.4).
+    this.held = []
   }
 
   /**
@@ -366,6 +407,9 @@ export class HermesBackend implements AgentBackend {
   private rememberRuntime(stored: SessionId, runtime: string): void {
     this.runtimeByStored.set(stored, runtime)
     this.storedByRuntime.set(runtime, stored)
+
+    // The mapping is the thing anything held was waiting for.
+    this.flushHeld()
   }
 
   /**
@@ -441,7 +485,7 @@ export class HermesBackend implements AgentBackend {
     this.stopLivenessWatch()
 
     this.livenessTimer = setInterval(() => {
-      void this.checkLiveness()
+      void this.probeLiveness()
     }, LIVENESS_TICK_MS)
   }
 
@@ -452,14 +496,29 @@ export class HermesBackend implements AgentBackend {
     this.probing = false
   }
 
-  private async checkLiveness(): Promise<void> {
+  /**
+   * Ask the socket whether it is still there, on demand (`AgentBackend`).
+   *
+   * Same probe the watchdog runs, with two differences that matter only when a
+   * person is waiting on the answer: it uses a shorter timeout, and it is
+   * allowed to skip the idle window's *tick*, not the window itself. A socket
+   * that has carried a frame within `IDLE_PROBE_AFTER_MS` is still taken at its
+   * word — a two-second trip out of the app must not cost a round trip — so
+   * this is free in the common case and only spends anything when the silence
+   * is already long enough to be suspicious.
+   */
+  checkLiveness(): Promise<void> {
+    return this.probeLiveness(LIVENESS_FOREGROUND_TIMEOUT_MS)
+  }
+
+  private async probeLiveness(timeoutMs: number = LIVENESS_PROBE_TIMEOUT_MS): Promise<void> {
     if (this.probing || this.state.get() !== 'open') return
     if (Date.now() - this.lastFrameAt < IDLE_PROBE_AFTER_MS) return
 
     this.probing = true
 
     try {
-      await this.gateway.request('config.get', { key: APPROVAL_MODE_KEY }, LIVENESS_PROBE_TIMEOUT_MS)
+      await this.gateway.request('config.get', { key: APPROVAL_MODE_KEY }, timeoutMs)
       this.lastFrameAt = Date.now()
     } catch (cause) {
       // The host answering "no such key", or anything else it has an opinion
@@ -492,16 +551,76 @@ export class HermesBackend implements AgentBackend {
     const runtimeId = event.session_id
 
     if (!runtimeId) return
+    if (this.routeToSession(event, runtimeId)) return
 
+    // Nobody is listening under that id *yet*.
+    //
+    // A reconnect clears the id maps and re-mints them with a `session.resume`
+    // that `subscribe` deliberately does not await. Until it lands, every event
+    // for the session names a runtime id this client cannot translate, matches
+    // no sink, and used to be dropped on the floor — so a turn that was already
+    // running when the socket came back streamed to nobody for the length of a
+    // round trip, and the chat sat there looking idle while the agent worked.
+    //
+    // Held rather than dropped, and only while a resume is actually in flight:
+    // outside that window an unknown id really is a session nobody has open,
+    // which is what the event sinks above are for.
+    if (this.resuming.size > 0) this.holdForResume(event)
+  }
+
+  /**
+   * Deliver one event to the session that is listening for it.
+   *
+   * Returns whether anyone was. The caller uses that to decide between holding
+   * the event for a resume and letting it go.
+   */
+  private routeToSession(event: GatewayEvent, runtimeId: string): boolean {
     // Events are keyed by runtime id; the UI subscribes by stored id. Fall back
     // to the raw id so a session the app only knows by one name still matches.
     const sessionId = this.storedByRuntime.get(runtimeId) ?? runtimeId
     const sinks = this.sinks.get(sessionId)
 
-    if (!sinks?.size) return
+    if (!sinks?.size) return false
 
     for (const update of mapGatewayEvent(event, this.mapContext)) {
       for (const sink of sinks) sink(update)
+    }
+
+    return true
+  }
+
+  /** Queue an event whose session id cannot be translated yet. */
+  private holdForResume(event: GatewayEvent): void {
+    this.held.push({ event, at: Date.now() })
+
+    // A bound, because this queue is fed by the host and drained by a round
+    // trip that may never come back. Oldest first: on a turn that is mid-reply
+    // the newest chunks are the ones worth keeping.
+    if (this.held.length > HELD_EVENT_LIMIT) this.held.splice(0, this.held.length - HELD_EVENT_LIMIT)
+  }
+
+  /**
+   * Replay whatever was waiting on a session id that has just been learned.
+   *
+   * Anything still unroutable is kept only while it could plausibly still
+   * belong to a resume in flight; past that it is stale and goes. Replay runs
+   * through `routeToSession` alone — the event sinks were served on the way in,
+   * and Activity must not show the same row twice.
+   */
+  private flushHeld(): void {
+    if (this.held.length === 0) return
+
+    const cutoff = Date.now() - HELD_EVENT_TTL_MS
+    const waiting = this.held
+
+    this.held = []
+
+    for (const { event, at } of waiting) {
+      const runtimeId = event.session_id
+
+      if (!runtimeId) continue
+      if (this.routeToSession(event, runtimeId)) continue
+      if (at >= cutoff && this.resuming.size > 0) this.held.push({ event, at })
     }
   }
 

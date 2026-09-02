@@ -93,8 +93,16 @@ export function useConnection(server: Server | null, agent: Agent | null): Conne
    */
   const stateRef = useRef<ConnectionState>('idle')
   const dialing = useRef(false)
+  /**
+   * The live backend, for the triggers below.
+   *
+   * Same reason as `stateRef`: the AppState listener subscribes once and must
+   * not be torn down and re-attached every time a dial replaces the backend.
+   */
+  const activeRef = useRef<{ agentId: AgentId; backend: AgentBackend } | null>(null)
 
   stateRef.current = state
+  activeRef.current = active
 
   /**
    * What a redial actually depends on.
@@ -286,7 +294,34 @@ export function useConnection(server: Server | null, agent: Agent | null): Conne
       if (next === 'active' && wasBackgrounded.current) {
         wasBackgrounded.current = false
 
-        if (stateRef.current !== 'open') setNonce(value => value + 1)
+        // Coming back is new information, exactly as pressing Reconnect is: the
+        // network under the app is not the one it left. Without this, a redial
+        // triggered here inherits whatever backoff the failures in the
+        // background earned it — up to 30s of doing nothing before it dials.
+        failures.current = 0
+
+        if (stateRef.current !== 'open') {
+          setNonce(value => value + 1)
+
+          return
+        }
+
+        // Still `open` — which, coming out of background, proves nothing.
+        //
+        // Neither OS delivers a close frame to an app it has frozen, so a
+        // socket the system reaped comes back looking perfectly healthy and the
+        // check above waves it through. What used to notice was the backend's
+        // own idle watchdog, and it is on a 15s tick with a 10s probe behind
+        // it — timers that were themselves suspended while the app was away.
+        // So the first thing a person saw on reopening the app was up to half a
+        // minute of a chat that could not receive anything.
+        //
+        // Asking now collapses that to one round trip. It is not a redial: the
+        // probe returns without touching the network on a socket that carried a
+        // frame recently, so a short trip out of the app stays free, and the
+        // backend already drives itself to `closed` when the answer does not
+        // come — which the watcher below is waiting for.
+        void activeRef.current?.backend.checkLiveness?.()
       } else if (next !== 'active') {
         wasBackgrounded.current = true
       }
@@ -350,6 +385,10 @@ export function useConnection(server: Server | null, agent: Agent | null): Conne
       const current = info.type
 
       if (previous !== null && previous !== current && info.isConnected) {
+        // A different transport is a different network, so whatever the last
+        // one failed at says nothing about this one. Dial it at once rather
+        // than through the backoff the old path earned.
+        failures.current = 0
         setNonce(value => value + 1)
       }
 
