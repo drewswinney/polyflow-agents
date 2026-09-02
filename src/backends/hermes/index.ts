@@ -541,8 +541,18 @@ export class HermesBackend implements AgentBackend {
 
     // Activity and Logs are agent-scoped: every event reaches them, including
     // ones for a session nobody has open.
+    //
+    // Named by the *stored* id wherever it is known. Events carry the runtime
+    // id, which is minted fresh by every `session.resume` — so a completion
+    // announced under it was keyed by something that changes each time a chat
+    // is reopened. The notification ledger therefore never recognised the turn
+    // it had already announced, and rang again for it; and the id it attached
+    // to the banner was one no REST route can look up, so tapping it opened an
+    // empty chat. It is also the id the host's own push uses, which is what
+    // lets the two paths finally agree on one key for one happening.
     if (this.eventSinks.size) {
-      const record = toEventRecord(event, this.mapContext.now)
+      const stored = event.session_id ? this.storedByRuntime.get(event.session_id) : undefined
+      const record = toEventRecord(event, this.mapContext.now, stored)
 
       for (const sink of this.eventSinks) sink(record)
     }

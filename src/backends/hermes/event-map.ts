@@ -290,7 +290,17 @@ export function mapGatewayEvent(event: GatewayEvent, ctx: MapContext): SessionUp
   return updates
 }
 
-export function toEventRecord(event: GatewayEvent, now: number): EventRecord {
+/**
+ * `sessionId` is the id the *app* knows the session by, when the caller can
+ * supply it.
+ *
+ * Events name the runtime id, which is minted per resume and therefore changes
+ * every time a chat is reopened. Anything that remembers a session across that
+ * — the notification ledger, a deep link into a chat — needs the stored id
+ * instead, and `dispatch` is the only place that holds the mapping. Falls back
+ * to the raw id, which is all there is before a resume has landed.
+ */
+export function toEventRecord(event: GatewayEvent, now: number, sessionId?: string): EventRecord {
   const payload = (event.payload ?? undefined) as Payload
 
   return {
@@ -299,7 +309,7 @@ export function toEventRecord(event: GatewayEvent, now: number): EventRecord {
     name: event.type,
     detail: str(payload?.name) || str(payload?.message) || str(payload?.status) || '',
     status: event.type === 'error' || payload?.error ? 'error' : 'info',
-    sessionId: event.session_id || undefined,
+    sessionId: sessionId || event.session_id || undefined,
     payload: event.payload
   }
 }
