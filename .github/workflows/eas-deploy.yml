@@ -1,0 +1,216 @@
+name: EAS deploy
+
+# Publishes an OTA update to an EAS channel, and first runs a full native build
+# whenever the native fingerprint has changed (new dependency, app.json/eas.json
+# change, new asset — anything expo prebuild bakes into the binary).
+#
+# Repository secrets this needs:
+#   EXPO_TOKEN                        Expo access token (Expo → account settings → access tokens)
+#   EXPO_APPLE_ID                     Apple ID used for the app's signing credentials
+#   EXPO_APPLE_APP_SPECIFIC_PASSWORD  App-specific password for that Apple ID
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: EAS channel to deploy to
+        type: string
+        default: preview
+      profile:
+        description: eas.json build profile (defaults to the channel name)
+        type: string
+        default: ''
+      platform:
+        description: Platforms to consider for a native build
+        type: choice
+        options: [all, ios, android]
+        default: all
+      force_build:
+        description: Build even if the fingerprint already has a finished build
+        type: boolean
+        default: false
+      skip_update:
+        description: Only build; do not publish an OTA update
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+concurrency:
+  group: eas-deploy-${{ inputs.channel || 'preview' }}
+  cancel-in-progress: false
+
+env:
+  CHANNEL: ${{ inputs.channel || 'preview' }}
+  PROFILE: ${{ inputs.profile || inputs.channel || 'preview' }}
+  PLATFORM: ${{ inputs.platform || 'all' }}
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      channel: ${{ steps.target.outputs.channel }}
+      profile: ${{ steps.target.outputs.profile }}
+      platforms: ${{ steps.fingerprint.outputs.platforms }}
+      any_build: ${{ steps.fingerprint.outputs.any_build }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve target
+        id: target
+        run: |
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"
+          echo "Deploying to channel \`$CHANNEL\` with profile \`$PROFILE\`." >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # A native build is needed when no finished build on this channel already
+      # carries the current fingerprint for that platform. EAS records the
+      # fingerprint of every build, so this is an exact comparison rather than a
+      # guess from changed paths — and it is idempotent across re-runs.
+      - name: Decide which platforms need a native build
+        id: fingerprint
+        run: |
+          set -euo pipefail
+
+          case "$PLATFORM" in
+            all) candidates="ios android" ;;
+            *) candidates="$PLATFORM" ;;
+          esac
+
+          needed=()
+          for platform in $candidates; do
+            hash="$(./node_modules/.bin/fingerprint fingerprint:generate --platform "$platform" | jq -r '.hash')"
+            echo "$platform fingerprint: $hash"
+
+            if [ "${FORCE_BUILD}" = "true" ]; then
+              echo "::notice::$platform — force_build requested, building"
+              needed+=("$platform")
+              continue
+            fi
+
+            matches="$(eas build:list \
+              --non-interactive --json \
+              --platform "$platform" \
+              --channel "$CHANNEL" \
+              --status finished \
+              --fingerprint-hash "$hash" \
+              --limit 1 | jq 'length')"
+
+            if [ "$matches" -gt 0 ]; then
+              echo "::notice::$platform — a finished build on '$CHANNEL' matches this fingerprint, OTA only"
+              echo "- \`$platform\`: up to date (\`$hash\`) — OTA only" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::notice::$platform — no finished build on '$CHANNEL' for this fingerprint, building"
+              echo "- \`$platform\`: native change (\`$hash\`) — building" >> "$GITHUB_STEP_SUMMARY"
+              needed+=("$platform")
+            fi
+          done
+
+          platforms="$(printf '%s\n' "${needed[@]+"${needed[@]}"}" | jq -R . | jq -sc 'map(select(length > 0))')"
+          echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
+          echo "any_build=$([ "$platforms" = '[]' ] && echo false || echo true)" >> "$GITHUB_OUTPUT"
+        env:
+          FORCE_BUILD: ${{ inputs.force_build || 'false' }}
+
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: plan
+    if: needs.plan.outputs.any_build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(needs.plan.outputs.platforms) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Build
+        run: |
+          eas build \
+            --platform "${{ matrix.platform }}" \
+            --profile "${{ needs.plan.outputs.profile }}" \
+            --message "${GITHUB_SHA::7} on ${GITHUB_REF_NAME}" \
+            --non-interactive \
+            --wait
+        env:
+          # Apple sign-in for non-interactive credential syncing. Android uses the
+          # keystore EAS already holds for the project.
+          EXPO_APPLE_ID: ${{ secrets.EXPO_APPLE_ID }}
+          EXPO_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.EXPO_APPLE_APP_SPECIFIC_PASSWORD }}
+
+  update:
+    name: OTA update
+    needs: [plan, build]
+    if: |
+      always()
+      && needs.plan.result == 'success'
+      && (needs.build.result == 'success' || needs.build.result == 'skipped')
+      && inputs.skip_update != true
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Ensure the channel exists
+        run: |
+          set -euo pipefail
+          channel="${{ needs.plan.outputs.channel }}"
+          if eas channel:view "$channel" --non-interactive --json >/dev/null 2>&1; then
+            echo "channel '$channel' already exists"
+          else
+            # Creates the channel and links it to a branch of the same name.
+            eas channel:create "$channel" --non-interactive
+          fi
+
+      - name: Publish update
+        run: |
+          eas update \
+            --channel "${{ needs.plan.outputs.channel }}" \
+            --message "${GITHUB_SHA::7} on ${GITHUB_REF_NAME}" \
+            --non-interactive
+
+      - name: Summary
+        run: |
+          echo "Published an OTA update to \`${{ needs.plan.outputs.channel }}\`." >> "$GITHUB_STEP_SUMMARY"
