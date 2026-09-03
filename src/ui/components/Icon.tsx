@@ -10,13 +10,33 @@ import { useTheme } from '../ThemeProvider'
  * agent, and one per tool type (design §Global chrome).
  */
 const AGENT_GLYPH: Record<AgentIconName, string> = {
-  home: 'house',
-  car: 'car',
+  server: 'server',
+  terminal: 'terminal',
   flask: 'flask',
   cloud: 'cloud',
-  server: 'server',
-  terminal: 'terminal'
+  home: 'house',
+  car: 'car',
+  robot: 'robot',
+  brain: 'brain',
+  rocket: 'rocket',
+  bolt: 'bolt',
+  code: 'code',
+  database: 'database',
+  microchip: 'microchip',
+  laptop: 'laptop',
+  compass: 'compass',
+  cube: 'cube',
+  leaf: 'leaf',
+  ghost: 'ghost'
 }
+
+/**
+ * Every glyph an agent can wear, in the order the picker shows them — read off
+ * the map above rather than listed again, so a glyph cannot be added to one and
+ * forgotten in the other. `Record<AgentIconName, …>` is what makes that whole:
+ * a new name in the union does not compile until it has a glyph here.
+ */
+export const AGENT_ICONS = Object.keys(AGENT_GLYPH) as AgentIconName[]
 
 export function AgentGlyph({ name, size = 11, color }: { name: AgentIconName; size?: number; color?: string }) {
   const theme = useTheme()

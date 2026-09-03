@@ -97,6 +97,15 @@ export default function SettingsScreen() {
   // the design's rule is that what is missing is stated once, never rendered as
   // something you can press.
   const agentRows = [
+    // Always present, unlike every row below it: the glyph is a phone-side
+    // choice, so there is no capability to report and nothing to gate it on.
+    {
+      key: 'icon',
+      label: 'Icon',
+      icon: 'palette',
+      show: true,
+      go: () => router.push('/agent-icon' as never)
+    },
     {
       key: 'model',
       label: 'Model & providers',

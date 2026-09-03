@@ -44,6 +44,8 @@ interface AgentsState {
   dismissAgent: (id: AgentId) => Promise<void>
   /** Folds a fresh discovery into what is stored, adding and marking (§5.2a). */
   reconcile: (serverId: ServerId, identities: AgentIdentity[]) => void
+  /** Re-glyphs one agent. Phone-side only — the host never sees it. */
+  setAgentIcon: (id: AgentId, icon: AgentIconName) => void
   patchServer: (id: ServerId, updates: Partial<Server>) => void
   setConnection: (id: ServerId, connection: AgentConnection, latencyMs?: number) => void
 }
@@ -166,6 +168,15 @@ export const useAgents = create<AgentsState>((set, get) => ({
     void persist(get())
   },
 
+  setAgentIcon(id, icon) {
+    // Same no-op guard as `reconcile` and `setConnection`: picking the glyph an
+    // agent already wears must not hand every subscriber a new object.
+    if (!get().agents.some(agent => agent.id === id && agent.icon !== icon)) return
+
+    set(state => ({ agents: state.agents.map(agent => (agent.id === id ? { ...agent, icon } : agent)) }))
+    void persist(get())
+  },
+
   patchServer(id, updates) {
     set(state => ({ servers: state.servers.map(server => (server.id === id ? { ...server, ...updates } : server)) }))
     void persist(get())
@@ -192,7 +203,12 @@ export const useAgents = create<AgentsState>((set, get) => ({
   }
 }))
 
-/** One distinct glyph per agent, cycled so a server's agents never collide. */
+/**
+ * The glyph a newly discovered agent starts with, cycled so a server's agents
+ * never collide. Only ever a starting point: `setAgentIcon` overrides it, and
+ * because `reconcile` keeps the stored agent object rather than rebuilding it,
+ * a chosen glyph survives every later reconnect.
+ */
 const GLYPHS: AgentIconName[] = ['server', 'terminal', 'flask', 'cloud', 'home', 'car']
 
 /**

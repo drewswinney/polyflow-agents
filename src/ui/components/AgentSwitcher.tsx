@@ -1,4 +1,4 @@
-import { Modal, Pressable, StyleSheet, View } from 'react-native'
+import { Modal, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { Agent, AgentId, Server, ServerId } from '@/domain'
@@ -164,6 +164,13 @@ function ServerGroup({
   )
 }
 
+/**
+ * The glyph column's width at 1× text: wide enough for the widest FontAwesome
+ * icon, which is 1.25em across — a 13-wide column for a 13pt glyph let `server`
+ * and `cloud` spill under the name beside them.
+ */
+const GLYPH_SLOT = 18
+
 function AgentRow({
   agent,
   offline,
@@ -183,11 +190,14 @@ function AgentRow({
   // and the row says so rather than letting a send fail to explain itself.
   const missing = Boolean(agent.missing)
   const dimmed = offline || missing
+  // The glyph is a font, so it grows with the phone's text size; its column has
+  // to grow with it or the icon spills under the name beside it.
+  const { fontScale } = useWindowDimensions()
 
   return (
     <Pressable accessibilityRole="button" onPress={onPress} style={styles.row}>
       <View style={styles.dotSlot} />
-      <View style={styles.glyphSlot}>
+      <View style={[styles.glyphSlot, { width: GLYPH_SLOT * fontScale }]}>
         <AgentGlyph name={agent.icon} size={13} />
       </View>
 
@@ -237,7 +247,7 @@ const styles = StyleSheet.create({
   row: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 11, paddingVertical: 7 },
   dotSlot: { width: 8, alignItems: 'center' },
   dot: { width: 5, height: 5, borderRadius: 2.5 },
-  glyphSlot: { width: 13, alignItems: 'center' },
+  glyphSlot: { alignItems: 'center' },
   agentText: { flex: 1, minWidth: 0, gap: 2 },
   name: { minWidth: 0, fontSize: 13.5 },
   hint: { minWidth: 0, flexShrink: 1, lineHeight: 15 },

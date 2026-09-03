@@ -136,7 +136,36 @@ export interface AgentAccent {
   secondaryTintStrong: string
 }
 
-export type AgentIconName = 'home' | 'car' | 'flask' | 'cloud' | 'server' | 'terminal'
+/**
+ * The glyphs an agent can wear.
+ *
+ * One agent gets a starting glyph by position (see `GLYPHS` in the agents
+ * store); the user can change it per agent, and that choice is phone-side —
+ * the host has no opinion about it, so nothing here crosses the §4 seam.
+ *
+ * Names are the app's own, not font names: `home` is a house. Adding one means
+ * adding its glyph to `AGENT_GLYPH`, and only ever *adding* — a name that has
+ * been persisted on someone's phone can never be removed.
+ */
+export type AgentIconName =
+  | 'home'
+  | 'car'
+  | 'flask'
+  | 'cloud'
+  | 'server'
+  | 'terminal'
+  | 'robot'
+  | 'brain'
+  | 'rocket'
+  | 'bolt'
+  | 'code'
+  | 'database'
+  | 'microchip'
+  | 'laptop'
+  | 'compass'
+  | 'cube'
+  | 'leaf'
+  | 'ghost'
 
 export interface SessionSummary {
   id: SessionId

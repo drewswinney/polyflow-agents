@@ -1,4 +1,4 @@
-import { Text as RNText, type StyleProp, type TextProps, type TextStyle } from 'react-native'
+import { Text as RNText, useWindowDimensions, type StyleProp, type TextProps, type TextStyle } from 'react-native'
 
 import { useTheme } from '../ThemeProvider'
 
@@ -28,9 +28,20 @@ interface Props extends TextProps {
  * The three-way type split from the design, in one place: Outfit for display,
  * Inter for UI, Space Mono for machine data (hosts, model ids, token counts).
  * Screens pick a variant; they never name a font family or size.
+ *
+ * Every variant below states a `lineHeight` alongside its `fontSize`, and React
+ * Native scales only the second of those by the OS font setting. Left alone,
+ * that is a bug the design never sees at 1×: turn the phone's text size up and
+ * the glyphs grow inside line boxes that do not, so lines close on each other,
+ * descenders are sliced, and a wrapped label crosses whatever sits beside it —
+ * the agent switcher's rows ran into their own glyph column that way. Scaling
+ * the pair together keeps the ratio the design chose at every text size.
  */
 export function Text({ variant = 'body', color, style, ...rest }: Props) {
   const theme = useTheme()
+  // The reactive read: `PixelRatio.getFontScale()` is a snapshot, so a phone
+  // whose text size changes while the app is open keeps the stale ratio.
+  const { fontScale } = useWindowDimensions()
 
   const variants: Record<Variant, TextStyle> = {
     screenTitle: { fontFamily: theme.font.display, fontSize: 22, lineHeight: 24, letterSpacing: -0.44 },
@@ -72,5 +83,17 @@ export function Text({ variant = 'body', color, style, ...rest }: Props) {
     monoSmall: theme.color.gray400
   }
 
-  return <RNText {...rest} style={[variants[variant], { color: color ?? defaultColor[variant] }, style]} />
+  const { lineHeight, ...typography } = variants[variant]
+
+  return (
+    <RNText
+      {...rest}
+      style={[
+        typography,
+        lineHeight === undefined ? null : { lineHeight: lineHeight * fontScale },
+        { color: color ?? defaultColor[variant] },
+        style
+      ]}
+    />
+  )
 }
