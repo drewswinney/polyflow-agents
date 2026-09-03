@@ -4,7 +4,7 @@
 
 A React Native / Expo app (iOS + Android) for managing a self-hosted **Hermes agent** running on a Proxmox VM, reached over a Tailscale tailnet. The app is chat-first: you talk to the agent, approve what it wants to do, and configure it. It supports **multiple agents, one at a time** — the whole app scopes to whichever agent is selected.
 
-Built for a single operator (the repo owner), not a team. Source of truth for agent behavior: `docs/architecture.md` in `drewswinney/agent-handheld` (branch `docs/initial-architecture`) — §2.4 events, §5 transport, §7 screens.
+Built for a single operator (the repo owner), not a team. Source of truth for agent behavior: `docs/architecture.md` in `drewswinney/polyflow-agents` (branch `docs/initial-architecture`) — §2.4 events, §5 transport, §7 screens.
 
 ## About the design files
 
@@ -304,7 +304,7 @@ None to hand off. The mock uses FontAwesome via CDN and Google-hosted Space Mono
 ## Files
 
 - `Hermes Handheld.dc.html` — all 20 phone frames. Search for a caption string (e.g. `Voice · listening`, `Logs ·`, `Empty ·`) to jump to a screen; each frame is a `360×790` container.
-- `github.md` — the source repo association (`drewswinney/agent-handheld`, branch `docs/initial-architecture`) and a screen-to-doc map.
+- `github.md` — the source repo association (`drewswinney/polyflow-agents`, branch `docs/initial-architecture`) and a screen-to-doc map.
 
 ## Open items
 

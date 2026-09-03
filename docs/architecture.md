@@ -545,7 +545,7 @@ client that replays from the last event it saw:
 ## 6. Project structure
 
 ```
-agent-handheld/
+polyflow-agents/
 ├── app/                        # expo-router routes
 │   ├── (tabs)/
 │   │   ├── index.tsx           sessions (+ in-place search)
@@ -571,7 +571,7 @@ agent-handheld/
     └── design/                 visual handoff (README, canvas, screen map)
 ```
 
-The directory and the remote are both `agent-handheld`, matching
+The directory and the remote are both `polyflow-agents`, matching
 `docs/design/github.md`. `main` is the default branch.
 
 ---

@@ -1,7 +1,7 @@
 # polyflow_agents_push
 
 The host half of the app's notifications. A Hermes plugin, not a service — see
-[`../../docs/push-relay.md`](https://github.com/drewswinney/agent-handheld/blob/main/docs/push-relay.md) for why, and for the
+[`../../docs/push-relay.md`](https://github.com/drewswinney/polyflow-agents/blob/main/docs/push-relay.md) for why, and for the
 verified hook inventory this is built on.
 
 **Status: registration proven offline, never yet run against a live host in
