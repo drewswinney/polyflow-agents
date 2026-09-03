@@ -115,6 +115,11 @@ export function useTranscript(scope: string, backend: AgentBackend | null, id: S
  * Shared rather than inlined because two places create sessions — the Sessions
  * screen and the sidebar — and the invalidation is the easy half to forget: a
  * new session that is not in the list is a session you cannot get back to.
+ *
+ * The invalidation here is necessary but not sufficient. It fires before the
+ * session has a message, and the list is fetched with `min_messages=1`, so the
+ * row it was meant to reveal is not in the response yet. `session-list-sync`
+ * is what reads the list again once the first turn has landed.
  */
 export function useCreateSession(scope: string, backend: AgentBackend | null) {
   const queryClient = useQueryClient()

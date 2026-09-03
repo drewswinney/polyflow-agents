@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "polyflow-agents-push"
-version = "0.2.1"
+version = "0.2.2"
 description = "Push notifications for the Polyflow Agents app — a Hermes plugin"
 readme = "polyflow_agents_push/README.md"
 requires-python = ">=3.10"
