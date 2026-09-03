@@ -20,6 +20,7 @@ import { useAgents, useSelectedAgentOrNull, useSelectedServerOrNull } from '@/st
 import { useNotificationRouting } from '@/state/notification-routing'
 import { useNotificationTap } from '@/state/notification-tap'
 import { useSessions } from '@/state/queries'
+import { useSessionListSync } from '@/state/session-list-sync'
 import { restoreQueryCache, startPersistingQueryCache } from '@/state/query-cache-persistence'
 import { useSidebar } from '@/state/sidebar'
 import { Sidebar } from '@/ui/components/Sidebar'
@@ -260,6 +261,10 @@ function AppSidebar() {
   const pathname = usePathname()
 
   const sessions = useSessions(agent?.scope ?? '', backend)
+
+  // The list is read here and never remounted, so nothing else would ever ask
+  // it to refetch — see the hook for what did not show up as a result.
+  useSessionListSync(agent?.scope ?? '', backend)
 
   return (
     <Sidebar

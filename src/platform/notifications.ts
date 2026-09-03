@@ -15,7 +15,7 @@
 
 import Constants from 'expo-constants'
 import * as Notifications from 'expo-notifications'
-import { Platform } from 'react-native'
+import { AppState, Platform } from 'react-native'
 
 let handlerInstalled = false
 
@@ -48,12 +48,25 @@ export function ensureNotificationHandler(): void {
 
   try {
     Notifications.setNotificationHandler({
-      handleNotification: async () => ({
-        shouldShowBanner: true,
-        shouldShowList: true,
-        shouldPlaySound: true,
-        shouldSetBadge: false
-      })
+      // Only while backgrounded — the rule the local path already applies
+      // (`notification-tap`), now applied to the host's push as well. The host
+      // pushes for every finished turn, and an app in the foreground is more
+      // often than not showing the very chat the push is about; a banner over
+      // that is noise. The OS only asks this of a foregrounded app — a push
+      // that lands on a backgrounded one is presented without asking — so
+      // what this decides in practice is that nothing is shown on the way in
+      // or out. The push is still received, and still written to the ledger,
+      // so the socket does not announce the same turn again.
+      handleNotification: async () => {
+        const show = AppState.currentState === 'background'
+
+        return {
+          shouldShowBanner: show,
+          shouldShowList: show,
+          shouldPlaySound: show,
+          shouldSetBadge: false
+        }
+      }
     })
   } catch (cause) {
     console.warn('[notifications] could not install the notification handler:', cause)

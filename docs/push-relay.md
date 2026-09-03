@@ -133,7 +133,7 @@ The platform face registers with:
 | Approval resolved | `post_approval_response` hook | the above plus `choice` (`once`/`session`/`always`/`deny`/`timeout`) |
 | Agent question | `pre_tool_call` on the `clarify` tool | `tool_name`, `args` (question, choices) |
 | Artifact generated | `post_tool_call` | `tool_name`, `args`, `result` |
-| Turn finished | `on_session_finalize` / `post_llm_call` | session identifiers |
+| Turn finished | `post_llm_call` hook | `session_id` (stored), `turn_id`, `assistant_response`, `platform`, `model` |
 | Cron job run | platform delivery target | the job's rendered output |
 
 Notes that change behaviour rather than decorate it:
@@ -338,16 +338,20 @@ Listed so the next person does not mistake this document for a finished spec:
   reached a device.** Registration is covered offline by `npm run check:plugin`,
   which drives the real router against the real on-disk registry; everything
   downstream of it is still written-not-run.
-- Whether `on_session_finalize` fires for an app session at all, and whether it
-  is redundant with `background.complete` on the app's own socket.
 - How the app's approval card answers a transport-presented request in shape A
   (§6.2) — the plugin owns that channel, and nothing about it is designed yet.
 - Which process a hook fires in for **cron-driven** turns specifically. Kanban
   workers are documented as separate `hermes -p <profile> chat -q` subprocesses;
   cron may be similar, which is exactly why `standalone_sender_fn` exists.
-- Whether `on_session_finalize` is the right "turn finished" signal for an
-  api_server session, or whether `background.complete` on our own socket is
-  better and the hook is redundant.
+- ~~Whether `on_session_finalize` is the right "turn finished" signal.~~ It is
+  not, and this was verified the hard way. In `tui_gateway` it fires from
+  `_finalize_session`, which is session *teardown*: the WS-orphan reap a few
+  seconds after the app's socket drops (`_close_sessions_for_transport` →
+  `_schedule_ws_orphan_reap`), the idle reaper and LRU eviction. So closing the
+  app pushed "Turn finished" for every idle session the socket had resumed —
+  and skipped the one still mid-turn, which made it look like it pointed at
+  the wrong chat. The hook is now `post_llm_call`: once per completed turn,
+  with the reply, on the stored session id.
 - Multi-agent fan-out: with one plugin per host, each Hermes pushes for itself,
   which dissolves the old design's "one socket per agent" problem. Worth
   confirming against a second agent before relying on it.

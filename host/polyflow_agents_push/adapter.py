@@ -3,7 +3,8 @@
 Three faces, loaded by up to three processes (see `docs/push-relay.md` §2, §3):
 
 - **Hooks**, registered wherever a turn runs — for this app, `hermes serve`.
-  They observe approvals, clarify questions and artifacts and push them out.
+  They observe approvals, clarify questions, artifacts and finished turns and
+  push them out.
 - **A platform**, registered in the messaging gateway, so cron jobs can
   `deliver=polyflow_agents_push`.
 - **Backend routes**, in `dashboard/plugin_api.py`, mounted by the web server
@@ -40,6 +41,17 @@ PLATFORM_LABEL = "Polyflow Agents"
 # Tools whose completion is worth interrupting someone for. "Artifact" is our
 # word, not Hermes's — there is no artifact concept upstream, only tool output.
 ARTIFACT_TOOLS = {"write_file", "image_gen", "video_gen", "generate_image", "generate_video"}
+
+# Turns nobody asked the phone about. A delegated subagent's turn ends inside
+# its parent's, which is the one worth announcing; a cron job's output has its
+# own way here (`deliver=polyflow_agents_push`), and its session is not one the
+# app can open. Everything else — the TUI, the desktop, the app itself — is a
+# conversation someone started and may have walked away from.
+SILENT_TURN_PLATFORMS = {"subagent", "cron"}
+
+# How much of the reply fits in a banner. The app's local copy of this
+# notification quotes the reply too; matching it means the two read alike.
+PREVIEW_LIMIT = 140
 
 
 # ── Hooks ────────────────────────────────────────────────────────────────────
@@ -136,14 +148,44 @@ def _on_post_tool_call(**kwargs: Any) -> None:
     )
 
 
-def _on_session_finalize(**kwargs: Any) -> None:
-    """A turn finished while you were away."""
+def _on_post_llm_call(**kwargs: Any) -> None:
+    """A turn finished.
+
+    `post_llm_call` fires once per turn, after the tool loop, with the final
+    reply — and only for a turn that completed rather than was interrupted.
+    `session_id` is the stored id (`20260818_195944_3b37eb`), which is the one
+    the app opens a chat by.
+
+    This used to hang off `on_session_finalize`, which is not that at all: it
+    is session *teardown* — the WS-orphan reap a few seconds after the app's
+    socket drops, the idle reaper, LRU eviction on the session cap — and it
+    never fires for a turn. Closing the app therefore pushed "Turn finished"
+    for whichever idle sessions that socket had resumed (a chat mid-turn is
+    skipped by the reaper, so it was reliably *not* the one you were in), and
+    a turn that genuinely finished while the phone was away pushed nothing.
+    """
+    if str(kwargs.get("platform") or "") in SILENT_TURN_PLATFORMS:
+        return
+
     push.notify(
         kind="turnComplete",
         title="Turn finished",
-        body="The agent finished what it was doing.",
+        body=_preview(str(kwargs.get("assistant_response") or "")) or "The agent finished what it was doing.",
         data={"sessionId": kwargs.get("session_id") or ""},
     )
+
+
+def _preview(text: str, limit: int = PREVIEW_LIMIT) -> str:
+    """One line of a reply, fit for a banner: whitespace collapsed, cut at a word."""
+    flat = " ".join(text.split())
+
+    if len(flat) <= limit:
+        return flat
+
+    cut = flat[:limit]
+    space = cut.rfind(" ")
+
+    return (cut[:space] if space > limit * 0.6 else cut).rstrip() + "…"
 
 
 # ── Platform face ────────────────────────────────────────────────────────────
@@ -246,7 +288,7 @@ def register(ctx: Any) -> None:
         ("post_approval_response", _safe(_on_approval_response)),
         ("pre_tool_call", _safe(_on_pre_tool_call)),
         ("post_tool_call", _safe(_on_post_tool_call)),
-        ("on_session_finalize", _safe(_on_session_finalize)),
+        ("post_llm_call", _safe(_on_post_llm_call)),
     ):
         try:
             ctx.register_hook(hook_name, callback)

@@ -18,7 +18,7 @@ to register one yet.
 | Approval answered anywhere | `post_approval_response` hook | data-only, so the app can dismiss a stale banner |
 | Agent question | `pre_tool_call` on `clarify` | the question |
 | Artifact produced | `post_tool_call` on `ARTIFACT_TOOLS` | "Artifact ready" |
-| Turn finished | `on_session_finalize` | "Turn finished" |
+| Turn finished | `post_llm_call` hook | "Turn finished" + the start of the reply |
 | Cron job output | `deliver=polyflow_agents_push` delivery target | the rendered output |
 
 Smart-mode approvals are skipped: an auxiliary LLM decides those and nobody is
@@ -140,9 +140,17 @@ Untested: no cron job has delivered here yet.
   `failed`, `traceback`. The app's preference is failures-only, so a job whose
   normal output says "0 errors" will notify and a failure that says none of
   those words will not. This is the weakest thing in the plugin.
-- **`on_session_finalize` may be the wrong "turn finished" signal.** It is
-  unverified against an app session, and may be redundant with
-  `background.complete`, which the app already sees on its own socket.
+- **A turn that ends seconds after the app is backgrounded is announced
+  twice.** The app's socket usually outlives the switch away by a little, and
+  it raises a local banner from `message.complete` before this push lands.
+  The ledger stops the socket repeating a push the app has *seen*; it cannot
+  stop a push the OS presents without asking, which is every push that arrives
+  while the app is not in the foreground. Once the socket is gone — the normal
+  case a minute in — only this push fires.
+- **Subagent and cron turns are deliberately silent** (`SILENT_TURN_PLATFORMS`,
+  matched on the hook's `platform`). A turn on any other platform pushes, so a
+  desktop or TUI session on the same host rings the phone too. That is by
+  design — it is the same agent — but it is worth knowing.
 - **Preferences live per device in the registry**, not in the app alone. A
   closed app cannot filter its own push, so the host has to know. That means the
   app must re-register when preferences change, and a device whose registration
