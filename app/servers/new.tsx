@@ -244,6 +244,9 @@ export default function AddServerScreen() {
         // Nothing to go back to on first run, and a chevron that does nothing is
         // worse than no chevron.
         onBack={canGoBack ? () => router.back() : undefined}
+        // No agent selector on a modal that exists to add one. Switching from
+        // inside it would send you to New session with this sheet still up.
+        center={null}
         insetTop={!hostedInCard}
       />
 

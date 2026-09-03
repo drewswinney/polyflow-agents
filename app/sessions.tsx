@@ -5,11 +5,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { SessionSummary } from '@/domain'
 import { useBackend, useConnectionFault, useConnectionState } from '@/state/ConnectionProvider'
-import { useAgents, useSelectedAgent, useSelectedServerOrNull, useSelectAgent } from '@/state/agents'
+import { useSelectedAgent } from '@/state/agents'
 import { useSessions, useSessionSearch } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
-import { AgentPill } from '@/ui/components/AgentPill'
-import { AgentSwitcher } from '@/ui/components/AgentSwitcher'
 import { BlockedStrip } from '@/ui/components/BlockedStrip'
 import { Card, Divider } from '@/ui/components/Card'
 import { AgentGlyph, Icon } from '@/ui/components/Icon'
@@ -33,17 +31,11 @@ export default function SessionsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const agent = useSelectedAgent()
-  const server = useSelectedServerOrNull()
-  const servers = useAgents(state => state.servers)
-  const agents = useAgents(state => state.agents)
-  const selectAgent = useSelectAgent()
-  const dismissAgent = useAgents(state => state.dismissAgent)
   const backend = useBackend()
   const connection = useConnectionState()
   const fault = useConnectionFault()
   const openSidebar = useSidebar(store => store.show)
 
-  const [switcherOpen, setSwitcherOpen] = useState(false)
   const [searchActive, setSearchActive] = useState(false)
   const [query, setQuery] = useState('')
 
@@ -86,14 +78,6 @@ export default function SessionsScreen() {
         <ScreenHeader
           title="Sessions"
           onMenu={openSidebar}
-          center={
-            <AgentPill
-              agent={agent}
-              connection={server?.connection ?? 'offline'}
-              open={switcherOpen}
-              onPress={() => setSwitcherOpen(true)}
-            />
-          }
           right={
             <IconButton
               name="magnifying-glass"
@@ -162,16 +146,6 @@ export default function SessionsScreen() {
         )}
       </ScrollView>
 
-      <AgentSwitcher
-        servers={servers}
-        agents={agents}
-        selectedId={agent.id}
-        visible={switcherOpen}
-        onSelect={selectAgent}
-        onDismissAgent={id => void dismissAgent(id)}
-        onAddServer={() => router.push('/servers/new' as never)}
-        onDismiss={() => setSwitcherOpen(false)}
-      />
     </View>
   )
 }

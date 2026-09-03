@@ -1,15 +1,12 @@
 import { Redirect, router } from 'expo-router'
-import { useState } from 'react'
 import { Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { missingCapabilityLabels, NO_CAPABILITIES } from '@/domain'
 import { forgetAgentCredential } from '@/platform/secure-store'
 import { useBackend, useConnectionState, useReconnect } from '@/state/ConnectionProvider'
-import { useAgents, useSelectedAgent, useSelectedAgentOrNull, useSelectedServerOrNull, useSelectAgent } from '@/state/agents'
+import { useAgents, useSelectedAgent, useSelectedAgentOrNull, useSelectedServerOrNull } from '@/state/agents'
 import { useSidebar } from '@/state/sidebar'
-import { AgentPill } from '@/ui/components/AgentPill'
-import { AgentSwitcher } from '@/ui/components/AgentSwitcher'
 import { Card, Divider } from '@/ui/components/Card'
 import { AgentGlyph, Icon } from '@/ui/components/Icon'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
@@ -37,10 +34,7 @@ export default function SettingsScreen() {
   const maybeAgent = useSelectedAgentOrNull()
   const agent = useSelectedAgent()
   const server = useSelectedServerOrNull()
-  const servers = useAgents(state => state.servers)
   const agents = useAgents(state => state.agents)
-  const selectAgent = useSelectAgent()
-  const dismissAgent = useAgents(state => state.dismissAgent)
   const removeServer = useAgents(state => state.removeServer)
   const backend = useBackend()
   
@@ -51,7 +45,6 @@ export default function SettingsScreen() {
   const state = useConnectionState()
   const reconnect = useReconnect()
   const openSidebar = useSidebar(store => store.show)
-  const [switcherOpen, setSwitcherOpen] = useState(false)
 
   // Home is the app's one gate on an empty registry: it sends you to the
   // introduction, and that is where removing the last server should land.
@@ -138,18 +131,7 @@ export default function SettingsScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
-      <ScreenHeader
-        title="Settings"
-        onMenu={openSidebar}
-        center={
-            <AgentPill
-              agent={agent}
-              connection={server?.connection ?? 'offline'}
-              open={switcherOpen}
-              onPress={() => setSwitcherOpen(true)}
-            />
-          }
-      />
+      <ScreenHeader title="Settings" onMenu={openSidebar} />
 
       <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
         <Card style={styles.connection}>
@@ -250,16 +232,6 @@ export default function SettingsScreen() {
         ) : null}
       </ScrollView>
 
-      <AgentSwitcher
-        servers={servers}
-        agents={agents}
-        selectedId={agent.id}
-        visible={switcherOpen}
-        onSelect={selectAgent}
-        onDismissAgent={id => void dismissAgent(id)}
-        onAddServer={() => router.push('/servers/new' as never)}
-        onDismiss={() => setSwitcherOpen(false)}
-      />
     </View>
   )
 }

@@ -6,9 +6,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { ConfigField } from '@/domain'
 import { useBackend } from '@/state/ConnectionProvider'
-import { useAgents, useSelectedAgent, useSelectAgent } from '@/state/agents'
+import { useSelectedAgent } from '@/state/agents'
 import { Card, Divider } from '@/ui/components/Card'
-import { AgentSwitcher } from '@/ui/components/AgentSwitcher'
 import { Segmented } from '@/ui/components/Segmented'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
@@ -34,11 +33,6 @@ export default function ConfigScreen() {
   const agent = useSelectedAgent()
   const backend = useBackend()
   const queryClient = useQueryClient()
-  const servers = useAgents(state => state.servers)
-  const agents = useAgents(state => state.agents)
-  const selectAgent = useSelectAgent()
-  const dismissAgent = useAgents(state => state.dismissAgent)
-  const [switcherOpen, setSwitcherOpen] = useState(false)
 
   const fieldsKey = ['agent', agent.id, 'config'] as const
 
@@ -95,16 +89,6 @@ export default function ConfigScreen() {
         )}
       </ScrollView>
 
-      <AgentSwitcher
-        servers={servers}
-        agents={agents}
-        selectedId={agent.id}
-        visible={switcherOpen}
-        onSelect={selectAgent}
-        onDismissAgent={id => void dismissAgent(id)}
-        onAddServer={() => router.push('/servers/new' as never)}
-        onDismiss={() => setSwitcherOpen(false)}
-      />
     </View>
   )
 }

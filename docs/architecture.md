@@ -796,6 +796,18 @@ missing (§5.2a) sit dimmed under their server with a dismiss.
 
 Selecting an agent re-scopes the entire app (§5.2).
 
+The pill is on every screen that has a header, drawn by `ScreenHeader` itself
+rather than wired up per screen — a screen that cannot say which agent it is
+scoped to is a screen you have to leave to find out. The one exception is
+"Connect a server", which is the modal you reach when there is no agent to name.
+
+Selecting lands you on **New session**. The screens you can switch from are
+scoped to the agent you just left — a transcript belongs to one agent's session,
+a cron list to one agent's jobs — so staying put would redraw them against
+something else's data. New session is the one screen that means the same thing
+for every agent. Re-picking the agent you are already on is not a switch: the
+popover closes and you stay where you are.
+
 ### 7.14 Connect a server
 
 **Kind first**, because it determines everything after: "Another Hermes" (full
