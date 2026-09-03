@@ -244,7 +244,8 @@ export const SHADOW = {
   }
 } as const
 
-/** The 135° gradient — composer send button and the user's own bubbles only. */
+/** The 135° gradient — composer send button, the user's own bubbles, and the
+ *  new-session glyph only. */
 export const GRADIENT = {
   start: { x: 0, y: 0 },
   end: { x: 1, y: 1 }
