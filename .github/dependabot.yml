@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      expo:
+        patterns: ['expo', 'expo-*', '@expo/*']
+      dev:
+        dependency-type: development
+
+  # Actions are pinned to commit SHAs, so this is how pins get refreshed.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

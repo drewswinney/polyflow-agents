@@ -1,4 +1,4 @@
-repo: drewswinney/agent-handheld
+repo: drewswinney/polyflow-agents
 branch: docs/initial-architecture
 path: docs
 

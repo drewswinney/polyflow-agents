@@ -405,7 +405,7 @@ export class MockBackend implements AgentBackend {
   private seedBoard(): KanbanBoard {
     return {
       title: 'Agent Handheld',
-      source: 'hermes kanban board: agent-handheld',
+      source: 'hermes kanban board: polyflow-agents',
       updatedAt: Date.now(),
       columns: [
         {

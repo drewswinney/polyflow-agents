@@ -5,7 +5,7 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "hermeshandheld",
+    "scheme": "polyflowagents",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
@@ -15,7 +15,7 @@
         "tinted": "./assets/images/ios-icon-tinted.png"
       },
       "supportsTablet": false,
-      "bundleIdentifier": "com.drewswinney.agenthandheld",
+      "bundleIdentifier": "com.drewswinney.polyflowagents",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
@@ -24,7 +24,7 @@
       }
     },
     "android": {
-      "package": "com.drewswinney.agenthandheld",
+      "package": "com.drewswinney.polyflowagents",
       "adaptiveIcon": {
         "backgroundColor": "#ffffff",
         "foregroundImage": "./assets/images/android-icon-foreground.png",

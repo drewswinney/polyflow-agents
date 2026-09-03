@@ -1,0 +1,118 @@
+name: Release to stores
+
+# Builds production binaries and submits them to App Store Connect and Google
+# Play. Runs in the `production` environment, so with a required reviewer set on
+# that environment every store submission waits for a manual approval — the last
+# line of defence if a dependency or the Expo token is ever compromised.
+#
+# The only GitHub secret this needs is EXPO_TOKEN. The App Store Connect API key
+# and the Google Play service account live on EAS — see CONTRIBUTING.md.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: Platforms to release
+        type: choice
+        options: [all, ios, android]
+        default: all
+      submit:
+        description: Submit the build to the store after it finishes
+        type: boolean
+        default: true
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  platforms:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      platforms: ${{ steps.plan.outputs.platforms }}
+    steps:
+      - name: Resolve platforms
+        id: plan
+        run: |
+          set -euo pipefail
+          case "$PLATFORM" in
+            all) platforms='["ios","android"]' ;;
+            ios) platforms='["ios"]' ;;
+            android) platforms='["android"]' ;;
+            *) echo "unknown platform '$PLATFORM'" >&2; exit 1 ;;
+          esac
+          echo "platforms=$platforms" >> "$GITHUB_OUTPUT"
+        env:
+          PLATFORM: ${{ inputs.platform || 'all' }}
+
+  release:
+    name: Release ${{ matrix.platform }}
+    needs: platforms
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    environment: production
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: ${{ fromJSON(needs.platforms.outputs.platforms) }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - uses: expo/expo-github-action@c7b66a9c327a43a8fa7c0158e7f30d6040d2481e # v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      # `--wait` blocks until the build finishes; the JSON tail carries the build
+      # id, so the submit step targets this exact build rather than whatever
+      # `--latest` happens to point at by then.
+      - name: Build
+        id: build
+        run: |
+          set -euo pipefail
+          eas build \
+            --platform "$MATRIX_PLATFORM" \
+            --profile production \
+            --message "${GITHUB_REF_NAME} (${GITHUB_SHA::7})" \
+            --non-interactive \
+            --wait \
+            --json > build.json
+          build_id="$(jq -r '.[0].id' build.json)"
+          if [ -z "$build_id" ] || [ "$build_id" = "null" ]; then
+            echo "could not read a build id from eas build output" >&2
+            cat build.json >&2
+            exit 1
+          fi
+          echo "id=$build_id" >> "$GITHUB_OUTPUT"
+          echo "- \`$MATRIX_PLATFORM\`: built \`$build_id\`" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          MATRIX_PLATFORM: ${{ matrix.platform }}
+
+      - name: Submit to store
+        if: inputs.submit != false
+        run: |
+          eas submit \
+            --platform "$MATRIX_PLATFORM" \
+            --profile production \
+            --id "$BUILD_ID" \
+            --non-interactive \
+            --wait
+          echo "- \`$MATRIX_PLATFORM\`: submitted \`$BUILD_ID\`" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          MATRIX_PLATFORM: ${{ matrix.platform }}
+          BUILD_ID: ${{ steps.build.outputs.id }}

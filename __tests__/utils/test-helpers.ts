@@ -1,4 +1,4 @@
-// Test utilities and helpers for agent-handheld tests
+// Test utilities and helpers for polyflow-agents tests
 
 import { render, RenderOptions } from '@testing-library/react-native';
 import React from 'react';
