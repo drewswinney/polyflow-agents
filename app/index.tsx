@@ -1,3 +1,4 @@
+import { LinearGradient } from 'expo-linear-gradient'
 import { Redirect, router } from 'expo-router'
 import { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
@@ -14,7 +15,7 @@ import { AgentGlyph } from '@/ui/components/Icon'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { KeyboardInset } from '@/ui/keyboard'
-import { useTheme } from '@/ui/ThemeProvider'
+import { useGradient, useTheme } from '@/ui/ThemeProvider'
 
 /**
  * New session — the app's home.
@@ -29,6 +30,7 @@ import { useTheme } from '@/ui/ThemeProvider'
  */
 export default function NewSessionScreen() {
   const theme = useTheme()
+  const gradient = useGradient()
   // Home is the gate: with no agents there is nothing to message, and every
   // other screen assumes one exists. Hooks all run first — an early return
   // above them would change the hook order between renders.
@@ -88,9 +90,14 @@ export default function NewSessionScreen() {
       <KeyboardInset style={styles.flex}>
         <View style={styles.body}>
           <View style={styles.empty}>
-            <View style={[styles.ring, { borderColor: theme.color.secondaryMuted }]}>
-              <AgentGlyph name={agent.icon} size={34} color={theme.color.info700} />
-            </View>
+            <LinearGradient
+              colors={gradient.colors}
+              start={gradient.start}
+              end={gradient.end}
+              style={styles.ring}
+            >
+              <AgentGlyph name={agent.icon} size={34} color={theme.color.onAccent} />
+            </LinearGradient>
             <Text variant="sheetTitle">{`Message ${agent.displayName}`}</Text>
             <Text variant="secondary" style={styles.emptyBody}>
               The session starts when you send. It then appears in the sidebar and on Sessions.
@@ -137,7 +144,6 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
     borderRadius: 34,
-    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 4
