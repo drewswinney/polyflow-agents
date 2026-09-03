@@ -17,7 +17,23 @@ import Constants from 'expo-constants'
 import * as Notifications from 'expo-notifications'
 import { AppState, Platform } from 'react-native'
 
+import { shouldPresentNotification } from '@/state/notification-presentation'
+
 let handlerInstalled = false
+
+/**
+ * The session whose chat is on screen, or null.
+ *
+ * Kept at module scope because `setNotificationHandler` takes a plain function
+ * that outlives any render, so the handler cannot read this from a hook. The
+ * root layout keeps it current — see `useVisibleSession`.
+ */
+let visibleSessionId: string | null = null
+
+/** Told by the router which chat is in front of the user, so a banner about it can be skipped. */
+export function setVisibleSession(sessionId: string | null): void {
+  visibleSessionId = sessionId
+}
 
 /**
  * Registered on first use, never at import.
@@ -48,17 +64,29 @@ export function ensureNotificationHandler(): void {
 
   try {
     Notifications.setNotificationHandler({
-      // Only while backgrounded — the rule the local path already applies
-      // (`notification-tap`), now applied to the host's push as well. The host
-      // pushes for every finished turn, and an app in the foreground is more
-      // often than not showing the very chat the push is about; a banner over
-      // that is noise. The OS only asks this of a foregrounded app — a push
-      // that lands on a backgrounded one is presented without asking — so
-      // what this decides in practice is that nothing is shown on the way in
-      // or out. The push is still received, and still written to the ledger,
-      // so the socket does not announce the same turn again.
-      handleNotification: async () => {
-        const show = AppState.currentState === 'background'
+      // Present everything except the one banner that is genuinely redundant:
+      // a notification about the chat you are looking at *right now*.
+      //
+      // This used to ask `AppState.currentState === 'background'`, which reads
+      // as "only interrupt someone who looked away" but is a constant `false`
+      // in practice. The OS only consults this handler for a *foregrounded*
+      // app — a notification that lands on a backgrounded one is presented
+      // without asking — so the state is `active` every time the question is
+      // put, and the answer was always "show nothing". Since the local path
+      // (`notification-tap`) fires only while backgrounded, that left no state
+      // in which the app could raise a banner at all: the host delivered, and
+      // the phone silently dropped it. `shouldShowList: false` meant it did
+      // not even reach Notification Center, so there was nothing to find later.
+      handleNotification: async notification => {
+        const data = notification.request.content.data as { sessionId?: string } | undefined
+
+        // Anything but the chat already on screen — another session, a list, a
+        // push with no session to open — is news, and gets a banner.
+        const show = shouldPresentNotification({
+          sessionId: typeof data?.sessionId === 'string' ? data.sessionId : undefined,
+          visibleSessionId,
+          appState: AppState.currentState
+        })
 
         return {
           shouldShowBanner: show,
