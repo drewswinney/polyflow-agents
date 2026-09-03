@@ -31,6 +31,17 @@ running but not foregrounded. That covers "I looked away for a minute". It does
 not cover "my phone was in my pocket for an hour", which is the case that
 actually matters — the agent is halted on an approval and stays halted.
 
+**What is shown, once something has arrived.** A notification the host pushes is
+presented unless it is about the chat already on screen — that one banner is the
+only redundant one, and `src/state/notification-presentation.ts` is the rule.
+Worth stating because the obvious-looking version of it does not work: asking
+`AppState.currentState === 'background'` inside `setNotificationHandler` is a
+constant `false`, since the OS only consults that handler for a **foregrounded**
+app and presents a backgrounded one's notifications without asking. Written that
+way it silenced every push that landed while the app was open, and, governing
+`shouldShowList` too, kept them out of Notification Center as well — delivered
+perfectly by the host, invisible on the phone.
+
 ## 2. What the host actually offers
 
 Verified against the pinned upstream tree (`hermes:~/.hermes/hermes-agent`, ref

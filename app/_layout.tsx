@@ -15,10 +15,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { View } from 'react-native'
 import { SafeAreaProvider } from 'react-native-safe-area-context'
 
+import { setVisibleSession } from '@/platform/notifications'
 import { ConnectionProvider, useBackend } from '@/state/ConnectionProvider'
 import { useAgents, useSelectedAgentOrNull, useSelectedServerOrNull } from '@/state/agents'
 import { useNotificationRouting } from '@/state/notification-routing'
 import { useNotificationTap } from '@/state/notification-tap'
+import { visibleSessionFromPath } from '@/state/notification-presentation'
 import { useSessions } from '@/state/queries'
 import { useSessionListSync } from '@/state/session-list-sync'
 import { restoreQueryCache, startPersistingQueryCache } from '@/state/query-cache-persistence'
@@ -296,7 +298,19 @@ function AppSidebar() {
 function NotificationRouting() {
   const agent = useSelectedAgentOrNull()
   const backend = useBackend()
-  
+  const pathname = usePathname()
+
+  // Which chat is in front of the user, so the presentation handler can skip
+  // the one banner that is redundant — a notification about the very session
+  // already on screen. Everything else is presented, including a push for
+  // another session while this one is open. Read from the route rather than
+  // held by the chat screen: this component outlives every screen, and a
+  // session id that was never cleared on unmount would silence that chat for
+  // the rest of the launch.
+  useEffect(() => {
+    setVisibleSession(visibleSessionFromPath(pathname))
+  }, [pathname])
+
   // Route notification taps to the right session
   useNotificationRouting()
   
