@@ -323,6 +323,13 @@ export default function ChatScreen() {
                 data={stream.entries}
                 keyExtractor={entry => entry.id}
                 renderItem={renderItem}
+                // Always flexed so it fills the stage from first mount; only
+                // opacity is gated on `placed` (hidden until onLoad +
+                // scrollToEnd land it). A non-flexed list before placed would
+                // measure the wrong viewport and break the first bottom
+                // placement. (Both are single registered style refs — never
+                // spread StyleSheet entries, they are numeric registry IDs,
+                // and `{...aNumericId}` is `{}`.)
                 style={placed ? styles.flex : styles.unplaced}
                 contentContainerStyle={[styles.list, { paddingBottom: composerHeight }]}
                 // Only when there is something to say. An always-mounted header
@@ -410,12 +417,14 @@ export default function ChatScreen() {
                   of pushing the list around. Anchored to the stage's bottom
                   edge — the keyboard top while it animates — so the stack
                   rides the keyboard like the old flex layout did. */}
-              <View style={styles.composerOverlay} onLayout={onOverlayLayout}>
+              <View style={styles.composerOverlay} onLayout={onOverlayLayout} pointerEvents="box-none">
                 {(stream.approval || stream.clarify) && manual ? <ApprovalNudge onPress={follow} /> : null}
 
                 {/* The measured frame for the list's bottom padding: the bar's
-                    full laid-out height, strip and queued notice included. */}
-                <View onLayout={onComposerLayout}>
+                    full laid-out height, strip and queued notice included.
+                    `box-none` — a measurement-only wrapper must not be a
+                    touch shield either. */}
+                <View onLayout={onComposerLayout} pointerEvents="box-none">
                   <Composer
                     streaming={running}
                     offline={state !== 'open'}
@@ -440,8 +449,11 @@ const styles = StyleSheet.create({
   flex: { flex: 1 },
   stage: { flex: 1 },
   loading: { marginTop: 32 },
-  // Laid out and measured, just not watched while it happens.
-  unplaced: { opacity: 0 },
+  // Laid out and measured, just not watched while it happens. Carries the
+  // list's own `flex: 1` — the FlashList is the stage's flex child directly,
+  // so the hidden phase must stay flexed (a collapsed list before `placed`
+  // would measure the wrong viewport).
+  unplaced: { flex: 1, opacity: 0 },
   list: { paddingHorizontal: 16, paddingVertical: 16 },
   header: { gap: 10, paddingBottom: 6 },
   entry: { paddingVertical: 7 },

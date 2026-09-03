@@ -97,8 +97,12 @@ export function Composer({
   return (
     // No fill of its own: the bar is transparent so the screen (or, on chat,
     // the transcript scrolling behind it) shows through. Opaque are only the
-    // pill, the action button, and the strip above them.
-    <Animated.View style={[styles.wrap, bottomPadding]}>
+    // pill, the action button, and the strip above them. `pointerEvents:
+    // box-none` goes with that — the bar's padding and the gap between the
+    // pill and the button must not shield whatever sits behind the bar (the
+    // transcript on chat; on home it just narrows the hit targets to the real
+    // controls).
+    <Animated.View style={[styles.wrap, bottomPadding]} pointerEvents="box-none">
       {queued > 0 ? (
         <Text variant="secondary" color={theme.color.warning700} style={styles.queued}>
           {`${queued} message${queued === 1 ? '' : 's'} queued — sends on reconnect`}
@@ -117,7 +121,11 @@ export function Composer({
         </ScrollView>
       ) : null}
 
-      <View style={styles.row}>
+      {/* `box-none`: the row spans the pill↔button gap, which is transparent
+          and must pass touches to whatever is behind the bar. The pill and
+          the action button are real Views with their own hit targets and
+          keep `auto` behavior. */}
+      <View style={styles.row} pointerEvents="box-none">
         <View
           style={[
             styles.field,
