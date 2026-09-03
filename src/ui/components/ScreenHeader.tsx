@@ -4,6 +4,7 @@ import { StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useTheme } from '../ThemeProvider'
+import { AgentSelector } from './AgentSelector'
 import { IconButton } from './IconButton'
 import { Text } from './Text'
 
@@ -45,7 +46,14 @@ export function ScreenHeader({
 }: {
   title: string
   subtitle?: ReactNode
-  center?: ReactNode
+  /**
+   * What sits in the pill row above the title.
+   *
+   * Left out, it is the agent selector — which is why every screen has one
+   * without asking. Pass `null` for a screen that must not offer a switch;
+   * pass a node to put something else there.
+   */
+  center?: ReactNode | null
   onBack?: () => void
   /**
    * Opens the sidebar. Top-level screens pass this where a sub-screen passes
@@ -105,7 +113,15 @@ export function ScreenHeader({
         }
       ]}
     >
-      {center ? <View style={styles.pillRow}>{center}</View> : null}
+      {/* `undefined` means "not specified" and gets the selector; `null` means
+          "deliberately nothing", which is how a screen opts out. */}
+      {center === undefined ? (
+        <View style={styles.pillRow}>
+          <AgentSelector />
+        </View>
+      ) : center ? (
+        <View style={styles.pillRow}>{center}</View>
+      ) : null}
 
       {/* Everything on this row shares one vertical centre — that is the whole
           point of it being its own row. */}

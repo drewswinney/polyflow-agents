@@ -31,9 +31,10 @@ export default function ThemeSettingsScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
-      <ScreenHeader title="Theme" />
-      
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>\n        <Card>
+      <ScreenHeader title="Theme" onBack={() => router.back()} />
+
+      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
+        <Card>
           {THEME_OPTIONS.map((option, index) => (
             <View key={option.value}>
               {index > 0 ? <Divider /> : null}

@@ -7,7 +7,7 @@ import { ActivityIndicator, Keyboard, Platform, StyleSheet, View } from 'react-n
 import type { TranscriptEntry } from '@/domain'
 import { useBackend, useConnectionState } from '@/state/ConnectionProvider'
 import { useAgentScopedRoute } from '@/state/agent-scope'
-import { useAgents, useSelectedAgent, useSelectedServer } from '@/state/agents'
+import { useSelectedAgent, useSelectedServer } from '@/state/agents'
 import { useSidebar } from '@/state/sidebar'
 import { useSessionStream } from '@/state/session-stream'
 import { useIsStreaming } from '@/state/stream-tail'
@@ -20,7 +20,6 @@ import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { ScrollToBottomButton } from '@/ui/components/ScrollToBottomButton'
 import { StreamingTail } from '@/ui/components/StreamingTail'
 import { Text } from '@/ui/components/Text'
-import { AgentPill } from '@/ui/components/AgentPill'
 import { KanbanMentionProvider } from '@/ui/components/KanbanMentions'
 import { TranscriptEntryView } from '@/ui/components/TranscriptEntryView'
 import { compactTokens, usd } from '@/ui/format'
@@ -43,7 +42,6 @@ export default function ChatScreen() {
   // which is the server's rather than the agent's — several agents share one.
   const server = useSelectedServer()
   const agent = useSelectedAgent()
-  const connection = useAgents(state => state.servers.find(s => s.id === server.id)?.connection ?? 'offline')
   const { id } = useLocalSearchParams<{ id: string }>()
   const backend = useBackend()
   const state = useConnectionState()
@@ -291,14 +289,6 @@ export default function ChatScreen() {
                 {stream.approval || stream.clarify ? 'blocked on you' : 'reconnecting…'}
               </Text>
             )
-          }
-          center={
-            <AgentPill
-              agent={agent}
-              connection={connection}
-              open={false}
-              disabled={true}
-            />
           }
           right={<IconButton name="ellipsis" accessibilityLabel="Session options" edge="right" />}
         />

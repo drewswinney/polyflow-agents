@@ -1,15 +1,12 @@
 import { LinearGradient } from 'expo-linear-gradient'
 import { Redirect, router } from 'expo-router'
-import { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 
 import { useBackend, useConnectionState } from '@/state/ConnectionProvider'
-import { useAgents, useSelectedAgent, useSelectedAgentOrNull, useSelectedServerOrNull, useSelectAgent } from '@/state/agents'
+import { useSelectedAgent, useSelectedAgentOrNull } from '@/state/agents'
 import { useChatInbox } from '@/state/chat-inbox'
 import { useCreateSession } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
-import { AgentPill } from '@/ui/components/AgentPill'
-import { AgentSwitcher } from '@/ui/components/AgentSwitcher'
 import { Composer } from '@/ui/components/Composer'
 import { AgentGlyph } from '@/ui/components/Icon'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
@@ -36,16 +33,10 @@ export default function NewSessionScreen() {
   // above them would change the hook order between renders.
   const maybeAgent = useSelectedAgentOrNull()
   const agent = useSelectedAgent()
-  const server = useSelectedServerOrNull()
-  const servers = useAgents(state => state.servers)
-  const agents = useAgents(state => state.agents)
-  const selectAgent = useSelectAgent()
-  const dismissAgent = useAgents(state => state.dismissAgent)
   const backend = useBackend()
   const state = useConnectionState()
   const openSidebar = useSidebar(store => store.show)
   const submitMessage = useChatInbox(inbox => inbox.submit)
-  const [switcherOpen, setSwitcherOpen] = useState(false)
 
   const createSession = useCreateSession(maybeAgent?.id ?? '', backend)
 
@@ -74,18 +65,7 @@ export default function NewSessionScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
-      <ScreenHeader
-        title="New session"
-        onMenu={openSidebar}
-        center={
-            <AgentPill
-              agent={agent}
-              connection={server?.connection ?? 'offline'}
-              open={switcherOpen}
-              onPress={() => setSwitcherOpen(true)}
-            />
-          }
-      />
+      <ScreenHeader title="New session" onMenu={openSidebar} />
 
       <KeyboardInset style={styles.flex}>
         <View style={styles.body}>
@@ -121,16 +101,6 @@ export default function NewSessionScreen() {
         />
       </KeyboardInset>
 
-      <AgentSwitcher
-        servers={servers}
-        agents={agents}
-        selectedId={agent.id}
-        visible={switcherOpen}
-        onSelect={selectAgent}
-        onDismissAgent={id => void dismissAgent(id)}
-        onAddServer={() => router.push('/servers/new' as never)}
-        onDismiss={() => setSwitcherOpen(false)}
-      />
     </View>
   )
 }
