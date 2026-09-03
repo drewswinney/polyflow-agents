@@ -3,16 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "description": "A cross-platform (iOS + Android) mobile client for a [Hermes](https://github.com/) agent, built so the agent harness behind it can be swapped later.",
-  "homepage": "https://github.com/drewswinney/agent-handheld#readme",
+  "homepage": "https://github.com/drewswinney/polyflow-agents#readme",
   "bugs": {
-    "url": "https://github.com/drewswinney/agent-handheld/issues"
+    "url": "https://github.com/drewswinney/polyflow-agents/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/drewswinney/agent-handheld.git"
+    "url": "git+https://github.com/drewswinney/polyflow-agents.git"
   },
-  "license": "ISC",
-  "author": "",
+  "license": "MIT",
+  "author": "Drew Swinney",
   "main": "expo-router/entry",
   "directories": {
     "doc": "docs"

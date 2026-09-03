@@ -4,10 +4,8 @@ name: EAS deploy
 # whenever the native fingerprint has changed (new dependency, app.json/eas.json
 # change, new asset — anything expo prebuild bakes into the binary).
 #
-# Repository secrets this needs:
-#   EXPO_TOKEN                        Expo access token (Expo → account settings → access tokens)
-#   EXPO_APPLE_ID                     Apple ID used for the app's signing credentials
-#   EXPO_APPLE_APP_SPECIFIC_PASSWORD  App-specific password for that Apple ID
+# The only GitHub secret this needs is EXPO_TOKEN. Signing credentials live on
+# EAS, not here — see CONTRIBUTING.md.
 
 on:
   workflow_dispatch:
@@ -40,6 +38,9 @@ concurrency:
   group: eas-deploy-${{ inputs.channel || 'preview' }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 env:
   CHANNEL: ${{ inputs.channel || 'preview' }}
   PROFILE: ${{ inputs.profile || inputs.channel || 'preview' }}
@@ -50,13 +51,14 @@ jobs:
     name: Plan
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    environment: ${{ inputs.channel || 'preview' }}
     outputs:
       channel: ${{ steps.target.outputs.channel }}
       profile: ${{ steps.target.outputs.profile }}
       platforms: ${{ steps.fingerprint.outputs.platforms }}
       any_build: ${{ steps.fingerprint.outputs.any_build }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Resolve target
         id: target
@@ -65,7 +67,7 @@ jobs:
           echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"
           echo "Deploying to channel \`$CHANNEL\` with profile \`$PROFILE\`." >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -73,7 +75,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - uses: expo/expo-github-action@v8
+      - uses: expo/expo-github-action@c7b66a9c327a43a8fa7c0158e7f30d6040d2481e # v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
@@ -133,14 +135,15 @@ jobs:
     if: needs.plan.outputs.any_build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    environment: ${{ inputs.channel || 'preview' }}
     strategy:
       fail-fast: false
       matrix:
         platform: ${{ fromJSON(needs.plan.outputs.platforms) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -148,24 +151,24 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - uses: expo/expo-github-action@v8
+      - uses: expo/expo-github-action@c7b66a9c327a43a8fa7c0158e7f30d6040d2481e # v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
 
+      # Signing credentials are held by EAS, so no Apple or Google secrets are
+      # needed here. Set them up once with `eas credentials`.
       - name: Build
         run: |
           eas build \
-            --platform "${{ matrix.platform }}" \
-            --profile "${{ needs.plan.outputs.profile }}" \
+            --platform "$MATRIX_PLATFORM" \
+            --profile "$BUILD_PROFILE" \
             --message "${GITHUB_SHA::7} on ${GITHUB_REF_NAME}" \
             --non-interactive \
             --wait
         env:
-          # Apple sign-in for non-interactive credential syncing. Android uses the
-          # keystore EAS already holds for the project.
-          EXPO_APPLE_ID: ${{ secrets.EXPO_APPLE_ID }}
-          EXPO_APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.EXPO_APPLE_APP_SPECIFIC_PASSWORD }}
+          MATRIX_PLATFORM: ${{ matrix.platform }}
+          BUILD_PROFILE: ${{ needs.plan.outputs.profile }}
 
   update:
     name: OTA update
@@ -177,10 +180,11 @@ jobs:
       && inputs.skip_update != true
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    environment: ${{ inputs.channel || 'preview' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: npm
@@ -188,7 +192,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - uses: expo/expo-github-action@v8
+      - uses: expo/expo-github-action@c7b66a9c327a43a8fa7c0158e7f30d6040d2481e # v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
@@ -196,21 +200,19 @@ jobs:
       - name: Ensure the channel exists
         run: |
           set -euo pipefail
-          channel="${{ needs.plan.outputs.channel }}"
-          if eas channel:view "$channel" --non-interactive --json >/dev/null 2>&1; then
-            echo "channel '$channel' already exists"
+          if eas channel:view "$CHANNEL" --non-interactive --json >/dev/null 2>&1; then
+            echo "channel '$CHANNEL' already exists"
           else
             # Creates the channel and links it to a branch of the same name.
-            eas channel:create "$channel" --non-interactive
+            eas channel:create "$CHANNEL" --non-interactive
           fi
 
       - name: Publish update
         run: |
           eas update \
-            --channel "${{ needs.plan.outputs.channel }}" \
+            --channel "$CHANNEL" \
             --message "${GITHUB_SHA::7} on ${GITHUB_REF_NAME}" \
             --non-interactive
 
       - name: Summary
-        run: |
-          echo "Published an OTA update to \`${{ needs.plan.outputs.channel }}\`." >> "$GITHUB_STEP_SUMMARY"
+        run: echo "Published an OTA update to \`$CHANNEL\`." >> "$GITHUB_STEP_SUMMARY"
