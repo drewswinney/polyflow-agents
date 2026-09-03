@@ -95,13 +95,14 @@ export function Composer({
   }
 
   return (
-    <Animated.View
-      style={[
-        styles.wrap,
-        { backgroundColor: theme.color.surface, borderTopColor: theme.color.border },
-        bottomPadding
-      ]}
-    >
+    // No fill of its own: the bar is transparent so the screen (or, on chat,
+    // the transcript scrolling behind it) shows through. Opaque are only the
+    // pill, the action button, and the strip above them. `pointerEvents:
+    // box-none` goes with that — the bar's padding and the gap between the
+    // pill and the button must not shield whatever sits behind the bar (the
+    // transcript on chat; on home it just narrows the hit targets to the real
+    // controls).
+    <Animated.View style={[styles.wrap, bottomPadding]} pointerEvents="box-none">
       {queued > 0 ? (
         <Text variant="secondary" color={theme.color.warning700} style={styles.queued}>
           {`${queued} message${queued === 1 ? '' : 's'} queued — sends on reconnect`}
@@ -120,7 +121,11 @@ export function Composer({
         </ScrollView>
       ) : null}
 
-      <View style={styles.row}>
+      {/* `box-none`: the row spans the pill↔button gap, which is transparent
+          and must pass touches to whatever is behind the bar. The pill and
+          the action button are real Views with their own hit targets and
+          keep `auto` behavior. */}
+      <View style={styles.row} pointerEvents="box-none">
         <View
           style={[
             styles.field,
@@ -264,7 +269,7 @@ function ActionButton({
 }
 
 const styles = StyleSheet.create({
-  wrap: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingTop: 10, gap: 8 },
+  wrap: { paddingHorizontal: 12, paddingTop: 10, gap: 8 },
   queued: { paddingHorizontal: 4 },
   strip: { flexDirection: 'row', gap: 8, paddingHorizontal: 4, paddingTop: 2, paddingRight: 8 },
   thumb: { width: 56, height: 56, borderWidth: StyleSheet.hairlineWidth },

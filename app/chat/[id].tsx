@@ -1,7 +1,7 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
+import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
 import { ActivityIndicator, Keyboard, Platform, StyleSheet, View } from 'react-native'
 
 import type { TranscriptEntry } from '@/domain'
@@ -104,6 +104,33 @@ export default function ChatScreen() {
    * the end should be allowed to resume following.
    */
   const dragging = useRef(false)
+
+  /**
+   * The composer's laid-out height, as clearance for the transcript.
+   *
+   * The bar floats over the bottom of the list, so the content's own bottom
+   * padding is the measured bar height: `scrollToEnd` then parks the last
+   * entry on the top edge of the pill instead of under it. The bar grows with
+   * the staged-image strip and the queued notice, and its bottom padding
+   * hands over to the keyboard while it animates, so it is measured rather
+   * than computed; the equality check keeps re-renders to real changes.
+   *
+   * `overlayHeight` is the bar *plus* the approval nudge that may sit on its
+   * top edge — the clearance the scroll-to-bottom button needs, since it
+   * shows only in manual mode, which is exactly when the nudge can too.
+   */
+  const [composerHeight, setComposerHeight] = useState(0)
+  const [overlayHeight, setOverlayHeight] = useState(0)
+
+  const onComposerLayout = useCallback((event: LayoutChangeEvent) => {
+    const height = event.nativeEvent.layout.height
+    setComposerHeight(current => (current === height ? current : height))
+  }, [])
+
+  const onOverlayLayout = useCallback((event: LayoutChangeEvent) => {
+    const height = event.nativeEvent.layout.height
+    setOverlayHeight(current => (current === height ? current : height))
+  }, [])
 
   /**
    * Whether the transcript has found its position yet.
@@ -280,13 +307,31 @@ export default function ChatScreen() {
           {stream.loading ? (
             <ActivityIndicator color={theme.color.secondary} style={styles.loading} />
           ) : (
-            <View style={[styles.flex, placed ? null : styles.unplaced]}>
+            // The stage fills the inset's content box — the area above the
+            // keyboard while it animates — so the absolutely positioned
+            // children below it (scroll button, composer overlay) anchor to
+            // the keyboard's top edge, not the screen's bottom: a child of
+            // the padding box it would be would park itself under the
+            // keyboard.
+            <View style={styles.stage}>
+              {/* Full height: the composer is no longer a flex sibling below
+                  it. The entries flow behind the bar, and the content's
+                  bottom padding — the bar's measured height — is what keeps
+                  the last one clear of the pill. */}
               <FlashList
                 ref={listRef}
                 data={stream.entries}
                 keyExtractor={entry => entry.id}
                 renderItem={renderItem}
-                contentContainerStyle={styles.list}
+                // Always flexed so it fills the stage from first mount; only
+                // opacity is gated on `placed` (hidden until onLoad +
+                // scrollToEnd land it). A non-flexed list before placed would
+                // measure the wrong viewport and break the first bottom
+                // placement. (Both are single registered style refs — never
+                // spread StyleSheet entries, they are numeric registry IDs,
+                // and `{...aNumericId}` is `{}`.)
+                style={placed ? styles.flex : styles.unplaced}
+                contentContainerStyle={[styles.list, { paddingBottom: composerHeight }]}
                 // Only when there is something to say. An always-mounted header
                 // that grows and shrinks with the connection is a height change at
                 // the top of the list, which every scroll position below it then
@@ -357,28 +402,42 @@ export default function ChatScreen() {
                   be taken back to, and a button pointing at where you already are
                   is chrome over the transcript for nothing.
 
-                  Anchored to the transcript's own bottom edge, which *is* the top
-                  of the composer: the list is the flex child above it. Pinning to
-                  the screen instead would put the button under the composer. */}
+                  Sits above the floating overlay (bar plus any nudge): the
+                  list now runs the full height of the stage, so the
+                  button's clearance from the bottom is the measured overlay
+                  height, not a fixed offset. */}
               {manual && placed ? (
-                <View style={styles.scrollButtonContainer}>
+                <View style={[styles.scrollButtonContainer, { bottom: overlayHeight + 14 }]}>
                   <ScrollToBottomButton onPress={follow} />
                 </View>
               ) : null}
+
+              {/* Floating above the transcript: the nudge and the composer share
+                  one overlay, so the nudge rests on the bar's top edge instead
+                  of pushing the list around. Anchored to the stage's bottom
+                  edge — the keyboard top while it animates — so the stack
+                  rides the keyboard like the old flex layout did. */}
+              <View style={styles.composerOverlay} onLayout={onOverlayLayout} pointerEvents="box-none">
+                {(stream.approval || stream.clarify) && manual ? <ApprovalNudge onPress={follow} /> : null}
+
+                {/* The measured frame for the list's bottom padding: the bar's
+                    full laid-out height, strip and queued notice included.
+                    `box-none` — a measurement-only wrapper must not be a
+                    touch shield either. */}
+                <View onLayout={onComposerLayout} pointerEvents="box-none">
+                  <Composer
+                    streaming={running}
+                    offline={state !== 'open'}
+                    queued={stream.outbox.length}
+                    onSend={stream.send}
+                    onStop={stream.cancel}
+                    onVoice={backend?.capabilities.media.audioIn ? () => router.push(`/voice/${id}`) : undefined}
+                    canAttach={backend?.capabilities.media.images ?? false}
+                  />
+                </View>
+              </View>
             </View>
           )}
-
-          {(stream.approval || stream.clarify) && manual ? <ApprovalNudge onPress={follow} /> : null}
-
-          <Composer
-            streaming={running}
-            offline={state !== 'open'}
-            queued={stream.outbox.length}
-            onSend={stream.send}
-            onStop={stream.cancel}
-            onVoice={backend?.capabilities.media.audioIn ? () => router.push(`/voice/${id}`) : undefined}
-            canAttach={backend?.capabilities.media.images ?? false}
-          />
         </KeyboardInset>
       </View>
     </KanbanMentionProvider>
@@ -388,9 +447,13 @@ export default function ChatScreen() {
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   flex: { flex: 1 },
+  stage: { flex: 1 },
   loading: { marginTop: 32 },
-  // Laid out and measured, just not watched while it happens.
-  unplaced: { opacity: 0 },
+  // Laid out and measured, just not watched while it happens. Carries the
+  // list's own `flex: 1` — the FlashList is the stage's flex child directly,
+  // so the hidden phase must stay flexed (a collapsed list before `placed`
+  // would measure the wrong viewport).
+  unplaced: { flex: 1, opacity: 0 },
   list: { paddingHorizontal: 16, paddingVertical: 16 },
   header: { gap: 10, paddingBottom: 6 },
   entry: { paddingVertical: 7 },
@@ -402,5 +465,16 @@ const styles = StyleSheet.create({
     bottom: 14,
     alignItems: 'center',
     pointerEvents: 'box-none'
+  },
+  // The nudge + composer, floating over the bottom of the stage (the inset's
+  // content box, i.e. the area above the keyboard). `bottom: 0` there means
+  // the stack's top edge rides on the keyboard top while it animates — the
+  // composer's own bottom padding tracks that — while the list behind keeps
+  // its full height.
+  composerOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0
   }
 })
