@@ -1,18 +1,71 @@
 version: 2
+
+# The Expo SDK -- not the npm registry -- decides the version of every native
+# module, of react and react-native, and of the SDK's own tooling.
+# `npx expo install --check` is the authority on those, and `npx expo install`
+# is how they change. Dependabot has no way to know that, so the SDK's packages
+# are held back here, and SDK upgrades are done deliberately on their own
+# branch, moving the whole set together.
+#
+# Two merges showed what happens otherwise. #53 landed SDK 57 tooling on an
+# SDK 54 app and left `npm ci` unresolvable; the group was titled "bump the dev
+# group with 10 updates", which read as routine. #56 moved netinfo past the
+# version SDK 54 bundles -- npm resolved it, tsc accepted it and the suite mocks
+# it, so no CI job could have caught it.
+
 updates:
   - package-ecosystem: npm
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+
+    ignore:
+      # Pinned by the SDK. This list mirrors the entries of
+      # expo/bundledNativeModules.json that this project actually depends on,
+      # plus the tooling that carries the SDK's major version.
+      # Re-check with `npx expo install --check` after editing.
+      - dependency-name: expo
+      - dependency-name: expo-*
+      - dependency-name: '@expo/*'
+      - dependency-name: '@expo-google-fonts/*'
+      - dependency-name: '@react-native-async-storage/*'
+      - dependency-name: '@react-native-community/*'
+      - dependency-name: '@shopify/flash-list'
+      - dependency-name: react
+      - dependency-name: react-dom
+      - dependency-name: react-native
+      # Also catches react-native-url-polyfill, which the SDK does not pin.
+      # A stable polyfill is a cheap thing to bump by hand.
+      - dependency-name: react-native-*
+      # jest-expo depends on an exact react-test-renderer; letting Dependabot
+      # move it independently of react is what broke #53.
+      - dependency-name: react-test-renderer
+      - dependency-name: eslint-config-expo
+      - dependency-name: jest-expo
+
+      # Not SDK-pinned, but eslint-config-expo and jest-expo constrain these,
+      # and a major needs their config migrated alongside it.
+      - dependency-name: eslint
+        update-types: ['version-update:semver-major']
+      - dependency-name: jest
+        update-types: ['version-update:semver-major']
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
+
     groups:
-      expo:
-        patterns: ['expo', 'expo-*', '@expo/*']
       dev:
         dependency-type: development
 
   # Actions are pinned to commit SHAs, so this is how pins get refreshed.
+  # Grouped into one PR: the limit above is per-ecosystem, so ungrouped actions
+  # updates stack on top of the npm ones -- that is how one weekly run opened
+  # eight PRs.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ['*']
