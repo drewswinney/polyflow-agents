@@ -157,7 +157,7 @@ Transcript (16px padding, 14px gap):
 - **Agent text**: full-width plain text, 15px/1.65, `#1f2937`. Streaming cursor is an 8×17px `#6d28d9` block appended inline.
 - **Tool call card**: white, 1px border, radius 10–12px. Header row ≥52px: 30px tinted tile + tool name (13.5px/500) + argument summary (Space Mono 10px) + duration chip (`#f0fdf4`/`#bbf7d0`/`#15803d`, radius 100px) or a check. Optional output block below: bg `#f8fafc`, Space Mono 11.5px/1.7.
 
-Composer (bg white, 1px top border, `padding 10px 12px 22px`): pill field (48px, radius 100px, bg `#f8fafc`, paperclip + placeholder + 36px mic circle on `#f5f3ff`) and a 48px circular action button. **Three states for that one slot:**
+Composer (transparent — no fill, no top border — floating over the bottom of the transcript, which scrolls behind it; `padding 10px 12px` + safe-area/keyboard bottom): pill field (48px, radius 100px, bg `#f8fafc`, paperclip + placeholder + 36px mic circle on `#f5f3ff`) and a 48px circular action button. **Three states for that one slot:**
 1. *Empty* — arrow-up, bg `#f8fafc`, border `#dfe3ea`, icon `#a3adbd` (disabled).
 2. *Typing* — mic disappears from the field, field border `#c4b5fd`, button becomes the 135° gradient with white arrow-up.
 3. *Streaming* — button becomes `#1f2937` with a white stop square.

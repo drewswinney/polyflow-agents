@@ -95,13 +95,10 @@ export function Composer({
   }
 
   return (
-    <Animated.View
-      style={[
-        styles.wrap,
-        { backgroundColor: theme.color.surface, borderTopColor: theme.color.border },
-        bottomPadding
-      ]}
-    >
+    // No fill of its own: the bar is transparent so the screen (or, on chat,
+    // the transcript scrolling behind it) shows through. Opaque are only the
+    // pill, the action button, and the strip above them.
+    <Animated.View style={[styles.wrap, bottomPadding]}>
       {queued > 0 ? (
         <Text variant="secondary" color={theme.color.warning700} style={styles.queued}>
           {`${queued} message${queued === 1 ? '' : 's'} queued — sends on reconnect`}
@@ -264,7 +261,7 @@ function ActionButton({
 }
 
 const styles = StyleSheet.create({
-  wrap: { borderTopWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingTop: 10, gap: 8 },
+  wrap: { paddingHorizontal: 12, paddingTop: 10, gap: 8 },
   queued: { paddingHorizontal: 4 },
   strip: { flexDirection: 'row', gap: 8, paddingHorizontal: 4, paddingTop: 2, paddingRight: 8 },
   thumb: { width: 56, height: 56, borderWidth: StyleSheet.hairlineWidth },
