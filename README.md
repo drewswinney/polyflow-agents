@@ -71,6 +71,28 @@ the package needs uv specifically.
 imported until its name is in Hermes's `plugins.enabled` allow-list, so an
 installed-but-not-enabled plugin is silently absent rather than broken.
 
+**Profiles matter, and this is the one that bites.** Hermes keeps **one plugin
+manager per Hermes home**, and `hermes serve` runs every turn under the
+profile's home. A plugin installed only in the default home is registered into
+a manager those turns never consult — hooks fire into an empty list and return.
+Nothing errors: routes mount, devices register, `status` says installed and
+enabled, and not one notification is ever sent. `install` therefore walks
+`~/.hermes/profiles/*` as well (`--no-profiles` opts out), and `status` reports
+each one:
+
+```
+profiles:
+  ok   greg
+         install: linked -> /home/drew/.hermes/plugins/polyflow_agents_push
+         enabled: yes
+  GAP  devqa
+         install: not installed
+         enabled: no
+```
+
+A `GAP` is not cosmetic — turns on that profile push nothing. If you add a
+profile later, re-run `install --force --enable`.
+
 Nothing else to configure. The app registers this device over the connection it
 already has, authenticated by the credential you already gave it — there is no
 second endpoint, no second secret, and nothing to type into Settings. The
