@@ -49,11 +49,11 @@
         {
           "backgroundColor": "#fcfcfd",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76,
+          "imageWidth": 200,
           "dark": {
             "backgroundColor": "#0b1120",
             "image": "./assets/images/splash-icon.png",
-            "imageWidth": 76
+            "imageWidth": 200
           }
         }
       ],
