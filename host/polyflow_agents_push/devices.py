@@ -38,13 +38,38 @@ DEFAULT_PREFS: Dict[str, bool] = {
 
 
 def _hermes_home() -> Path:
-    """The active profile's home, asked of Hermes rather than guessed."""
-    try:
-        from hermes_constants import get_hermes_home
+    """The *process* home, asked of Hermes rather than guessed.
 
-        return Path(get_hermes_home())
+    Deliberately the process home and not `get_hermes_home()`, which follows a
+    context-local override. A registered device is machine-level — one phone,
+    one host — and has nothing to do with which profile a given turn ran under.
+
+    Getting this wrong cost a whole evening, and silently. `hermes serve` runs
+    turns under a per-task profile override (`tui_gateway/compute_host.py`
+    calls `set_hermes_home_override(profile_home)`), while the registration
+    route runs with no override at all. With `get_hermes_home()` the two
+    disagree: the app registers into `~/.hermes/polyflow_agents_push/` and
+    every hook then reads `~/.hermes/profiles/<name>/polyflow_agents_push/`,
+    which does not exist. `load()` returns `[]`, `push._send_now` finds no
+    targets and returns before it builds a message or touches the network —
+    so registration succeeds, the app reports the host knows about it, and
+    not one notification is ever sent, with nothing logged either way.
+
+    `get_process_hermes_home()` is documented for exactly this: assets under
+    the server's launch home that must stay visible while a request is scoped
+    to another profile. It is newer than the rest of this plugin's floor, so
+    the older name is kept as a fallback.
+    """
+    try:
+        from hermes_constants import get_process_hermes_home
+
+        return Path(get_process_hermes_home())
     except Exception:
-        return Path(os.environ.get("HERMES_HOME", Path.home() / ".hermes"))
+        # Older Hermes, or no Hermes at all (the CLI's `status` runs outside it).
+        # `HERMES_HOME` is what that function reads anyway, so read it directly
+        # rather than falling back to `get_hermes_home()`, which would put the
+        # override — and this whole bug — straight back.
+        return Path(os.environ.get("HERMES_HOME", "").strip() or Path.home() / ".hermes")
 
 
 def store_path() -> Path:

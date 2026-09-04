@@ -44,9 +44,21 @@ def notify(*, kind: str, title: str, body: str, data: Dict[str, Any] | None = No
 
 def _send_now(*, kind: str, title: str, body: str, data: Dict[str, Any]) -> None:
     try:
-        targets = [d for d in devices.load() if devices.wants(d, kind)]
+        registered = devices.load()
+        targets = [d for d in registered if devices.wants(d, kind)]
 
         if not targets:
+            # Logged, not shrugged off. This return is what a registry read from
+            # the wrong Hermes home looks like from the outside — no push, no
+            # error, nothing in the log — and it cost an evening to find once.
+            # Naming the path it read makes the same fault self-evident next time.
+            logger.info(
+                "[polyflow_agents_push] %s: no target devices (%d registered) in %s",
+                kind,
+                len(registered),
+                devices.store_path(),
+            )
+
             return
 
         messages = [
@@ -68,6 +80,10 @@ def _send_now(*, kind: str, title: str, body: str, data: Dict[str, Any]) -> None
 
         for start in range(0, len(messages), MAX_MESSAGES_PER_REQUEST):
             _post(messages[start : start + MAX_MESSAGES_PER_REQUEST])
+
+        # A success line, because silence used to be indistinguishable from
+        # every way this can fail quietly.
+        logger.info("[polyflow_agents_push] %s: sent to %d device(s)", kind, len(messages))
     except Exception:
         logger.warning("[polyflow_agents_push] notification failed", exc_info=True)
 
