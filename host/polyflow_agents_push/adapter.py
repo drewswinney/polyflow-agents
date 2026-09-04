@@ -54,6 +54,18 @@ SILENT_TURN_PLATFORMS = {"subagent", "cron"}
 # notification quotes the reply too; matching it means the two read alike.
 PREVIEW_LIMIT = 140
 
+# How long an end-of-turn push may hold its caller so the send survives a
+# process that is about to exit. The CLI hard-exits via `os._exit`, which kills
+# the sender thread mid-flight, so a turn that ends a `-z` one-shot or a cron
+# worker pushes nothing at all without this. Generous against a measured 50-200ms
+# round trip: it is a ceiling, paid only while the send is actually in flight,
+# and only after the reply has already been delivered.
+#
+# Not applied to approvals or clarify questions. Those halt the agent and run in
+# `hermes serve`, which lives for hours — the daemon thread is safe there, and
+# blocking the path a person is waiting on would be the worse trade.
+FLUSH_SECONDS = 5.0
+
 
 # ── Hooks ────────────────────────────────────────────────────────────────────
 
@@ -180,6 +192,8 @@ def _on_post_llm_call(**kwargs: Any) -> None:
         title="Turn finished",
         body=_preview(str(kwargs.get("assistant_response") or "")) or "The agent finished what it was doing.",
         data={"sessionId": kwargs.get("session_id") or ""},
+        # A turn ending is exactly when a short-lived process exits.
+        flush=FLUSH_SECONDS,
     )
 
 
@@ -357,6 +371,9 @@ async def _standalone_send(*_args: Any, **kwargs: Any) -> Dict[str, Any]:
         title="Hermes",
         body=text[:200],
         data={"source": "cron"},
+        # The whole reason this function exists is delivery from a process with
+        # no live adapter — which is usually one that is about to exit.
+        flush=FLUSH_SECONDS,
     )
 
     return {"ok": True}

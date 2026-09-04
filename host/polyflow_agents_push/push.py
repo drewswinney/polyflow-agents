@@ -10,6 +10,16 @@ Two rules govern everything here:
    agent's critical path. `notify()` hands off to a daemon thread and returns.
 2. **Never raise.** `tools/approval.py` is explicit that "approval flow is
    safety-critical, plugin observability is not". A push failure is a log line.
+
+Rule 1 has one deliberate exception, and it exists because the daemon thread is
+a lie in a process that is about to die. The Hermes CLI hard-exits through
+``os._exit`` (`hermes_cli/main.py`), which skips interpreter finalization and
+kills threads where they stand — so a ``-z`` one-shot, or a cron/kanban worker
+that exits straight after its turn, would start the send and vanish mid-flight.
+No error, no log: the POST simply never happens. `notify(flush=...)` therefore
+lets a caller wait for the send, and the end-of-turn and cron paths use it.
+Measured round trip to Expo is 50-200ms, so the wait is real but small, and the
+reply is already on screen by the time it is paid.
 """
 
 from __future__ import annotations
@@ -31,8 +41,24 @@ REQUEST_TIMEOUT_SECONDS = 10
 MAX_MESSAGES_PER_REQUEST = 100
 
 
-def notify(*, kind: str, title: str, body: str, data: Dict[str, Any] | None = None) -> None:
-    """Queue a push to every device that asked for this kind. Returns immediately."""
+def notify(
+    *,
+    kind: str,
+    title: str,
+    body: str,
+    data: Dict[str, Any] | None = None,
+    flush: float = 0.0,
+) -> None:
+    """Queue a push to every device that asked for this kind.
+
+    Returns immediately by default. Pass ``flush`` (seconds) to wait for the
+    send from a caller that may be in a process about to exit — see the module
+    docstring. The wait is a ceiling, not a cost: `join` returns the moment the
+    send lands, which is normally well under a second.
+
+    Never raises, and never waits on the approval path: an agent halted on a
+    question must not also be waiting on a notification.
+    """
     thread = threading.Thread(
         target=_send_now,
         kwargs={"kind": kind, "title": title, "body": body, "data": data or {}},
@@ -40,6 +66,22 @@ def notify(*, kind: str, title: str, body: str, data: Dict[str, Any] | None = No
         daemon=True,
     )
     thread.start()
+
+    if flush <= 0:
+        return
+
+    thread.join(flush)
+
+    if thread.is_alive():
+        # Said out loud because the alternative is the silence this whole
+        # mechanism exists to remove: if the process is exiting, this push is
+        # about to be killed, and nothing else would ever mention it.
+        logger.warning(
+            "[polyflow_agents_push] %s: send still running after %.1fs; "
+            "it will be lost if this process is exiting",
+            kind,
+            flush,
+        )
 
 
 def _send_now(*, kind: str, title: str, body: str, data: Dict[str, Any]) -> None:

@@ -160,12 +160,16 @@ Untested: no cron job has delivered here yet.
   does not exist. Every push returned early on an empty registry, silently, so
   registration looked perfect and nothing was ever delivered. `devices.py` now
   uses `get_process_hermes_home()`. One phone is one host, not one profile.
-- **A short-lived process cannot push at all.** `notify()` hands the send to a
-  daemon thread, and the CLI hard-exits through `os._exit` (`hermes_cli/main.py`),
-  which kills threads without running finalizers. So a `-z` one-shot — and any
-  cron/kanban worker that exits straight after its turn, including via
-  `standalone_sender_fn` — drops its push on the floor. Only a long-lived
-  process (`hermes serve`, the gateway) delivers reliably. Unfixed.
+- **A short-lived process used to drop its push entirely.** `notify()` hands the
+  send to a daemon thread, and the CLI hard-exits through `os._exit`
+  (`hermes_cli/main.py`), which kills threads without running finalizers — so a
+  `-z` one-shot, or a cron/kanban worker exiting straight after its turn,
+  started the POST and vanished mid-flight. Silently: the thread never got far
+  enough to log a failure. `notify(flush=…)` now lets a caller wait for the
+  send, and the end-of-turn and cron paths pass `FLUSH_SECONDS`. Verified A/B
+  against a real `os._exit(0)` — lost without it, delivered with it. Approvals
+  and clarify questions stay non-blocking by design: they halt the agent, and
+  only ever run under `hermes serve`, which lives for hours.
 - **Preferences live per device in the registry**, not in the app alone. A
   closed app cannot filter its own push, so the host has to know. That means the
   app must re-register when preferences change, and a device whose registration
