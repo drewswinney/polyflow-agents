@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Dict, Optional
 
 from . import devices, push
@@ -164,7 +165,14 @@ def _on_post_llm_call(**kwargs: Any) -> None:
     skipped by the reaper, so it was reliably *not* the one you were in), and
     a turn that genuinely finished while the phone was away pushed nothing.
     """
-    if str(kwargs.get("platform") or "") in SILENT_TURN_PLATFORMS:
+    platform = str(kwargs.get("platform") or "")
+
+    if platform in SILENT_TURN_PLATFORMS:
+        # Debug, not info: subagent turns are frequent and this is the designed
+        # outcome. It is logged at all because a turn vanishing here looks
+        # identical to a turn that never fired the hook.
+        logger.debug("[polyflow_agents_push] turn on %r is deliberately silent", platform)
+
         return
 
     push.notify(
@@ -283,6 +291,8 @@ def register(ctx: Any) -> None:
     Registering what works and logging what does not is what lets one directory
     serve both.
     """
+    registered = []
+
     for hook_name, callback in (
         ("pre_approval_request", _safe(_on_approval_request)),
         ("post_approval_response", _safe(_on_approval_response)),
@@ -292,8 +302,21 @@ def register(ctx: Any) -> None:
     ):
         try:
             ctx.register_hook(hook_name, callback)
+            registered.append(hook_name)
         except Exception:
             logger.warning("[polyflow_agents_push] could not register hook %s", hook_name, exc_info=True)
+
+    # One line, at startup, naming the process that will (or will not) push.
+    # Hook registration used to be entirely silent on success, so "the plugin
+    # is loaded" and "this process will fire hooks" were indistinguishable —
+    # and the difference is the whole game: `hermes serve` runs the turns, and
+    # if its hooks are not registered nothing is ever sent, with nothing said.
+    logger.info(
+        "[polyflow_agents_push] registered %d hook(s) in pid %d: %s",
+        len(registered),
+        os.getpid(),
+        ", ".join(registered) or "none",
+    )
 
     try:
         ctx.register_platform(

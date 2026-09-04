@@ -151,6 +151,21 @@ Untested: no cron job has delivered here yet.
   matched on the hook's `platform`). A turn on any other platform pushes, so a
   desktop or TUI session on the same host rings the phone too. That is by
   design — it is the same agent — but it is worth knowing.
+- **The registry is read from the *process* Hermes home, deliberately.**
+  `hermes serve` runs each turn under a per-task profile override
+  (`tui_gateway/compute_host.py` calls `set_hermes_home_override`), while the
+  registration route runs with none. Resolving the store with
+  `get_hermes_home()` therefore wrote to `~/.hermes/polyflow_agents_push/` and
+  read `~/.hermes/profiles/<name>/polyflow_agents_push/` — a directory that
+  does not exist. Every push returned early on an empty registry, silently, so
+  registration looked perfect and nothing was ever delivered. `devices.py` now
+  uses `get_process_hermes_home()`. One phone is one host, not one profile.
+- **A short-lived process cannot push at all.** `notify()` hands the send to a
+  daemon thread, and the CLI hard-exits through `os._exit` (`hermes_cli/main.py`),
+  which kills threads without running finalizers. So a `-z` one-shot — and any
+  cron/kanban worker that exits straight after its turn, including via
+  `standalone_sender_fn` — drops its push on the floor. Only a long-lived
+  process (`hermes serve`, the gateway) delivers reliably. Unfixed.
 - **Preferences live per device in the registry**, not in the app alone. A
   closed app cannot filter its own push, so the host has to know. That means the
   app must re-register when preferences change, and a device whose registration
