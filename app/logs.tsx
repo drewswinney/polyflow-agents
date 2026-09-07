@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useBackend } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { type EventFilter, matchesFilter, useEventLog } from '@/state/event-log'
+import { withAgent } from '@/ui/components/AgentGate'
 import { Card, Divider } from '@/ui/components/Card'
 import { EventRow } from '@/ui/components/EventRow'
 import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
@@ -28,7 +29,7 @@ const FILTERS: Array<{ key: EventFilter; label: string }> = [
  * screen's whole reason to exist — Activity is for noticing, this is for
  * finding out what actually happened.
  */
-export default function LogsScreen() {
+function LogsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const headerInset = useHeaderInset()
@@ -120,3 +121,5 @@ const styles = StyleSheet.create({
   empty: { padding: 16 },
   footer: { paddingHorizontal: 4 }
 })
+
+export default withAgent(LogsScreen)

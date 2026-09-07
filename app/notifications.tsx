@@ -7,6 +7,7 @@ import { useSelectedAgent } from '@/state/agents'
 import { useBackend } from '@/state/ConnectionProvider'
 import { useNotificationPrefs } from '@/state/notification-prefs'
 import { usePushRegistration, type PushStatus } from '@/state/push-sync'
+import { withAgent } from '@/ui/components/AgentGate'
 import { Card, Divider } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
 import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
@@ -25,7 +26,7 @@ import { useTheme } from '@/ui/ThemeProvider'
  * Quiet hours are the exception and stay device-side: they depend on this
  * phone's clock and timezone, which the host does not know.
  */
-export default function NotificationsScreen() {
+function NotificationsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const headerInset = useHeaderInset()
@@ -210,3 +211,5 @@ const styles = StyleSheet.create({
   save: { minHeight: 44, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
   noticeHead: { flexDirection: 'row', alignItems: 'center', gap: 9 }
 })
+
+export default withAgent(NotificationsScreen)
