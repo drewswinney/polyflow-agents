@@ -256,9 +256,14 @@ function Staged({ image, onRemove }: { image: PickedImage; onRemove: () => void 
         accessibilityLabel={`Remove ${image.name}`}
         onPress={onRemove}
         hitSlop={8}
-        style={[styles.remove, { backgroundColor: theme.color.gray800 }]}
+        // `accentFill`, not a grey: the grey ramp inverts in dark mode, where
+        // `gray800` is a near-white disc — and the X on it is white. The
+        // accent fill is the one role resolved to carry `onAccent` in both
+        // themes. The ring in `bg` keeps the chip distinct from whatever
+        // photo it sits on.
+        style={[styles.remove, { backgroundColor: theme.color.accentFill, borderColor: theme.color.bg }]}
       >
-        <Icon name="xmark" size={9} color={theme.color.onAccent} />
+        <Icon name="xmark" size={10} color={theme.color.onAccent} />
       </Pressable>
     </View>
   )
@@ -313,18 +318,25 @@ function ActionButton({
   )
 }
 
+/** How far the remove chip sits outside its thumbnail's top-right corner. */
+const REMOVE_OVERHANG = 6
+
 const styles = StyleSheet.create({
   wrap: { paddingHorizontal: 12, paddingTop: 10, gap: 8 },
   queued: { paddingHorizontal: 4 },
-  strip: { flexDirection: 'row', gap: 8, paddingHorizontal: 4, paddingTop: 2, paddingRight: 8 },
+  // Padded past the remove chip's overhang (`REMOVE_OVERHANG`) on the sides it
+  // overhangs: a horizontal ScrollView clips to its bounds, and anything the
+  // chip pokes out beyond this padding is cut off.
+  strip: { flexDirection: 'row', gap: 8, paddingLeft: 4, paddingTop: REMOVE_OVERHANG + 2, paddingRight: REMOVE_OVERHANG + 4 },
   thumb: { width: 56, height: 56, borderWidth: StyleSheet.hairlineWidth },
   remove: {
     position: 'absolute',
-    top: -5,
-    right: -5,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+    top: -REMOVE_OVERHANG,
+    right: -REMOVE_OVERHANG,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center'
   },
