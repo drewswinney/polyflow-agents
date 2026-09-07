@@ -30,12 +30,22 @@ export function Sheet({
   visible,
   title,
   onDismiss,
+  onHidden,
   children
 }: {
   visible: boolean
   /** Named for the screen reader, and drawn as the card's heading. */
   title: string
   onDismiss: () => void
+  /**
+   * The sheet has left the screen: its exit animation is done and the Modal
+   * is out of the tree. Later than `visible` dropping, by the length of the
+   * animation — and that gap is the point. Whoever closed the sheet may be
+   * about to present a native screen of their own, and iOS puts that on the
+   * topmost view controller, which until this fires is the Modal's — so it
+   * would be dismissed along with the Modal. See `useSheet.close`.
+   */
+  onHidden?: () => void
   children: ReactNode
 }) {
   const theme = useTheme()
@@ -92,6 +102,19 @@ export function Sheet({
 
     return () => animation.stop()
   }, [visible, progress, drag])
+
+  // Reported from an effect rather than from the animation's completion, so
+  // it runs after the commit that removed the Modal. The Modal's native
+  // dismissal is queued to the main thread by that commit, ahead of anything
+  // the callback asks the OS to present, so by the time it presents, the
+  // app's own controller is topmost again.
+  const wasMounted = useRef(mounted)
+
+  useEffect(() => {
+    if (wasMounted.current && !mounted) onHidden?.()
+
+    wasMounted.current = mounted
+  }, [mounted, onHidden])
 
   const pan = useMemo(
     () =>

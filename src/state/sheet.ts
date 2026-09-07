@@ -40,12 +40,46 @@ export type SheetRequest =
 
 interface SheetState {
   request: SheetRequest | null
+  /**
+   * Work waiting for the sheet to leave the screen. Set by `close(after)`,
+   * run once by `settle()`.
+   */
+  afterClose: (() => void) | null
   open: (request: SheetRequest) => void
-  close: () => void
+  /**
+   * Close the sheet. `after` runs once the sheet has *left the screen*, which
+   * is later than this returning: the sheet is a native `Modal` that stays
+   * mounted through its exit animation, and iOS presents whatever comes next
+   * — the camera, the photo picker — on the topmost view controller, which
+   * for that window is the Modal's own. The picker then goes down with the
+   * Modal, which is how "Take photo" opened a camera that closed itself.
+   * Anything that opens a native screen of its own goes through `after`.
+   *
+   * Only meaningful from an open sheet: the host reports the leaving, and a
+   * sheet that is already gone will not report it again.
+   */
+  close: (after?: () => void) => void
+  /** Called by the host when the sheet is off screen: runs what was waiting. */
+  settle: () => void
 }
 
-export const useSheet = create<SheetState>(set => ({
+export const useSheet = create<SheetState>((set, get) => ({
   request: null,
-  open: request => set({ request }),
-  close: () => set({ request: null })
+  afterClose: null,
+  // Reopening abandons anything still waiting: a callback that presents a
+  // native screen over a sheet that has just come back is exactly the
+  // stacking this exists to avoid.
+  open: request => set({ request, afterClose: null }),
+  // `close` is handed straight to `onPress` and `onRequestClose` in places,
+  // so what arrives may be a press event rather than a callback. Only a
+  // function is worth waiting for.
+  close: after => set({ request: null, afterClose: typeof after === 'function' ? after : null }),
+  settle: () => {
+    const { afterClose } = get()
+
+    if (!afterClose) return
+
+    set({ afterClose: null })
+    afterClose()
+  }
 }))

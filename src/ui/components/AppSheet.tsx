@@ -26,9 +26,10 @@ import { Text } from './Text'
 export function AppSheet() {
   const request = useSheet(store => store.request)
   const close = useSheet(store => store.close)
+  const settle = useSheet(store => store.settle)
 
   return (
-    <Sheet visible={request !== null} title={titleFor(request)} onDismiss={close}>
+    <Sheet visible={request !== null} title={titleFor(request)} onDismiss={close} onHidden={settle}>
       {request?.kind === 'model' ? <ModelSheet request={request} onDone={close} /> : null}
       {request?.kind === 'add-to-chat' ? <AddToChatSheet request={request} onDone={close} /> : null}
       {request?.kind === 'agent' ? <AgentSheet onDone={close} /> : null}
@@ -199,7 +200,7 @@ function AddToChatSheet({
   onDone
 }: {
   request: Extract<SheetRequest, { kind: 'add-to-chat' }>
-  onDone: () => void
+  onDone: (after?: () => void) => void
 }) {
   const theme = useTheme()
 
@@ -218,8 +219,12 @@ function AddToChatSheet({
             onPress={() => {
               // Closed first: the picker is a native screen of its own, and
               // leaving the sheet under it means coming back to a stale card.
-              onDone()
-              request.onPick(row.source)
+              // And closed *fully* first — the pick waits for the sheet to
+              // leave the screen, because a picker presented while this
+              // sheet's Modal is still on its way out is presented on that
+              // Modal, and dismissed with it. That was the camera that opened
+              // and closed itself.
+              onDone(() => request.onPick(row.source))
             }}
             style={[styles.row, index > 0 && { borderTopColor: theme.color.divider, borderTopWidth: StyleSheet.hairlineWidth }]}
           >
