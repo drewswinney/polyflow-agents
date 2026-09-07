@@ -4,7 +4,9 @@
  * Pinned here because each rule guards a real failure: asking again after a
  * refusal nags on every open of the sheet; a `ph://` URI is a tile that draws
  * nothing; and resolving an iCloud-only photo for a tile would start a
- * download for a thumbnail nobody tapped.
+ * download for a thumbnail nobody tapped. And on Android, asking for an
+ * asset's info reads EXIF, which needs a location permission the app does not
+ * hold — so attaching there must go straight from the asset's own URI.
  */
 
 import { beforeEach, describe, expect, it, jest } from '@jest/globals'
@@ -93,7 +95,7 @@ describe('recentPhotos', () => {
 })
 
 describe('attachRecentPhoto', () => {
-  it('re-resolves the asset, allowing a download, and keeps a PNG lossless', async () => {
+  it('re-resolves the asset on iOS, allowing a download, and keeps a PNG lossless', async () => {
     library.getAssetInfoAsync.mockResolvedValue({ localUri: 'file:///shot.png' })
     prepareImage.mockResolvedValue({ uri: 'file:///out.png' })
 
@@ -118,5 +120,15 @@ describe('attachRecentPhoto', () => {
     await attachRecentPhoto({ id: 'p', uri: 'file:///tile.heic', width: 1, height: 1, filename: 'IMG_1.HEIC' })
 
     expect(prepareImage).toHaveBeenCalledWith(expect.objectContaining({ uri: 'file:///tile.heic', mimeType: null }))
+  })
+
+  it('does not ask Android for asset info, which would need a location permission', async () => {
+    platform.OS = 'android'
+    prepareImage.mockResolvedValue({})
+
+    await attachRecentPhoto({ id: 'p', uri: 'file:///DCIM/IMG_1.jpg', width: 1, height: 1, filename: 'IMG_1.jpg' })
+
+    expect(library.getAssetInfoAsync).not.toHaveBeenCalled()
+    expect(prepareImage).toHaveBeenCalledWith(expect.objectContaining({ uri: 'file:///DCIM/IMG_1.jpg' }))
   })
 })

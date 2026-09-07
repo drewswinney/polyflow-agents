@@ -92,14 +92,18 @@ async function renderable(asset: MediaLibrary.Asset): Promise<RecentPhoto | null
 /**
  * A tapped recent, re-encoded exactly as a picked one would be.
  *
- * Resolved again rather than from the tile's URI: this time a download is
- * fine, and the tile's file may have been a cached rendition.
+ * On iOS the asset is resolved again rather than taken from the tile's URI:
+ * this time a download is fine, and the tile's file may have been a cached
+ * rendition. Android is *not* asked again — the asset's URI is already the
+ * file, and the info call there reads EXIF, which the OS refuses without
+ * `ACCESS_MEDIA_LOCATION`. That is a location permission, for a photo's GPS
+ * tag the agent has no use for, and this app does not request it.
  */
 export async function attachRecentPhoto(photo: RecentPhoto): Promise<PickedImage> {
-  const info = await MediaLibrary.getAssetInfoAsync(photo.id)
+  const localUri = Platform.OS === 'ios' ? (await MediaLibrary.getAssetInfoAsync(photo.id)).localUri : undefined
 
   return prepareImage({
-    uri: info.localUri ?? photo.uri,
+    uri: localUri ?? photo.uri,
     width: photo.width,
     height: photo.height,
     fileName: photo.filename,
