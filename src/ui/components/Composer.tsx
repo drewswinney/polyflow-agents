@@ -4,6 +4,7 @@ import { Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, View } from
 import Animated from 'react-native-reanimated'
 
 import { PermissionDenied, type PickedImage, type PickSource, pickImages } from '@/platform/image-attachments'
+import { attachRecentPhoto, type RecentPhoto } from '@/platform/recent-photos'
 
 import { modelLabel } from '../format'
 import { useSheet } from '@/state/sheet'
@@ -81,11 +82,12 @@ export function Composer({
     setImages([])
   }
 
-  const attach = async (source: PickSource) => {
+  /** Stage whatever `pick` produces, with the spinner up and any failure said once. */
+  const stage = async (pick: () => Promise<PickedImage[]>) => {
     setPicking(true)
 
     try {
-      const picked = await pickImages(source)
+      const picked = await pick()
 
       if (picked.length) setImages(current => [...current, ...picked])
     } catch (cause) {
@@ -98,13 +100,20 @@ export function Composer({
     }
   }
 
+  const attach = (source: PickSource) => stage(() => pickImages(source))
+  const attachRecent = (photo: RecentPhoto) => stage(async () => [await attachRecentPhoto(photo)])
+
   // A sheet rather than `Alert.alert`. The OS action sheet could hold two
   // labels and nothing else — no thumbnails, no room for what else might be
   // added to a chat — and on Android it draws as an error dialog.
   const chooseSource = () => {
     if (picking) return
 
-    openSheet({ kind: 'add-to-chat', onPick: source => void attach(source) })
+    openSheet({
+      kind: 'add-to-chat',
+      onPick: source => void attach(source),
+      onPickRecent: photo => void attachRecent(photo)
+    })
   }
 
   return (

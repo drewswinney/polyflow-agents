@@ -71,6 +71,13 @@
         }
       ],
       [
+        "expo-media-library",
+        {
+          "photosPermission": "Polyflow Agents uses your photo library so you can show your agent an image.",
+          "granularPermissions": ["photo"]
+        }
+      ],
+      [
         "expo-notifications",
         {
           "color": "#6d28d9"
