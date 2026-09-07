@@ -630,8 +630,12 @@ def _read_data_url(ref: str) -> Optional[Tuple[bytes, str, Optional[str]]]:
         return None
 
     extension = mimetypes.guess_extension(mime or "") or ""
+    # Named by content, because a data URL carries no name and the upsert key
+    # is the name: two generations in one session called `generated.png` would
+    # otherwise be one artifact, the second overwriting the first.
+    stamp = hashlib.sha256(data).hexdigest()[:10]
 
-    return data, f"generated{extension}", mime
+    return data, f"generated-{stamp}{extension}", mime
 
 
 def capture_tool_result(

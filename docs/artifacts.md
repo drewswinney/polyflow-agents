@@ -1,7 +1,11 @@
 # Artifacts — what the agent produced, kept where the phone can reach it
 
-**Status:** built, proven offline (`npm run check:plugin`, `npm test`), not yet
-run against a live host in this shape.
+**Status:** built and proven offline (`npm run check:plugin`, `npm test`), and
+the same check passes under the host's own Python and FastAPI. On the live host
+the routes mount and the hooks register in `hermes serve`; the capture path has
+not yet been driven by a real turn from the app, so that is the next thing to
+watch: `grep artifact ~/.hermes/logs/agent.log` after sending a picture or
+asking for a file.
 
 An *artifact* is a file that passed through a conversation: something the agent
 wrote or generated, or an image the phone sent it. Hermes has no such noun —

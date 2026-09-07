@@ -217,6 +217,15 @@ Untested: no cron job has delivered here yet.
   file the agent produced through `terminal` — `echo > out.txt`, a script that
   writes — is not seen. `write_file` and the generators are; those are the
   calls whose result names what was made.
+- **A `write_file` into a sandbox is invisible.** The hook copies the path the
+  tool reports, from the process it runs in. If the agent's terminal backend is
+  a container or a remote box, that path may not exist on the host, and the
+  capture logs a miss rather than an artifact.
+- **The store follows the process home, like the device registry.** Under
+  `hermes serve` that is `~/.hermes/polyflow_agents_push/artifacts/`, which is
+  also what the routes read. A `hermes -p <profile> chat` one-shot or a cron
+  worker runs with the *profile* home as its process home and writes there
+  instead, where the app never looks. Same property, same reason, as devices.
 - **The plugin's name is a contract.** Hermes mounts a router under the `name`
   in `dashboard/manifest.json` (falling back to the directory basename), so
   `polyflow_agents_push` is baked into the app's `PUSH_ROUTE`. Change one
