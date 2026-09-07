@@ -6,10 +6,12 @@ import { Image, Pressable, StyleSheet, View } from 'react-native'
 import type { MessageImage, TranscriptEntry } from '@/domain'
 
 import { clockTime, duration } from '../format'
+import { fanFor, stackLabel } from '../image-stack'
 import { thinkingSynopsis } from '../transcript-rows'
 import { Markdown } from '../markdown/Markdown'
 import { useGradient, useTheme } from '../ThemeProvider'
 import { Icon } from './Icon'
+import { ImageViewer } from './ImageViewer'
 import { KanbanUnfurls } from './KanbanMentions'
 import { Text } from './Text'
 import { ToolRow } from './ToolRow'
@@ -46,17 +48,42 @@ export const TranscriptEntryView = memo(function TranscriptEntryView({ entry }: 
 function UserBubble({ text, images }: { text: string; images?: MessageImage[] }) {
   const theme = useTheme()
   const gradient = useGradient()
+  // Which picture the viewer is open on, or closed. Local to the bubble: the
+  // viewer belongs to this message, and the entry view is memoised, so the
+  // state costs nothing while the transcript streams below it.
+  const [viewing, setViewing] = useState<number | null>(null)
+
+  // Pictures this device can draw stack; the rest are names, and a name has
+  // nothing to stack or to open. A reloaded transcript with a cleared cache
+  // is all names, and reads as the chips it always did.
+  const pictures = images?.filter(image => image.uri) ?? []
+  const chips = images?.filter(image => !image.uri) ?? []
 
   return (
     <View style={styles.userRow}>
       <View style={styles.userContent}>
-        {images?.length ? (
+        {pictures.length > 1 ? (
+          <SentImageStack images={pictures} onOpen={setViewing} />
+        ) : pictures[0] ? (
+          <Pressable
+            accessibilityRole="imagebutton"
+            accessibilityLabel={`${pictures[0].name}, opens full screen`}
+            onPress={() => setViewing(0)}
+            style={styles.single}
+          >
+            <SentImage image={pictures[0]} />
+          </Pressable>
+        ) : null}
+
+        {chips.length ? (
           <View style={styles.sentImages}>
-            {images.map((image, index) => (
+            {chips.map((image, index) => (
               <SentImage key={`${image.name}-${index}`} image={image} />
             ))}
           </View>
         ) : null}
+
+        {viewing !== null ? <ImageViewer images={pictures} index={viewing} onClose={() => setViewing(null)} /> : null}
 
         {/* A picture on its own is a whole message — an empty bubble under it
             would be a second, silent one. */}
@@ -105,6 +132,54 @@ function SentImage({ image }: { image: MessageImage }) {
       resizeMode="cover"
       accessibilityLabel={image.name}
     />
+  )
+}
+
+/** How wide and tall each card in a hand is. */
+const CARD = 120
+/** How far the back cards reach beyond the front one, either side. */
+const STACK_SPREAD = 24
+
+/**
+ * Several pictures on one message, held like a hand of cards.
+ *
+ * One tap target for the whole hand, opening on the front card; the badge
+ * says how many there really are, since only the front few show. Cards are
+ * drawn back to front (`fanFor` orders them so) because a later sibling
+ * paints over an earlier one.
+ */
+function SentImageStack({ images, onOpen }: { images: MessageImage[]; onOpen: (index: number) => void }) {
+  const theme = useTheme()
+
+  return (
+    <Pressable accessibilityRole="imagebutton" accessibilityLabel={stackLabel(images.length)} onPress={() => onOpen(0)} style={styles.stack}>
+      {fanFor(images.length).map(card => (
+        <Image
+          key={card.index}
+          source={{ uri: images[card.index]?.uri }}
+          resizeMode="cover"
+          accessibilityLabel={images[card.index]?.name}
+          style={[
+            styles.stackCard,
+            theme.shadow.sheet,
+            {
+              borderColor: theme.color.border,
+              backgroundColor: theme.color.bgSubtle,
+              transform: [{ translateX: card.dx }, { translateY: card.dy }, { rotate: `${card.rotate}deg` }]
+            }
+          ]}
+        />
+      ))}
+
+      {/* Same chip language as the composer's remove button: accent fill,
+          which carries white in both themes, ringed in the page background. */}
+      <View style={[styles.stackBadge, { backgroundColor: theme.color.accentFill, borderColor: theme.color.bg }]}>
+        <Icon name="images" size={10} color={theme.color.onAccent} />
+        <Text variant="monoSmall" color={theme.color.onAccent}>
+          {String(images.length)}
+        </Text>
+      </View>
+    </Pressable>
   )
 }
 
@@ -235,6 +310,30 @@ const styles = StyleSheet.create({
   userContent: { maxWidth: '80%', gap: MESSAGE_GAP },
   sentImages: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, justifyContent: 'flex-end' },
   sentImage: { width: 140, height: 140, borderRadius: 12, borderWidth: StyleSheet.hairlineWidth },
+  single: { alignSelf: 'flex-end' },
+  // Room for the back cards' reach on both sides, and their drop below.
+  stack: { alignSelf: 'flex-end', width: CARD + STACK_SPREAD * 2, height: CARD + 14 },
+  stackCard: {
+    position: 'absolute',
+    left: STACK_SPREAD,
+    top: 6,
+    width: CARD,
+    height: CARD,
+    borderRadius: 12,
+    borderWidth: StyleSheet.hairlineWidth
+  },
+  stackBadge: {
+    position: 'absolute',
+    top: 6 + 8,
+    right: STACK_SPREAD + 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    height: 22,
+    paddingHorizontal: 8,
+    borderRadius: 11,
+    borderWidth: 1.5
+  },
   imageChip: {
     flexDirection: 'row',
     alignItems: 'center',
