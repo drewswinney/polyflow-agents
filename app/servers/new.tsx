@@ -283,7 +283,7 @@ export default function AddServerScreen() {
               setHost(value)
               setProbe({ status: 'idle' })
             }}
-            placeholder="10.0.0.68:9119"
+            placeholder="hermes.lan:9119"
             mono
             onReveal={revealField}
           />

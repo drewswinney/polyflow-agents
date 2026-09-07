@@ -135,9 +135,9 @@ globalThis.fetch = realFetch
           displayName: 'home hermes',
           kind: 'hermes',
           icon: 'server',
-          host: '10.0.0.68:9119',
+          host: 'hermes.lan:9119',
           authMode: 'password',
-          username: 'drew',
+          username: 'operator',
           secure: false
         }
       ],
@@ -157,8 +157,8 @@ globalThis.fetch = realFetch
     'agent-legacy1',
     'the server keeps the old agent id — the keychain credential is keyed by it'
   )
-  assert.equal(servers[0]?.host, '10.0.0.68:9119')
-  assert.equal(servers[0]?.username, 'drew')
+  assert.equal(servers[0]?.host, 'hermes.lan:9119')
+  assert.equal(servers[0]?.username, 'operator')
   assert.equal(servers[0]?.connection, 'idle', 'reachability is re-measured, never restored from disk')
 
   assert.equal(agents.length, 1)
