@@ -34,9 +34,9 @@ classifiers = [
 dependencies = ["PyYAML>=6.0"]
 
 [project.urls]
-Homepage = "https://github.com/drewswinney/polyflow-agents"
-Repository = "https://github.com/drewswinney/polyflow-agents"
-Issues = "https://github.com/drewswinney/polyflow-agents/issues"
+Homepage = "https://github.com/polyflowlabs/polyflow-agents"
+Repository = "https://github.com/polyflowlabs/polyflow-agents"
+Issues = "https://github.com/polyflowlabs/polyflow-agents/issues"
 
 [project.scripts]
 polyflow_agents_push = "polyflow_agents_push.cli:main"
