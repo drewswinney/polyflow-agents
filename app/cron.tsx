@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { CronJobSummary } from '@/domain'
 import { useBackend } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
+import { withAgent } from '@/ui/components/AgentGate'
 import { Card, Divider } from '@/ui/components/Card'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
@@ -21,7 +22,7 @@ import { useTheme } from '@/ui/ThemeProvider'
  * button rather than a swipe or a long-press — nothing here should fire by
  * accident from a pocket.
  */
-export default function CronScreen() {
+function CronScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const agent = useSelectedAgent()
@@ -151,3 +152,5 @@ const styles = StyleSheet.create({
   rowBody: { flex: 1, minWidth: 0, gap: 2 },
   runButton: { height: 44, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth }
 })
+
+export default withAgent(CronScreen)

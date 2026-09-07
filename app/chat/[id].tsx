@@ -12,6 +12,7 @@ import { useSidebar } from '@/state/sidebar'
 import { useSessionStream } from '@/state/session-stream'
 import { useIsStreaming } from '@/state/stream-tail'
 import { useChatInbox } from '@/state/chat-inbox'
+import { withAgent } from '@/ui/components/AgentGate'
 import { ApprovalCard, ApprovalNudge } from '@/ui/components/ApprovalCard'
 import { ClarifyCard } from '@/ui/components/ClarifyCard'
 import { Composer } from '@/ui/components/Composer'
@@ -36,7 +37,7 @@ import { useTheme } from '@/ui/ThemeProvider'
  * The agent pill is shown here as a read-only indicator — you can't switch
  * agents mid-chat because the session id is scoped to one agent (§5.2).
  */
-export default function ChatScreen() {
+function ChatScreen() {
   const theme = useTheme()
   // The approval sentence names the *host* the command would run on (§7.6),
   // which is the server's rather than the agent's — several agents share one.
@@ -468,3 +469,5 @@ const styles = StyleSheet.create({
     bottom: 0
   }
 })
+
+export default withAgent(ChatScreen)

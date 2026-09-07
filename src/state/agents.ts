@@ -343,10 +343,15 @@ export function useSelectedAgentOrNull(): Agent | null {
 /**
  * The selected agent, for screens that cannot be reached without one.
  *
- * The invariant is held by the redirect in `app/index.tsx`: with an empty
- * registry the only reachable route is onboarding, and when the last server is
- * removed the root swaps what it renders, so a screen never re-renders into an
- * empty registry. Screens stay free of null checks that could never fire.
+ * The invariant is held by `withAgent`, which every screen past home is wrapped
+ * in: a gated screen does not mount without an agent, so the cast below cannot
+ * hand one a null. Screens stay free of null checks.
+ *
+ * It was previously held by the redirect in `app/index.tsx` alone, on the
+ * reasoning that an empty registry is only reachable at first run. Removal
+ * breaks that — forgetting the last server empties the registry under a stack
+ * that is already mounted, and home's redirect says nothing about the screens
+ * behind it. They dereferenced this null and took the root layout down.
  */
 export function useSelectedAgent(): Agent {
   return useSelectedAgentOrNull() as Agent

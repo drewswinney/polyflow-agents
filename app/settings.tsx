@@ -62,7 +62,14 @@ export default function SettingsScreen() {
     await forgetAgentCredential(id)
     await removeServer(id)
 
-    router.replace('/')
+    // Home, because this screen is showing a server that no longer exists —
+    // left alone it silently re-points at whichever agent got reselected.
+    //
+    // Only while others remain, though. Emptying the registry is the root's to
+    // handle: it resets the whole stack rather than this one screen, and
+    // racing it from here is what turned the removal crash into a routing
+    // error ("Attempted to navigate before mounting the Root Layout").
+    if (useAgents.getState().agents.length > 0) router.replace('/')
   }
 
   const confirmForget = () => {

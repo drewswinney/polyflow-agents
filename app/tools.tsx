@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { ApprovalPolicy, McpServerStatus, SkillSummary } from '@/domain'
 import { useBackend } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
+import { withAgent } from '@/ui/components/AgentGate'
 import { Card, Divider } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
@@ -25,7 +26,7 @@ import { useTheme } from '@/ui/ThemeProvider'
  * `POST /api/mcp/servers/{name}/test` — so a server is described as what is
  * actually known rather than given a health it has not reported.
  */
-export default function ToolsScreen() {
+function ToolsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const agent = useSelectedAgent()
@@ -196,3 +197,5 @@ const styles = StyleSheet.create({
   empty: { padding: 16 },
   policyCard: { padding: 14, gap: 10 }
 })
+
+export default withAgent(ToolsScreen)

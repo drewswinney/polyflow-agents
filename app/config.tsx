@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { ConfigField } from '@/domain'
 import { useBackend } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
+import { withAgent } from '@/ui/components/AgentGate'
 import { Card, Divider } from '@/ui/components/Card'
 import { Segmented } from '@/ui/components/Segmented'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
@@ -27,7 +28,7 @@ import { useTheme } from '@/ui/ThemeProvider'
  * renders as text rather than being skipped: a field the app does not
  * understand is still a field the user may need.
  */
-export default function ConfigScreen() {
+function ConfigScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const agent = useSelectedAgent()
@@ -259,3 +260,5 @@ const styles = StyleSheet.create({
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: { paddingHorizontal: 12, paddingVertical: 7, borderWidth: StyleSheet.hairlineWidth }
 })
+
+export default withAgent(ConfigScreen)

@@ -17,6 +17,7 @@ import { useSelectedAgent } from '@/state/agents'
 import { useBackend, useConnectionFault, useConnectionState } from '@/state/ConnectionProvider'
 import { useKanbanBoard, useKanbanCardCreate } from '@/state/boards'
 import { useSidebar } from '@/state/sidebar'
+import { withAgent } from '@/ui/components/AgentGate'
 import { Card } from '@/ui/components/Card'
 import { KanbanCardDetail } from '@/ui/components/KanbanCardDetail'
 import { KanbanCardTile } from '@/ui/components/KanbanCardTile'
@@ -30,7 +31,7 @@ import { useTheme } from '@/ui/ThemeProvider'
 const COLUMN_GAP = 12
 const BOARD_INSET = 16
 
-export default function BoardsScreen() {
+function BoardsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const { width } = useWindowDimensions()
@@ -389,3 +390,5 @@ const styles = StyleSheet.create({
     paddingVertical: 9
   }
 })
+
+export default withAgent(BoardsScreen)

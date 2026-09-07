@@ -10,6 +10,7 @@ import { useSessions, useSessionSearch } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
 import { BlockedStrip } from '@/ui/components/BlockedStrip'
 import { Card, Divider } from '@/ui/components/Card'
+import { withAgent } from '@/ui/components/AgentGate'
 import { AgentGlyph, Icon } from '@/ui/components/Icon'
 import { IconButton } from '@/ui/components/IconButton'
 import { SessionRow } from '@/ui/components/SessionRow'
@@ -27,7 +28,7 @@ import { useTheme } from '@/ui/ThemeProvider'
  * Search expands in place in the header rather than pushing a route or opening
  * a modal (§7.7), so cancelling always returns you exactly where you were.
  */
-export default function SessionsScreen() {
+function SessionsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const agent = useSelectedAgent()
@@ -392,3 +393,5 @@ const styles = StyleSheet.create({
   },
   emptyBody: { maxWidth: 264, textAlign: 'center' }
 })
+
+export default withAgent(SessionsScreen)

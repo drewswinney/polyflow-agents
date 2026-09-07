@@ -6,6 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { ModelOption } from '@/domain'
 import { useBackend } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
+import { withAgent } from '@/ui/components/AgentGate'
 import { Card, Divider } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
 import { ScreenHeader } from '@/ui/components/ScreenHeader'
@@ -22,7 +23,7 @@ import { Pressable } from 'react-native'
  * memory belong on this screen too and need `/api/config/schema` (M4) to be
  * rendered rather than hardcoded — they are not stubbed in the meantime.
  */
-export default function ModelScreen() {
+function ModelScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const agent = useSelectedAgent()
@@ -114,3 +115,5 @@ const styles = StyleSheet.create({
   row: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 13 },
   rowLabel: { flex: 1, minWidth: 0 }
 })
+
+export default withAgent(ModelScreen)

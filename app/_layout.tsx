@@ -92,10 +92,30 @@ export default function RootLayout() {
   // empty registry until onboarding runs.
   const agent = useSelectedAgentOrNull()
   const server = useSelectedServerOrNull()
+  const agentCount = useAgents(state => state.agents.length)
 
   useEffect(() => {
     void hydrate()
   }, [hydrate])
+
+  /**
+   * Where you land when the registry empties.
+   *
+   * Removing the last server is the only way to reach an empty registry with a
+   * stack already built, and the screens on it are all scoped to an agent that
+   * no longer exists. `withAgent` keeps them from rendering into that state;
+   * this is what gets you out of it. Popping to the root lands on home, whose
+   * own gate carries on into onboarding — one navigation for the app rather
+   * than one per screen that noticed.
+   *
+   * Gated on `hydrated` so a fresh launch, which is empty until AsyncStorage
+   * answers, does not read as a removal.
+   */
+  useEffect(() => {
+    if (!hydrated || agentCount > 0) return
+
+    if (router.canDismiss()) router.dismissAll()
+  }, [hydrated, agentCount])
 
   /**
    * Bring back what was on screen last time, then keep it up to date.
