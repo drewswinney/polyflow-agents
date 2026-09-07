@@ -1,4 +1,4 @@
-repo: drewswinney/polyflow-agents
+repo: polyflowlabs/polyflow-agents
 branch: docs/initial-architecture
 path: docs
 
