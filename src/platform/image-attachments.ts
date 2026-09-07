@@ -88,21 +88,34 @@ export async function pickImages(source: PickSource, limit = 6): Promise<PickedI
   const prepared: PickedImage[] = []
 
   for (const asset of result.assets) {
-    prepared.push(await prepare(asset))
+    prepared.push(await prepareImage(asset))
   }
 
   return prepared
 }
 
+/** What the re-encode needs to know about a source image. A picker asset is one. */
+export interface ImageSource {
+  uri: string
+  width: number
+  height: number
+  mimeType?: string | null
+  fileName?: string | null
+}
+
 /**
- * Re-encode one asset to an accepted format, downscaled to fit `MAX_EDGE`.
+ * Re-encode one image to an accepted format, downscaled to fit `MAX_EDGE`.
  *
  * PNG sources stay PNG: a screenshot is the common one, its flat colour costs
  * little losslessly, and JPEG would both ring the text and drop any alpha to
  * black. Everything else — HEIC included, which is the whole reason this
  * function is not conditional — becomes JPEG.
+ *
+ * Exported because the picker is not the only way in: a photo tapped in the
+ * "Add to chat" recents row (`recent-photos`) arrives as a library asset and
+ * takes exactly this path, so the format guarantee above holds for it too.
  */
-async function prepare(asset: ImagePicker.ImagePickerAsset): Promise<PickedImage> {
+export async function prepareImage(asset: ImageSource): Promise<PickedImage> {
   const png = (asset.mimeType ?? '').toLowerCase() === 'image/png'
   const context = ImageManipulator.manipulate(asset.uri)
   const longEdge = Math.max(asset.width, asset.height)

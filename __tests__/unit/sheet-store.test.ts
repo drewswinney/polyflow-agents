@@ -21,7 +21,7 @@ describe('useSheet close → settle', () => {
   it('runs the callback on settle, not on close, and only once', () => {
     const after = jest.fn()
 
-    useSheet.getState().open({ kind: 'add-to-chat', onPick: () => undefined })
+    useSheet.getState().open({ kind: 'add-to-chat', onPick: () => undefined, onPickRecent: () => undefined })
     useSheet.getState().close(after)
 
     expect(useSheet.getState().request).toBeNull()

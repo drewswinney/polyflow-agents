@@ -14,6 +14,7 @@
 import { create } from 'zustand'
 
 import type { PickSource } from '@/platform/image-attachments'
+import type { RecentPhoto } from '@/platform/recent-photos'
 
 export type SheetRequest =
   | {
@@ -29,7 +30,13 @@ export type SheetRequest =
       /** Told the choice instead of the host, when there is no session. */
       onPick?: (model: string) => void
     }
-  | { kind: 'add-to-chat'; onPick: (source: PickSource) => void }
+  | {
+      kind: 'add-to-chat'
+      /** Open a picker — a native screen of its own. */
+      onPick: (source: PickSource) => void
+      /** Attach one of the recents shown in the sheet, with no picker. */
+      onPickRecent: (photo: RecentPhoto) => void
+    }
   /**
    * Which agent the app is pointed at (§7.13).
    *

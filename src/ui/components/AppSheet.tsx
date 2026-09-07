@@ -1,9 +1,10 @@
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { router } from 'expo-router'
-import { useState } from 'react'
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native'
+import { useEffect, useState } from 'react'
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
 import type { ModelOption, ModelSwitch } from '@/domain'
+import { type RecentPhotos, recentPhotos } from '@/platform/recent-photos'
 import { useBackend } from '@/state/ConnectionProvider'
 import { useAgents, useSelectAgent, useSelectedAgentOrNull } from '@/state/agents'
 import { useSheet, type SheetRequest } from '@/state/sheet'
@@ -194,7 +195,15 @@ function AgentSheet({ onDone }: { onDone: () => void }) {
   )
 }
 
-/** What can be attached to the next message. */
+/**
+ * What can be attached to the next message.
+ *
+ * A row of the library's newest photos first, because the photo you want is
+ * usually the one you just took: tapping one attaches it with no picker in
+ * between. The row leads with the library itself, as a `+` tile, so "any
+ * other photo" is one tap further along the same row rather than a separate
+ * option below. What remains below is what needs a screen of its own.
+ */
 function AddToChatSheet({
   request,
   onDone
@@ -203,40 +212,81 @@ function AddToChatSheet({
   onDone: (after?: () => void) => void
 }) {
   const theme = useTheme()
+  // Null until the library has answered — the `+` tile stands alone until
+  // then, and the photos slide in beside it rather than the row appearing.
+  const [recent, setRecent] = useState<RecentPhotos | null>(null)
 
-  const rows = [
-    { icon: 'image', label: 'Photo library', source: 'library' as const },
-    { icon: 'camera', label: 'Take photo', source: 'camera' as const }
-  ]
+  useEffect(() => {
+    let cancelled = false
+
+    recentPhotos()
+      .then(result => {
+        if (!cancelled) setRecent(result)
+      })
+      .catch(() => {
+        // A library that will not answer is the same as one we may not read.
+        if (!cancelled) setRecent({ access: 'denied', photos: [] })
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  // Closed first: the picker is a native screen of its own, and leaving the
+  // sheet under it means coming back to a stale card. And closed *fully*
+  // first — the pick waits for the sheet to leave the screen, because a
+  // picker presented while this sheet's Modal is still on its way out is
+  // presented on that Modal, and dismissed with it. That was the camera that
+  // opened and closed itself.
+  const pick = (source: 'library' | 'camera') => onDone(() => request.onPick(source))
+
+  const tileRadius = { borderRadius: theme.radius.control }
 
   return (
     <View style={styles.body}>
-      <Card>
-        {rows.map((row, index) => (
+      {/* Bleeds to the sheet's edges so the row scrolls out from under them
+          instead of stopping at the body's inset. */}
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.recentBleed} contentContainerStyle={styles.recent}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Choose from photo library"
+          onPress={() => pick('library')}
+          style={[styles.recentTile, styles.addTile, tileRadius, { backgroundColor: theme.color.secondaryTint }]}
+        >
+          <Icon name="plus" size={20} color={theme.color.secondary} />
+        </Pressable>
+
+        {recent?.photos.map(photo => (
           <Pressable
-            key={row.source}
+            key={photo.id}
             accessibilityRole="button"
+            accessibilityLabel={`Add ${photo.filename ?? 'photo'}`}
             onPress={() => {
-              // Closed first: the picker is a native screen of its own, and
-              // leaving the sheet under it means coming back to a stale card.
-              // And closed *fully* first — the pick waits for the sheet to
-              // leave the screen, because a picker presented while this
-              // sheet's Modal is still on its way out is presented on that
-              // Modal, and dismissed with it. That was the camera that opened
-              // and closed itself.
-              onDone(() => request.onPick(row.source))
+              // No native screen follows, so nothing to wait for.
+              onDone()
+              request.onPickRecent(photo)
             }}
-            style={[styles.row, index > 0 && { borderTopColor: theme.color.divider, borderTopWidth: StyleSheet.hairlineWidth }]}
           >
-            <View style={[styles.tile, { backgroundColor: theme.color.secondaryTint }]}>
-              <Icon name={row.icon} size={15} color={theme.color.secondary} />
-            </View>
-            <Text variant="rowLabel" style={styles.rowLabel}>
-              {row.label}
-            </Text>
+            <Image source={{ uri: photo.uri }} style={[styles.recentTile, tileRadius, { borderColor: theme.color.border }]} />
           </Pressable>
         ))}
-      </Card>
+      </ScrollView>
+
+      {recent?.access === 'denied' ? (
+        <Text variant="secondary" style={styles.hint}>
+          Allow photo access in Settings to see recent photos here.
+        </Text>
+      ) : null}
+
+      <Pressable accessibilityRole="button" onPress={() => pick('camera')} style={styles.option}>
+        <View style={[styles.tile, { backgroundColor: theme.color.secondaryTint }]}>
+          <Icon name="camera" size={15} color={theme.color.secondary} />
+        </View>
+        <Text variant="rowLabel" style={styles.rowLabel}>
+          Take photo
+        </Text>
+      </Pressable>
     </View>
   )
 }
@@ -249,6 +299,13 @@ const styles = StyleSheet.create({
   notice: { padding: 14, gap: 6 },
   done: { height: 46, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth },
   row: { minHeight: 56, flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14 },
+  // Uncarded: the body's own inset positions it, so no padding of its own.
+  option: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  recentBleed: { marginHorizontal: -16 },
+  recent: { flexDirection: 'row', gap: 8, paddingHorizontal: 16 },
+  recentTile: { width: 72, height: 72, borderWidth: StyleSheet.hairlineWidth, borderColor: 'transparent' },
+  addTile: { alignItems: 'center', justifyContent: 'center' },
+  hint: { paddingHorizontal: 2 },
   tile: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   rowLabel: { flex: 1, minWidth: 0 }
 })
