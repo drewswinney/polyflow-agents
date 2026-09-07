@@ -37,6 +37,8 @@ and can never share memory (see `devices.py`).
 
 from __future__ import annotations
 
+import asyncio
+import base64
 import importlib
 import importlib.util
 import json
@@ -48,7 +50,8 @@ import time
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +101,8 @@ def _sibling(name: str) -> Any:
 
 devices = _sibling("devices")
 push = _sibling("push")
+artifacts = _sibling("artifacts")
+thumbnails = _sibling("thumbnails")
 
 
 def _redacted(device: Dict[str, Any]) -> Dict[str, Any]:
@@ -764,3 +769,228 @@ async def send_test(body: dict | None = None) -> Dict[str, Any]:
     )
 
     return {"ok": True, "devices": len(targets)}
+
+
+# ---------------------------------------------------------------------------
+# Artifacts — files a conversation produced, kept where the app can reach them.
+#
+# The store and the capture live in `artifacts.py`; these routes are the app's
+# side of it (`docs/artifacts.md` §4). Behind the same auth as everything else
+# here, which is also what stops `/share/{token}` from being a public link
+# today — §5 of that document says why, and why this plugin does not route
+# around the gate.
+# ---------------------------------------------------------------------------
+
+_ARTIFACT_KINDS = set(artifacts.KINDS)
+# Longest a share link may be asked to live. A year is "until revoked" with a
+# number on it; anything longer is a request to never expire, which is what
+# omitting the field already means.
+_MAX_SHARE_HOURS = 24 * 365
+
+
+def _route_prefix(request: Request, tail: str) -> str:
+    """This router's mount, from the request's own path rather than a guess.
+
+    A share URL has to name the same prefix Hermes mounted the router under,
+    and that is the plugin's *name* as the manifest declares it — the very
+    contract the README warns can drift. Reading it off the path that reached
+    this handler is the one way to be right about it.
+    """
+    path = request.url.path
+    cut = path.find(tail)
+    prefix = path[:cut] if cut >= 0 else path.rstrip("/")
+
+    return f"{str(request.base_url).rstrip('/')}{prefix}"
+
+
+def _artifact_or_404(artifact_id: str) -> Dict[str, Any]:
+    row = artifacts.get(artifact_id)
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+
+    return row
+
+
+def _serve(row: Dict[str, Any], *, download: bool) -> FileResponse:
+    path = artifacts.file_path(row)
+
+    if not path.is_file():
+        # The row outlived its bytes — a hand-edited store, or a disk that
+        # filled mid-copy. A 410 says "was here", which is more useful than a
+        # 404 that reads as a bad id.
+        raise HTTPException(status_code=410, detail="artifact bytes are missing")
+
+    return FileResponse(
+        path=str(path),
+        media_type=str(row["mime_type"]),
+        filename=str(row["name"]),
+        content_disposition_type="attachment" if download else "inline",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            # The bytes for a given id and version never change, so a client
+            # may keep them; a rewrite bumps the version and the URL with it.
+            "Cache-Control": "private, max-age=86400",
+            "ETag": f'"{row["sha256"]}"',
+        },
+    )
+
+
+@router.get("/artifacts")
+async def list_artifacts(
+    request: Request,
+    session: str | None = None,
+    kind: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> Dict[str, Any]:
+    """Newest first. `session` is the *stored* id the app opens a chat by."""
+    if kind is not None and kind not in _ARTIFACT_KINDS:
+        raise HTTPException(status_code=400, detail=f"kind must be one of {sorted(_ARTIFACT_KINDS)}")
+
+    rows, total = artifacts.list_rows(session_id=session or None, kind=kind, limit=limit, offset=offset)
+    share_base = _route_prefix(request, "/artifacts")
+
+    return {"artifacts": [artifacts.to_public(row, share_base) for row in rows], "total": total}
+
+
+@router.get("/artifacts/{artifact_id}")
+async def get_artifact(artifact_id: str, request: Request) -> Dict[str, Any]:
+    return artifacts.to_public(_artifact_or_404(artifact_id), _route_prefix(request, "/artifacts"))
+
+
+@router.get("/artifacts/{artifact_id}/content")
+async def artifact_content(artifact_id: str, download: bool = False) -> FileResponse:
+    """The bytes. Inline by default so an image renders; `?download=1` for a save-as."""
+    return _serve(_artifact_or_404(artifact_id), download=download)
+
+
+@router.get("/artifacts/{artifact_id}/thumbnail")
+async def artifact_thumbnail(artifact_id: str) -> FileResponse:
+    """A first-page PNG, rendered on the host the first time it is asked for.
+
+    404 when nothing here can render this kind of file — the app shows a glyph
+    instead. Off the event loop: a cold LibreOffice takes seconds, and every
+    other request on this server would otherwise wait for it.
+    """
+    row = _artifact_or_404(artifact_id)
+    path = await asyncio.to_thread(thumbnails.ensure, row)
+
+    if path is None:
+        raise HTTPException(status_code=404, detail="no thumbnail for this artifact")
+
+    return FileResponse(
+        path=str(path),
+        media_type="image/png",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, max-age=86400",
+            "ETag": f'"{row["sha256"]}-thumb"',
+        },
+    )
+
+
+@router.post("/artifacts")
+async def upload_artifact(body: dict, request: Request) -> Dict[str, Any]:
+    """The app filing a picture it sent.
+
+    A JSON data URL rather than multipart, for the same reason Hermes's own
+    `/api/files/upload` takes one: nothing here may depend on `python-multipart`
+    being installed in a venv this plugin does not own. The phone downscaled
+    the image before sending it, so the base64 tax is paid on a few hundred KB.
+
+    `name` is the filename the *host* stored the upload under — what a reloaded
+    transcript refers to it by — so the app can match the two on the next open.
+    """
+    name = str(body.get("name") or "").strip()
+    data_url = str(body.get("dataUrl") or "")
+
+    if not name:
+        raise HTTPException(status_code=400, detail="name is required")
+    if not data_url.startswith("data:") or ";base64," not in data_url:
+        raise HTTPException(status_code=400, detail="dataUrl must be a base64 data URL")
+
+    header, _, payload = data_url.partition(",")
+    declared = header[5:].split(";")[0] or None
+
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except Exception:
+        raise HTTPException(status_code=400, detail="dataUrl is not valid base64")
+
+    origin = str(body.get("origin") or "upload")
+
+    try:
+        stored = artifacts.record(
+            data=data,
+            name=name,
+            session_id=str(body.get("sessionId") or "") or None,
+            origin=origin,
+            tool=None,
+            source_path=None,
+            mime_type=str(body.get("mimeType") or "") or declared,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return {"ok": True, "artifact": artifacts.to_public(artifacts.get(stored["id"]), _route_prefix(request, "/artifacts"))}
+
+
+@router.delete("/artifacts/{artifact_id}")
+async def delete_artifact(artifact_id: str) -> Dict[str, Any]:
+    if not artifacts.delete(artifact_id):
+        raise HTTPException(status_code=404, detail="artifact not found")
+
+    return {"ok": True}
+
+
+@router.post("/artifacts/{artifact_id}/share")
+async def share_artifact(artifact_id: str, request: Request, body: dict | None = None) -> Dict[str, Any]:
+    """Mint a share token, or return the one that is live. `{expiresInHours?}`."""
+    hours = (body or {}).get("expiresInHours")
+    expires_in = None
+
+    if hours is not None:
+        try:
+            hours = float(hours)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="expiresInHours must be a number")
+
+        if hours <= 0 or hours > _MAX_SHARE_HOURS:
+            raise HTTPException(status_code=400, detail=f"expiresInHours must be between 0 and {_MAX_SHARE_HOURS}")
+
+        expires_in = int(hours * 3600)
+
+    row = artifacts.share(artifact_id, expires_in_seconds=expires_in)
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+
+    public = artifacts.to_public(row, _route_prefix(request, "/artifacts"))
+
+    return {"ok": True, "share": public["share"], "artifact": public}
+
+
+@router.delete("/artifacts/{artifact_id}/share")
+async def unshare_artifact(artifact_id: str) -> Dict[str, Any]:
+    if not artifacts.unshare(artifact_id):
+        raise HTTPException(status_code=404, detail="artifact not found")
+
+    return {"ok": True}
+
+
+@router.get("/share/{token}")
+async def open_share(token: str, download: bool = False) -> FileResponse:
+    """The bytes, by token alone.
+
+    Unknown, revoked and expired all answer 404: a link that has stopped
+    working should not say which of the three it is. Sits behind the host's
+    auth gate like every other route here — see `docs/artifacts.md` §5 for
+    exactly what that means for "anyone with the link".
+    """
+    row = artifacts.by_share_token(token)
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="no such share")
+
+    return _serve(row, download=download)

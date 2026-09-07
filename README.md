@@ -107,6 +107,20 @@ What the host sends, what it deliberately does not, and the two hooks it is
 still unproven against are in [docs/push-relay.md](docs/push-relay.md) and the
 plugin's own [README](host/polyflow_agents_push/README.md).
 
+## Artifacts
+
+The same plugin keeps **artifacts**: every file the agent writes or generates,
+and every picture the app sends it, copied into a store on the host and served
+back over `/api/plugins/polyflow_agents_push/artifacts`. The app lists them on
+an Artifacts screen (sidebar, or a chat's header for that conversation's own),
+previews pictures and text, and can hand a file to the OS share sheet or mint a
+link. Sent pictures come back on any device, not just the one that sent them.
+
+One limit, stated plainly: a share link sits behind the host's own sign-in,
+because Hermes's auth gate has no way for a plugin to declare a public route.
+"Share file" is the action that reaches someone outside. The design, the API
+contract and that limit are in [docs/artifacts.md](docs/artifacts.md).
+
 ## Checks
 
 ```bash
@@ -114,8 +128,15 @@ npm run typecheck     # includes the vendored upstream types
 npm run check:m0      # the M0 gate, without needing a host
 npm run check:images  # image attachments, without needing a host
 npm run check:discovery  # agent discovery + the v1→v2 registry migration
-npm run check:plugin  # the host plugin's registration route, without a Hermes
+npm run check:plugin  # the host plugin's routes and artifact store, without a Hermes
 npm run spike:m0      # the M0 gate against a live `hermes serve`
+```
+
+`check:plugin` needs `fastapi` and `httpx`, which a Hermes host has and a Mac
+usually does not. Without them it prints `skipped`; to run it here:
+
+```bash
+uv run --with fastapi --with httpx python3 scripts/plugin-api-check.py
 ```
 
 `check:m0` is the one that matters in CI. It drives the *vendored, unmodified*

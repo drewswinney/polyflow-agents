@@ -22,6 +22,14 @@ import {
 import {
   type AgentBackend,
   type ApprovalPolicy,
+  type Artifact,
+  type ArtifactBytes,
+  type ArtifactKind,
+  type ArtifactOrigin,
+  type ArtifactPage,
+  type ArtifactQuery,
+  type ArtifactShare,
+  type ArtifactUpload,
   type Capabilities,
   type ConfigField,
   type ConnectionState,
@@ -57,7 +65,7 @@ import {
 import { mapGatewayEvent, type MapContext, toEventRecord } from './event-map'
 import { createHeldEvents } from './held-events'
 import { toSearchHit, toSessionSummary, toTranscriptEntries, usableTitle } from './normalize'
-import { HermesRest, type HermesRestConfig, HermesRestError } from './rest'
+import { type ArtifactRow, HermesRest, type HermesRestConfig, HermesRestError } from './rest'
 
 export { HermesRest, HermesRestError, probeScheme } from './rest'
 export { mapGatewayEvent } from './event-map'
@@ -168,7 +176,10 @@ export const HERMES_CAPABILITIES: Capabilities = {
   media: { images: true, audioIn: true, audioOut: true },
   // True of the *kind*, not of a given host: the route exists once the
   // `polyflow_agents_push` plugin is installed and enabled. Without it, 404.
-  push: { register: true }
+  push: { register: true },
+  // Same plugin, same caveat. `share` is "links can be minted"; whether one
+  // clears the host's auth gate is the host's call (`docs/artifacts.md` §5).
+  artifacts: { store: true, share: true }
 }
 
 const OUTCOME_TO_CHOICE: Record<PermissionOutcome, string> = {
@@ -1080,6 +1091,101 @@ export class HermesBackend implements AgentBackend {
     if (!result.ok) throw new Error('The agent could not synthesise that text.')
 
     return { dataUrl: result.data_url, mimeType: result.mime_type }
+  }
+
+  // --- Artifacts ----------------------------------------------------------
+
+  async listArtifacts(query: ArtifactQuery = {}): Promise<ArtifactPage> {
+    const page = await this.rest.listArtifacts({
+      session: query.sessionId,
+      kind: query.kind,
+      limit: query.limit ?? 100,
+      offset: query.offset
+    })
+
+    return { artifacts: page.artifacts.map(toArtifact), total: Number(page.total) || 0 }
+  }
+
+  async getArtifact(id: string): Promise<Artifact> {
+    return toArtifact(await this.rest.artifact(id))
+  }
+
+  readArtifact(id: string): Promise<ArtifactBytes> {
+    return this.rest.artifactBytes(id)
+  }
+
+  readArtifactThumbnail(id: string): Promise<ArtifactBytes> {
+    return this.rest.artifactThumbnail(id)
+  }
+
+  /**
+   * Same read path as `attachImage`: the phone's file exists only on the
+   * phone, so the bytes go up base64 in a data URL. The picture was downscaled
+   * before it was ever sent, so this is a few hundred KB, not a photo.
+   */
+  async uploadArtifact(upload: ArtifactUpload): Promise<Artifact> {
+    const dataUrl = upload.uri.startsWith('data:')
+      ? upload.uri
+      : `data:${upload.mimeType};base64,${await new File(upload.uri).base64()}`
+
+    const result = await this.rest.uploadArtifact({
+      name: upload.name,
+      mimeType: upload.mimeType,
+      sessionId: upload.sessionId,
+      dataUrl
+    })
+
+    return toArtifact(result.artifact)
+  }
+
+  deleteArtifact(id: string): Promise<void> {
+    return this.rest.deleteArtifact(id)
+  }
+
+  async shareArtifact(id: string, options: { expiresInHours?: number } = {}): Promise<ArtifactShare> {
+    const result = await this.rest.shareArtifact(id, options.expiresInHours ? { expiresInHours: options.expiresInHours } : {})
+    const share = toArtifact(result.artifact).share
+
+    if (!share) throw new Error('The host did not return a share link.')
+
+    return share
+  }
+
+  unshareArtifact(id: string): Promise<void> {
+    return this.rest.unshareArtifact(id)
+  }
+}
+
+const ARTIFACT_KINDS: ReadonlySet<string> = new Set<ArtifactKind>(['image', 'video', 'audio', 'document', 'code', 'data', 'other'])
+
+/**
+ * Coerce a row off the wire into the domain shape.
+ *
+ * The route is this repo's own, so the names already match; what this guards
+ * is a *newer* host adding a kind this build does not know, which lands as
+ * `other` rather than as a tile the screen cannot draw.
+ */
+function toArtifact(row: ArtifactRow): Artifact {
+  return {
+    id: String(row.id),
+    name: String(row.name ?? ''),
+    kind: (ARTIFACT_KINDS.has(row.kind) ? row.kind : 'other') as ArtifactKind,
+    mimeType: String(row.mimeType ?? 'application/octet-stream'),
+    size: Number(row.size) || 0,
+    sessionId: row.sessionId ? String(row.sessionId) : null,
+    origin: (row.origin === 'upload' ? 'upload' : 'agent') as ArtifactOrigin,
+    tool: row.tool ? String(row.tool) : null,
+    sourcePath: row.sourcePath ? String(row.sourcePath) : null,
+    createdAt: Number(row.createdAt) || 0,
+    updatedAt: Number(row.updatedAt) || Number(row.createdAt) || 0,
+    version: Number(row.version) || 1,
+    share: row.share?.url
+      ? {
+          url: String(row.share.url),
+          expiresAt: row.share.expiresAt === null || row.share.expiresAt === undefined ? null : Number(row.share.expiresAt),
+          createdAt: row.share.createdAt === null || row.share.createdAt === undefined ? null : Number(row.share.createdAt)
+        }
+      : null
   }
 }
 

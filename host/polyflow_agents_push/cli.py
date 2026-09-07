@@ -176,7 +176,7 @@ def _status_lines() -> list[str]:
 
     lines.append(f"state:     {_install_state(target)}")
 
-    for probe in ("plugin.yaml", "dashboard/manifest.json", "dashboard/plugin_api.py"):
+    for probe in ("plugin.yaml", "artifacts.py", "thumbnails.py", "dashboard/manifest.json", "dashboard/plugin_api.py"):
         lines.append(f"  {'ok  ' if (target / probe).exists() else 'MISSING'} {probe}")
 
     return lines

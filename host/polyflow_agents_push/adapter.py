@@ -25,9 +25,10 @@ from __future__ import annotations
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+import threading
+from typing import Any, Dict, List, Optional
 
-from . import devices, push
+from . import artifacts, devices, push
 
 logger = logging.getLogger(__name__)
 
@@ -147,18 +148,65 @@ def _on_pre_tool_call(**kwargs: Any) -> None:
 
 
 def _on_post_tool_call(**kwargs: Any) -> None:
-    """Something was produced. See ARTIFACT_TOOLS for what counts."""
+    """Something was produced. See ARTIFACT_TOOLS for what counts.
+
+    Two jobs, in order, on one daemon thread: copy what the tool made into the
+    artifact store (`artifacts.py`), then push about it with the artifact's id
+    so a tap opens the thing rather than the chat it came from. The copy comes
+    first because the push is only worth sending once there is something to
+    open — and neither may hold the tool loop, which is why the thread.
+    """
     tool_name = str(kwargs.get("tool_name") or "")
 
     if tool_name not in ARTIFACT_TOOLS:
         return
 
-    push.notify(
-        kind="artifacts",
-        title="Artifact ready",
-        body=f"{tool_name} finished",
-        data={"sessionId": kwargs.get("session_id") or "", "tool": tool_name},
+    # A cancelled or failed call produced nothing. The hook says which when the
+    # host is new enough to; an older host leaves it to the result's own
+    # `error` field, which `capture_tool_result` reads.
+    if str(kwargs.get("status") or "") in ("error", "cancelled"):
+        return
+
+    session_id = str(kwargs.get("session_id") or "")
+    args = kwargs.get("args")
+    result = kwargs.get("result")
+
+    if isinstance(args, str):
+        try:
+            args = json.loads(args)
+        except Exception:
+            args = {}
+
+    threading.Thread(
+        target=_capture_then_notify,
+        kwargs={"tool_name": tool_name, "args": args, "result": result, "session_id": session_id},
+        name=f"polyflow-artifact-{tool_name}",
+        daemon=True,
+    ).start()
+
+
+def _capture_then_notify(*, tool_name: str, args: Any, result: Any, session_id: str) -> None:
+    stored: List[Dict[str, Any]] = artifacts.capture_tool_result(
+        tool_name=tool_name, args=args, result=result, session_id=session_id
     )
+
+    if stored:
+        first = stored[0]
+        body = first["name"] if len(stored) == 1 else f"{first['name']} and {len(stored) - 1} more"
+        data: Dict[str, Any] = {
+            "sessionId": session_id,
+            "tool": tool_name,
+            "artifactId": first["id"],
+            "artifactCount": len(stored),
+        }
+    else:
+        # Nothing landed in the store — the file was over the cap, or a
+        # provider answered with something this plugin does not read. The tool
+        # still finished, and that was what this notification always said.
+        body = f"{tool_name} finished"
+        data = {"sessionId": session_id, "tool": tool_name}
+
+    push.notify(kind="artifacts", title="Artifact ready", body=body[:140], data=data)
 
 
 def _on_post_llm_call(**kwargs: Any) -> None:

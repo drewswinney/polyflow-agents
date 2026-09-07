@@ -1,4 +1,4 @@
-import type { TranscriptEntry } from '@/domain'
+import type { Artifact, TranscriptEntry } from '@/domain'
 
 /**
  * What the transcript list actually renders.
@@ -12,6 +12,15 @@ import type { TranscriptEntry } from '@/domain'
 export type TranscriptRow =
   | { kind: 'entry'; id: string; entry: TranscriptEntry }
   | { kind: 'work'; id: string; entries: TranscriptEntry[] }
+  /**
+   * What a stretch of working-out produced, as cards you can open.
+   *
+   * Not an entry: the host's transcript has no row for a file, only the tool
+   * call that wrote it. These come from the artifact store (`docs/artifacts.md`)
+   * and are slotted in by time, so a card sits right under the work that made
+   * it and above the reply that mentions it.
+   */
+  | { kind: 'artifacts'; id: string; artifacts: Artifact[] }
 
 /** Thinking and tool calls group; messages and stream cuts break the run. */
 function isWork(entry: TranscriptEntry): boolean {
@@ -47,6 +56,70 @@ export function groupTranscript(entries: readonly TranscriptEntry[]): Transcript
   }
 
   return rows
+}
+
+/** When an entry happened — for a tool, when it finished. */
+function entryTime(entry: TranscriptEntry): number {
+  if (entry.kind === 'tool') return entry.call.startedAt + (entry.call.durationMs ?? 0)
+
+  return entry.at
+}
+
+/** When a row happened: the last thing in it. */
+function rowTime(row: TranscriptRow): number {
+  switch (row.kind) {
+    case 'entry':
+      return entryTime(row.entry)
+    case 'work':
+      return row.entries.reduce((latest, entry) => Math.max(latest, entryTime(entry)), 0)
+    case 'artifacts':
+      return row.artifacts.reduce((latest, artifact) => Math.max(latest, artifact.createdAt), 0)
+  }
+}
+
+/**
+ * Slot the session's artifacts into the transcript, by time.
+ *
+ * Each artifact goes after the last row that had already happened when it was
+ * made — for a file the agent wrote, that is the work section holding the
+ * `write_file` call, so the card lands under the work and above the reply.
+ * Artifacts that land in the same gap share one row. Pictures the user sent
+ * are left out: they already show in the user's own bubble, and a card for
+ * one would say "the agent produced this", which it did not.
+ *
+ * Rows are chronological, so the slot for a later artifact is never earlier
+ * than for an earlier one, and the ids — the first artifact in each group —
+ * hold still as new ones arrive after them.
+ */
+export function withArtifactRows(rows: readonly TranscriptRow[], artifacts: readonly Artifact[]): TranscriptRow[] {
+  const produced = artifacts.filter(artifact => artifact.origin === 'agent').sort((a, b) => a.createdAt - b.createdAt)
+
+  if (produced.length === 0) return [...rows]
+
+  const times = rows.map(rowTime)
+  const bySlot = new Map<number, Artifact[]>()
+
+  for (const artifact of produced) {
+    let slot = 0
+
+    while (slot < rows.length && times[slot] <= artifact.createdAt) slot += 1
+
+    const group = bySlot.get(slot)
+
+    if (group) group.push(artifact)
+    else bySlot.set(slot, [artifact])
+  }
+
+  const merged: TranscriptRow[] = []
+
+  for (let index = 0; index <= rows.length; index += 1) {
+    const group = bySlot.get(index)
+
+    if (group) merged.push({ kind: 'artifacts', id: `artifacts:${group[0].id}`, artifacts: group })
+    if (index < rows.length) merged.push(rows[index])
+  }
+
+  return merged
 }
 
 /** How long a headline runs before it is cut. Roughly one line on a phone. */

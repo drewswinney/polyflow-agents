@@ -155,6 +155,7 @@ main reason the design and this document disagree anywhere.
 | Voice mode: `realtime · 180ms round trip`, barge-in | Audio is three request/response REST endpoints — `/api/audio/transcribe`, `/api/audio/speak`, `/api/audio/elevenlabs/voices`. No duplex channel exists | **Descoped to push-to-talk** (§7.9) |
 | Approval countdown, `expires 4:52` | No `expires_at` on the wire — it appears only on OAuth types (`OAuthProviderStatus`, `OAuthPollResponse`). But the host *does* enforce one: `approvals.timeout`, default **300s**, read by `tools/approval.py::_get_approval_timeout()` and part of `DEFAULT_CONFIG`, so it is visible through `/api/config/schema` | **Countdown is buildable** off receipt time + the configured timeout (§7.6); not yet built |
 | QR pairing, `hermes pair` | `hermes pairing` is `list / approve / revoke / clear-pending`. No `pair` subcommand, no token issuance, no QR flow | **Manual host + token only** (§7.8) |
+| A sent image, on reopen | The host persists `@image:<path>` and serves no route to read it back | **The plugin keeps a copy** — [artifacts.md](artifacts.md) §6; the device cache stays the first place looked |
 
 ---
 
@@ -272,6 +273,8 @@ interface Capabilities {
   approvals:{ requests: boolean; policy: boolean }
   logs:     { events: boolean }
   media:    { images: boolean; audioIn: boolean; audioOut: boolean }
+  push:     { register: boolean }
+  artifacts:{ store: boolean; share: boolean }   // the host plugin's store, artifacts.md
 }
 ```
 
@@ -607,6 +610,7 @@ sub-screen reached by a back chevron.
 | 7.16 | Connection lost | state | — |
 | 7.17 | Sidebar | overlay | `/api/sessions` |
 | 7.18 | New session | home | `/api/sessions` (on first send) |
+| 7.19 | Artifacts | top-level / sub | `/api/plugins/polyflow_agents_push/artifacts` — see [artifacts.md](artifacts.md) |
 
 ### 7.1 Sessions
 

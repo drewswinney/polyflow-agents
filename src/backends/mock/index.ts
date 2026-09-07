@@ -7,9 +7,17 @@
  * against this is how the UI gets built before §11 host prep exists.
  */
 
+import { File } from 'expo-file-system'
+
 import {
   type AgentBackend,
   type ApprovalPolicy,
+  type Artifact,
+  type ArtifactBytes,
+  type ArtifactPage,
+  type ArtifactQuery,
+  type ArtifactShare,
+  type ArtifactUpload,
   type Capabilities,
   type ConfigField,
   type ConnectionState,
@@ -38,6 +46,8 @@ import {
   type Unsubscribe,
 } from '@/domain'
 
+import { DEMO_IMAGE_PNG_BASE64 } from './demo-image'
+
 export const MOCK_CAPABILITIES: Capabilities = {
   sessions: { search: true, rename: true, pin: true },
   settings: { schemaDriven: true, model: true, providers: false, sessionModel: true },
@@ -50,7 +60,10 @@ export const MOCK_CAPABILITIES: Capabilities = {
   // There is no host to register with. The demo agent exists so the UI can be
   // built without one, and a fake "registered" would hide the only thing that
   // matters about push: whether a real device reached a real host.
-  push: { register: false }
+  push: { register: false },
+  // Kept in memory, so the Artifacts screen has something to draw and every
+  // action on it — share, delete, the picture coming back — can be exercised.
+  artifacts: { store: true, share: true }
 }
 
 const MINUTE = 60_000
@@ -189,6 +202,9 @@ export class MockBackend implements AgentBackend {
    * exercisable on the demo agent, not just readable.
    */
   private board: KanbanBoard
+  /** Seeded on first use, so the constructor stays as it was. */
+  private artifacts: Artifact[] | null = null
+  private readonly artifactBytes = new Map<string, Uint8Array>()
   private models: ModelOption[] = [
     { id: 'sonnet-4.5', provider: 'anthropic', selected: true },
     { id: 'opus-4.5', provider: 'anthropic', selected: false },
@@ -694,6 +710,124 @@ export class MockBackend implements AgentBackend {
     throw new Error('The mock agent has no voice.')
   }
 
+  // --- Artifacts ----------------------------------------------------------
+
+  private seededArtifacts(): Artifact[] {
+    if (this.artifacts === null) {
+      this.artifacts = this.options.seed === false ? [] : seedArtifacts(Date.now(), this.artifactBytes)
+    }
+
+    return this.artifacts
+  }
+
+  async listArtifacts(query: ArtifactQuery = {}): Promise<ArtifactPage> {
+    await tick(120)
+
+    const all = this.seededArtifacts()
+      .filter(artifact => (!query.sessionId || artifact.sessionId === query.sessionId) && (!query.kind || artifact.kind === query.kind))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+    const offset = query.offset ?? 0
+
+    return { artifacts: all.slice(offset, offset + (query.limit ?? 50)), total: all.length }
+  }
+
+  async getArtifact(id: string): Promise<Artifact> {
+    const hit = this.seededArtifacts().find(artifact => artifact.id === id)
+
+    if (!hit) throw new Error('No such artifact.')
+
+    return hit
+  }
+
+  async readArtifact(id: string): Promise<ArtifactBytes> {
+    await tick(200)
+
+    const artifact = await this.getArtifact(id)
+    const bytes = this.artifactBytes.get(id)
+
+    if (!bytes) throw new Error('The demo agent lost the bytes for that artifact.')
+
+    return { bytes, mimeType: artifact.mimeType }
+  }
+
+  async readArtifactThumbnail(id: string): Promise<ArtifactBytes> {
+    // The demo has no renderer. Pictures are their own thumbnail; everything
+    // else is honestly a miss, which is what draws the glyph the real host
+    // draws when it has no Pillow or `pdftoppm`.
+    const artifact = await this.getArtifact(id)
+
+    if (artifact.kind !== 'image') throw new Error('The demo agent renders no thumbnails.')
+
+    return this.readArtifact(id)
+  }
+
+  async uploadArtifact(upload: ArtifactUpload): Promise<Artifact> {
+    const base64 = upload.uri.startsWith('data:') ? upload.uri.slice(upload.uri.indexOf(',') + 1) : await new File(upload.uri).base64()
+    const bytes = bytesFromBase64(base64)
+    const rows = this.seededArtifacts()
+    const now = Date.now()
+    const existing = rows.find(row => row.origin === 'upload' && row.sessionId === upload.sessionId && row.name === upload.name)
+
+    if (existing) {
+      existing.updatedAt = now
+      existing.version += 1
+      existing.size = bytes.length
+      this.artifactBytes.set(existing.id, bytes)
+
+      return existing
+    }
+
+    const artifact: Artifact = {
+      id: `mock-upload-${now.toString(36)}`,
+      name: upload.name,
+      kind: upload.mimeType.startsWith('image/') ? 'image' : 'other',
+      mimeType: upload.mimeType,
+      size: bytes.length,
+      sessionId: upload.sessionId,
+      origin: 'upload',
+      tool: null,
+      sourcePath: null,
+      createdAt: now,
+      updatedAt: now,
+      version: 1,
+      share: null
+    }
+
+    rows.push(artifact)
+    this.artifactBytes.set(artifact.id, bytes)
+
+    return artifact
+  }
+
+  async deleteArtifact(id: string): Promise<void> {
+    const rows = this.seededArtifacts()
+    const index = rows.findIndex(artifact => artifact.id === id)
+
+    if (index === -1) throw new Error('No such artifact.')
+
+    rows.splice(index, 1)
+    this.artifactBytes.delete(id)
+  }
+
+  async shareArtifact(id: string, options: { expiresInHours?: number } = {}): Promise<ArtifactShare> {
+    const artifact = await this.getArtifact(id)
+    const now = Date.now()
+    const expiresAt = options.expiresInHours ? now + options.expiresInHours * 60 * 60 * 1000 : null
+
+    // A live link keeps its token; only the expiry follows the request.
+    artifact.share = artifact.share
+      ? { ...artifact.share, expiresAt }
+      : { url: `https://demo.polyflow.local/share/${now.toString(36)}`, expiresAt, createdAt: now }
+
+    return artifact.share
+  }
+
+  async unshareArtifact(id: string): Promise<void> {
+    const artifact = await this.getArtifact(id)
+
+    artifact.share = null
+  }
+
   private emit(id: SessionId, update: SessionUpdate): void {
     for (const sink of this.sinks.get(id) ?? []) sink(update)
 
@@ -820,4 +954,115 @@ function toEventRecord(update: SessionUpdate): EventRecord {
     default:
       return { ...base, name: update.kind, detail: '', status: 'info', payload: update }
   }
+}
+
+function bytesFromBase64(base64: string): Uint8Array {
+  return Uint8Array.from(atob(base64), character => character.charCodeAt(0))
+}
+
+function bytesFromText(text: string): Uint8Array {
+  return new TextEncoder().encode(text)
+}
+
+/**
+ * What the demo agent has produced: one of each kind the screen draws, a
+ * rewrite with a version count, a picture the phone sent, and a live share.
+ * The bytes go into `store` so the detail screen can actually open them.
+ */
+function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] {
+  const rows: (Artifact & { bytes: Uint8Array })[] = [
+    {
+      id: 'mock-art-report',
+      name: 'scrub-report.md',
+      kind: 'document',
+      mimeType: 'text/markdown',
+      size: 0,
+      sessionId: 'ses-zfs',
+      origin: 'agent',
+      tool: 'write_file',
+      sourcePath: '/home/agent/reports/scrub-report.md',
+      // Between the question and the reply in `ses-zfs`, where its card belongs.
+      createdAt: now - 3 * MINUTE + 20_000,
+      updatedAt: now - 2 * MINUTE - 10_000,
+      version: 3,
+      share: { url: 'https://demo.polyflow.local/share/k3v9x1', expiresAt: null, createdAt: now - 20 * MINUTE },
+      bytes: bytesFromText(
+        '# Scrub report — tank\n\n' +
+          '- Scrub finished clean in 3h 41m\n' +
+          '- 110 stale snapshots from the failed replication\n' +
+          '- 412G reclaimable once they are destroyed\n\n' +
+          'Waiting on approval before touching anything.\n'
+      )
+    },
+    {
+      id: 'mock-art-pool',
+      name: 'pool-layout.png',
+      kind: 'image',
+      mimeType: 'image/png',
+      size: 0,
+      sessionId: 'ses-zfs',
+      origin: 'agent',
+      tool: 'image_generate',
+      sourcePath: '/home/agent/.hermes/image_cache/pool-layout.png',
+      createdAt: now - 2 * MINUTE - 30_000,
+      updatedAt: now - 2 * MINUTE - 30_000,
+      version: 1,
+      share: null,
+      bytes: bytesFromBase64(DEMO_IMAGE_PNG_BASE64)
+    },
+    {
+      id: 'mock-art-window',
+      name: 'backup-window.sh',
+      kind: 'code',
+      mimeType: 'application/x-sh',
+      size: 0,
+      sessionId: 'ses-proxmox',
+      origin: 'agent',
+      tool: 'write_file',
+      sourcePath: '/etc/cron.d/backup-window.sh',
+      createdAt: now - 48 * MINUTE - 20_000,
+      updatedAt: now - 48 * MINUTE - 20_000,
+      version: 1,
+      share: null,
+      bytes: bytesFromText('#!/bin/sh\n# Nightly backup, moved clear of the scrub.\n15 3 * * * root /usr/local/bin/pve-backup --all\n')
+    },
+    {
+      id: 'mock-art-reconnects',
+      name: 'reconnects.json',
+      kind: 'data',
+      mimeType: 'application/json',
+      size: 0,
+      sessionId: 'ses-homeassistant',
+      origin: 'agent',
+      tool: 'write_file',
+      sourcePath: '/home/agent/reconnects.json',
+      createdAt: now - 5 * 60 * MINUTE - 20_000,
+      updatedAt: now - 5 * 60 * MINUTE - 20_000,
+      version: 1,
+      share: null,
+      bytes: bytesFromText(JSON.stringify({ attempts: 6, lastError: 'ECONNREFUSED', container: 'exited' }, null, 2) + '\n')
+    },
+    {
+      id: 'mock-art-photo',
+      name: 'upload_20260907_132822_1.png',
+      kind: 'image',
+      mimeType: 'image/png',
+      size: 0,
+      sessionId: 'ses-board',
+      origin: 'upload',
+      tool: null,
+      sourcePath: null,
+      createdAt: now - 3 * 60 * MINUTE,
+      updatedAt: now - 3 * 60 * MINUTE,
+      version: 1,
+      share: null,
+      bytes: bytesFromBase64(DEMO_IMAGE_PNG_BASE64)
+    }
+  ]
+
+  return rows.map(({ bytes, ...artifact }) => {
+    store.set(artifact.id, bytes)
+
+    return { ...artifact, size: bytes.length }
+  })
 }
