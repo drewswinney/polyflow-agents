@@ -143,7 +143,7 @@ The platform face registers with:
 | Approval request | `pre_approval_request` hook | `command`, `description`, `pattern_key(s)`, `session_key`, `surface`, `session_id`, `turn_id`, `tool_call_id` |
 | Approval resolved | `post_approval_response` hook | the above plus `choice` (`once`/`session`/`always`/`deny`/`timeout`) |
 | Agent question | `pre_tool_call` on the `clarify` tool | `tool_name`, `args` (question, choices) |
-| Artifact generated | `post_tool_call` | `tool_name`, `args`, `result` |
+| Artifact generated | `post_tool_call` | `tool_name`, `args`, `result`, `status` — and the file itself is now kept, see [artifacts.md](artifacts.md) |
 | Turn finished | `post_llm_call` hook | `session_id` (stored), `turn_id`, `assistant_response`, `platform`, `model` |
 | Cron job run | platform delivery target | the job's rendered output |
 

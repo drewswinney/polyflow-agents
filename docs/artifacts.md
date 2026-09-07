@@ -123,8 +123,9 @@ client agrees on what is an image. `sessionId` is the **stored** id — the one
 ## 5. Sharing, and the honest limit
 
 A share token is a random 128-bit string kept on the row, optionally expiring.
-`GET /share/{token}` looks up the artifact by token — constant-time compared,
-expiry checked — and streams it inline with `nosniff`. Revoking deletes the
+`GET /share/{token}` looks the artifact up by token (a unique index over 128
+random bits; guessing is not a strategy), checks the expiry, and streams it
+inline with `nosniff`. Revoking deletes the
 token; the link dies.
 
 **What the link does not do today: get past the host's auth gate.** Every

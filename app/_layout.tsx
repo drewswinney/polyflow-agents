@@ -243,6 +243,8 @@ export default function RootLayout() {
                 <Stack.Screen name="index" />
                 <Stack.Screen name="welcome" />
                 <Stack.Screen name="sessions" />
+                <Stack.Screen name="artifacts/index" />
+                <Stack.Screen name="artifacts/[id]" />
                 <Stack.Screen name="boards" />
                 <Stack.Screen name="settings" />
                 <Stack.Screen name="chat/[id]" />
@@ -304,6 +306,7 @@ function AppSidebar() {
       loading={sessions.isPending}
       activePath={pathname}
       paired={Boolean(agent)}
+      supportsArtifacts={backend?.capabilities.artifacts.store === true}
       supportsBoards={backend?.capabilities.extras.boards === true}
       onOpenSession={id => router.push(`/chat/${id}`)}
       // `navigate` returns to a top-level destination already on the stack

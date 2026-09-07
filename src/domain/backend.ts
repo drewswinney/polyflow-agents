@@ -10,6 +10,12 @@ import type { Capabilities } from './capabilities'
 import type {
   AgentError,
   ApprovalPolicy,
+  Artifact,
+  ArtifactBytes,
+  ArtifactPage,
+  ArtifactQuery,
+  ArtifactShare,
+  ArtifactUpload,
   ClarifyRequest,
   ConfigField,
   ContentBlock,
@@ -216,6 +222,38 @@ export interface AgentBackend {
   transcribe(dataUrl: string, mimeType: string): Promise<string>
   /** Requires `capabilities.media.audioOut`. Returns audio as a data URL. */
   speak(text: string): Promise<{ dataUrl: string; mimeType: string }>
+
+  // --- Artifacts (`docs/artifacts.md`) ------------------------------------
+  //
+  // All gated on `capabilities.artifacts.store`; the two share calls on
+  // `capabilities.artifacts.share` as well. A Hermes host without the plugin
+  // answers 404 to the first of these, which the screen reads as "not set up".
+
+  /** Newest first. */
+  listArtifacts(query?: ArtifactQuery): Promise<ArtifactPage>
+  getArtifact(id: string): Promise<Artifact>
+  /**
+   * The bytes, over the same authenticated connection everything else uses.
+   *
+   * A method rather than a URL on purpose: an `<Image>` handed a bare URL
+   * carries neither the bearer token nor the session cookie on Android, so
+   * the bytes come through `fetch` and are cached on disk by the caller.
+   */
+  readArtifact(id: string): Promise<ArtifactBytes>
+  /**
+   * File a picture this app sent, under the name the host gave it.
+   *
+   * Called after `prompt()` reports the name, which is the only moment both
+   * the bytes and the host's name for them are known on this side. What it
+   * buys is the picture coming back on any device, not just the one that
+   * sent it (`attachment-cache.ts` is per phone).
+   */
+  uploadArtifact(upload: ArtifactUpload): Promise<Artifact>
+  deleteArtifact(id: string): Promise<void>
+  /** Mint a link, or return the one already live. Requires `capabilities.artifacts.share`. */
+  shareArtifact(id: string, options?: { expiresInHours?: number }): Promise<ArtifactShare>
+  /** Revoke the link. Requires `capabilities.artifacts.share`. */
+  unshareArtifact(id: string): Promise<void>
 }
 
 /**

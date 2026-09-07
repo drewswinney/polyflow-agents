@@ -30,6 +30,8 @@ import type {
 } from '@/domain'
 import type { PickedImage } from '@/platform/image-attachments'
 
+import { ensureArtifactFile } from '@/platform/artifact-cache'
+
 import { cacheSentImage, cachedImageUri } from './attachment-cache'
 import { useTranscript } from './queries'
 import { createStreamTail, type StreamTail } from './stream-tail'
@@ -118,6 +120,61 @@ export function useSessionStream(
   entriesRef.current = entries
 
   useEffect(() => () => tail.dispose(), [tail])
+
+  /**
+   * Pictures this device never kept, fetched back from the host.
+   *
+   * A reloaded turn names its images and nothing else, and `withCachedImages`
+   * can only answer from this phone's own copies — so a picture sent from
+   * another device, or before a reinstall, came back as a name-only chip. The
+   * host's artifact store now keeps every sent picture (`docs/artifacts.md`
+   * §6), so a chip is looked up there by the name the host stored it under
+   * and, when found, filed into the local cache so the next open is free.
+   *
+   * Tried once per name per session. A name the host does not have stays a
+   * chip; asking again on every token that seals would be a list call per
+   * reply for a picture that is not coming.
+   */
+  const askedHostFor = useRef(new Set<string>())
+
+  useEffect(() => {
+    if (!backend?.capabilities.artifacts.store) return
+
+    const missing = new Set<string>()
+
+    for (const entry of entries) {
+      if (entry.kind !== 'message' || !entry.images) continue
+
+      for (const image of entry.images) {
+        const key = `${sessionId}:${image.name}`
+
+        if (!image.uri && !askedHostFor.current.has(key)) {
+          askedHostFor.current.add(key)
+          missing.add(image.name)
+        }
+      }
+    }
+
+    if (missing.size === 0) return
+
+    let cancelled = false
+
+    void resolveHostImages(backend, sessionId, missing).then(resolved => {
+      if (cancelled || resolved.size === 0) return
+
+      setEntries(current =>
+        current.map(entry =>
+          entry.kind === 'message' && entry.images?.some(image => !image.uri && resolved.has(image.name))
+            ? { ...entry, images: entry.images.map(image => (image.uri ? image : { ...image, uri: resolved.get(image.name) ?? image.uri })) }
+            : entry
+        )
+      )
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [backend, sessionId, entries])
 
   // --- Transcript load ----------------------------------------------------
   /**
@@ -597,6 +654,22 @@ async function dispatch(
     ])
   )
 
+  // File each picture with the host as well, under the name it just gave it.
+  //
+  // The local copy above is what this phone shows; this is what every other
+  // device shows, and what this one shows after its cache is gone. Not awaited
+  // and not fatal: the message is already away, and a picture that fails to
+  // file is a chip on some later device, not a turn that did not happen.
+  if (backend.capabilities.artifacts.store) {
+    for (const stored of result.images) {
+      const picked = message.images.find(image => image.uri === stored.sourceUri)
+
+      void backend
+        .uploadArtifact({ name: stored.name, mimeType: picked?.mimeType ?? 'image/jpeg', sessionId, uri: stored.sourceUri })
+        .catch(error => console.warn('[artifacts] could not file a sent picture with the host:', error))
+    }
+  }
+
   setEntries(current =>
     current.map(entry =>
       entry.kind === 'message' && entry.images?.length
@@ -604,6 +677,41 @@ async function dispatch(
         : entry
     )
   )
+}
+
+/**
+ * Find sent pictures on the host by the names the transcript carries.
+ *
+ * Only pictures this app sent (`origin: 'upload'`) are matched: an agent-made
+ * image that happens to share a name is a different thing. Each hit is pulled
+ * into the artifact cache and then copied into the attachment cache under the
+ * host's name, so `withCachedImages` finds it synchronously next time.
+ *
+ * Never throws. A host without the plugin answers 404 to the list, and a
+ * download that fails leaves that one chip standing.
+ */
+async function resolveHostImages(backend: AgentBackend, sessionId: SessionId, names: Set<string>): Promise<Map<string, string>> {
+  const resolved = new Map<string, string>()
+
+  try {
+    const page = await backend.listArtifacts({ sessionId, kind: 'image', limit: 200 })
+
+    for (const artifact of page.artifacts) {
+      if (artifact.origin !== 'upload' || !names.has(artifact.name) || resolved.has(artifact.name)) continue
+
+      try {
+        const uri = await ensureArtifactFile(artifact, () => backend.readArtifact(artifact.id))
+
+        resolved.set(artifact.name, cacheSentImage(sessionId, artifact.name, uri) ?? uri)
+      } catch {
+        // This one stays a chip.
+      }
+    }
+  } catch {
+    // No store on this host, or none reachable now. Chips it is.
+  }
+
+  return resolved
 }
 
 /**

@@ -17,7 +17,7 @@ to register one yet.
 | Approval blocking a turn | `pre_approval_request` hook | "Approval needed" + the command |
 | Approval answered anywhere | `post_approval_response` hook | data-only, so the app can dismiss a stale banner |
 | Agent question | `pre_tool_call` on `clarify` | the question |
-| Artifact produced | `post_tool_call` on `ARTIFACT_TOOLS` | "Artifact ready" |
+| Artifact produced | `post_tool_call` on `ARTIFACT_TOOLS` | "Artifact ready", naming the file — and the file is kept (below) |
 | Turn finished | `post_llm_call` hook | "Turn finished" + the start of the reply |
 | Cron job output | `deliver=polyflow_agents_push` delivery target | the rendered output |
 
@@ -125,6 +125,43 @@ Over Tailscale that means binding to the tailnet address and having the phone
 address the host by that same name — the same rule the socket already follows,
 but now it can fail at registration too.
 
+## Artifacts
+
+The plugin also keeps what the agent produces. On every `post_tool_call` for a
+tool in `ARTIFACT_TOOLS` — `write_file` and the image and video generators —
+the file is copied into a store under the process Hermes home, and the push
+carries its id so a tap opens it. The app files the pictures it sends through
+the same store, which is how a sent picture comes back on a different phone.
+
+```
+~/.hermes/polyflow_agents_push/artifacts/
+  artifacts.db          # SQLite index
+  files/<id>.<ext>      # the bytes, copied — never a link to the agent's path
+```
+
+| Route | Does |
+|---|---|
+| `GET /artifacts?session=&kind=&limit=&offset=` | newest first |
+| `GET /artifacts/{id}` | one row |
+| `GET /artifacts/{id}/content` | the bytes, inline; `?download=1` for a save-as |
+| `POST /artifacts` | the app filing a sent picture: `{name, mimeType, sessionId, dataUrl}` |
+| `DELETE /artifacts/{id}` | row and bytes |
+| `POST /artifacts/{id}/share` | mint or return a share token; `{expiresInHours?}` |
+| `DELETE /artifacts/{id}/share` | revoke |
+| `GET /share/{token}` | the bytes, by token alone |
+
+Same auth as the device routes, which is the catch for `/share/{token}`: every
+`/api/*` path is behind the host's gate, and the public allow-list is a fixed
+upstream tuple with no registration API, so the link works for anyone who can
+already sign in to the host and nobody else. The route is already shaped for a
+public path — it authenticates by the token alone — so exposing it needs only
+the gate to let that one prefix through. Design and the rest of the contract:
+[`docs/artifacts.md`](https://github.com/polyflowlabs/polyflow-agents/blob/main/docs/artifacts.md).
+
+Per-file cap of 25 MB, matching the gateway's own `image.attach_bytes` ceiling.
+A rewrite of the same path in the same session updates the row and bumps its
+`version` rather than adding a row.
+
 ## Cron delivery
 
 `deliver=polyflow_agents_push` needs a home channel, which is what
@@ -176,6 +213,10 @@ Untested: no cron job has delivered here yet.
   is stale gets notifications it has since turned off.
 - **Approvals ignore preferences by design** (`devices.wants`). A halted agent
   nobody is told about is a worse failure than an unwanted banner.
+- **Artifacts are captured from tool results, not from the filesystem.** A
+  file the agent produced through `terminal` — `echo > out.txt`, a script that
+  writes — is not seen. `write_file` and the generators are; those are the
+  calls whose result names what was made.
 - **The plugin's name is a contract.** Hermes mounts a router under the `name`
   in `dashboard/manifest.json` (falling back to the directory basename), so
   `polyflow_agents_push` is baked into the app's `PUSH_ROUTE`. Change one

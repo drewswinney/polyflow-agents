@@ -319,7 +319,22 @@ function ChatScreen() {
               </Text>
             )
           }
-          right={<IconButton name="ellipsis" accessibilityLabel="Session options" edge="right" outlined />}
+          right={
+            // What this conversation produced, one tap away. Only on a host
+            // that keeps artifacts; the placeholder stays otherwise so the
+            // row's shape does not change with the host.
+            backend?.capabilities.artifacts.store ? (
+              <IconButton
+                name="box-archive"
+                accessibilityLabel="Artifacts from this session"
+                edge="right"
+                outlined
+                onPress={() => router.push({ pathname: '/artifacts', params: { session: id } } as never)}
+              />
+            ) : (
+              <IconButton name="ellipsis" accessibilityLabel="Session options" edge="right" outlined />
+            )
+          }
         />
 
         <KeyboardInset style={styles.flex}>

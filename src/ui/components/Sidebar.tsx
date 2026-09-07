@@ -17,7 +17,7 @@ import { Icon } from './Icon'
 import { Text } from './Text'
 
 /** The drawer's destinations, as expo-router's typed routes see them. */
-export type SidebarPath = '/' | '/sessions' | '/boards' | '/settings'
+export type SidebarPath = '/' | '/sessions' | '/artifacts' | '/boards' | '/settings'
 
 const MAX_WIDTH = 320
 const WIDTH_FRACTION = 0.84
@@ -57,6 +57,7 @@ export function Sidebar({
   loading,
   activePath,
   paired,
+  supportsArtifacts,
   supportsBoards,
   onOpenSession,
   onNavigate,
@@ -76,6 +77,8 @@ export function Sidebar({
    * these at yet", not as features that vanished.
    */
   paired: boolean
+  /** Whether the host keeps artifacts (`docs/artifacts.md`); the row is absent, not disabled, without it. */
+  supportsArtifacts: boolean
   supportsBoards: boolean
   onOpenSession: (id: string) => void
   onNavigate: (path: SidebarPath) => void
@@ -130,6 +133,18 @@ export function Sidebar({
               onNavigate('/sessions')
             }}
           />
+          {supportsArtifacts ? (
+            <NavRow
+              icon="box-archive"
+              label="Artifacts"
+              disabled={!paired}
+              selected={activePath === '/artifacts' || activePath.startsWith('/artifacts/')}
+              onPress={() => {
+                onDismiss()
+                onNavigate('/artifacts')
+              }}
+            />
+          ) : null}
           {supportsBoards ? (
             <NavRow
               icon="table-columns"

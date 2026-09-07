@@ -480,3 +480,84 @@ export interface KanbanCardUpdate {
   body?: string
   move?: KanbanMoveTarget
 }
+
+/**
+ * How the app draws an artifact. Decided on the host, once, from the MIME
+ * type and extension, so every client agrees on what is an image.
+ */
+export type ArtifactKind = 'image' | 'video' | 'audio' | 'document' | 'code' | 'data' | 'other'
+
+/** `agent` produced it — a tool wrote or generated it. `upload` is a picture this app sent. */
+export type ArtifactOrigin = 'agent' | 'upload'
+
+/**
+ * A live share link. `expiresAt` is null for "until revoked".
+ *
+ * Whether the link works for someone *outside* the host's own auth is the
+ * host's decision, not this app's — see `docs/artifacts.md` §5. The screen
+ * that shows it says so.
+ */
+export interface ArtifactShare {
+  url: string
+  expiresAt: number | null
+  createdAt: number | null
+}
+
+/**
+ * A file that passed through a conversation, kept by the host (`docs/artifacts.md`).
+ *
+ * Hermes has no such noun — upstream there is tool output and an `images/`
+ * directory of uploads — so this is the app's word, backed by its own plugin.
+ * `sessionId` is the stored id the app opens a chat by, or null when the host
+ * could not say which conversation produced it.
+ */
+export interface Artifact {
+  id: string
+  name: string
+  kind: ArtifactKind
+  mimeType: string
+  /** Bytes. */
+  size: number
+  sessionId: SessionId | null
+  origin: ArtifactOrigin
+  /** The tool that produced it, when an agent did. */
+  tool: string | null
+  /** Where it lived on the host when it was captured, if anywhere. */
+  sourcePath: string | null
+  /** Epoch ms. */
+  createdAt: number
+  /** Epoch ms; moves when the same file is written again. */
+  updatedAt: number
+  /** Starts at 1; a rewrite of the same file in the same session bumps it. */
+  version: number
+  share: ArtifactShare | null
+}
+
+export interface ArtifactQuery {
+  sessionId?: SessionId
+  kind?: ArtifactKind
+  limit?: number
+  offset?: number
+}
+
+export interface ArtifactPage {
+  artifacts: Artifact[]
+  /** How many match the query in all, so a page knows what it is a page of. */
+  total: number
+}
+
+/** A picture this app sent, being filed with the host under the host's own name for it. */
+export interface ArtifactUpload {
+  /** The filename the host stored the upload as — the one a reloaded transcript refers to. */
+  name: string
+  mimeType: string
+  sessionId: SessionId
+  /** A data URL or a local file URI. */
+  uri: string
+}
+
+/** The bytes of one artifact, as fetched. */
+export interface ArtifactBytes {
+  bytes: Uint8Array
+  mimeType: string
+}

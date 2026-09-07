@@ -30,7 +30,9 @@ export const OPENAI_COMPAT_CAPABILITIES: Capabilities = {
   media: { images: true, audioIn: false, audioOut: false },
   // An OpenAI-compatible host serves completions and nothing else — there is no
   // process there to hold a device registry, and no approvals to push about.
-  push: { register: false }
+  push: { register: false },
+  // Nor anywhere to keep a file: completions in, completions out.
+  artifacts: { store: false, share: false }
 }
 
 class NotImplemented extends Error {
@@ -193,6 +195,34 @@ export class OpenAiCompatBackend implements AgentBackend {
 
   async triggerCronJob(): Promise<never> {
     throw new NotImplemented('cron')
+  }
+
+  async listArtifacts(): Promise<never> {
+    throw new NotImplemented('artifacts')
+  }
+
+  async getArtifact(): Promise<never> {
+    throw new NotImplemented('artifacts')
+  }
+
+  async readArtifact(): Promise<never> {
+    throw new NotImplemented('artifacts')
+  }
+
+  async uploadArtifact(): Promise<never> {
+    throw new NotImplemented('artifacts')
+  }
+
+  async deleteArtifact(): Promise<never> {
+    throw new NotImplemented('artifacts')
+  }
+
+  async shareArtifact(): Promise<never> {
+    throw new NotImplemented('artifact sharing')
+  }
+
+  async unshareArtifact(): Promise<never> {
+    throw new NotImplemented('artifact sharing')
   }
 
   async transcribe(): Promise<never> {

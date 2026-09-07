@@ -115,6 +115,37 @@ const DEFAULT_TIMEOUT_MS = 30_000
  */
 const PUSH_ROUTE = '/api/plugins/polyflow_agents_push/devices'
 const KANBAN_ROUTE = '/api/plugins/polyflow_agents_push/kanban'
+const ARTIFACTS_ROUTE = '/api/plugins/polyflow_agents_push/artifacts'
+
+/** How long the bytes of one artifact may take to arrive. Same ceiling as an upload. */
+const ARTIFACT_BYTES_TIMEOUT_MS = 120_000
+
+/**
+ * One artifact as the plugin's routes describe it (`docs/artifacts.md` §4).
+ *
+ * Already camel-cased on the wire — the route is this repo's own — so the
+ * backend's mapping is a coercion, not a translation.
+ */
+export interface ArtifactRow {
+  id: string
+  name: string
+  kind: string
+  mimeType: string
+  size: number
+  sessionId: string | null
+  origin: string
+  tool: string | null
+  sourcePath: string | null
+  createdAt: number
+  updatedAt: number
+  version: number
+  share: { url: string; expiresAt: number | null; createdAt: number | null } | null
+}
+
+export interface ArtifactsPage {
+  artifacts: ArtifactRow[]
+  total: number
+}
 
 /** Audio endpoints scale with payload size, between three and ten minutes. */
 function audioTimeoutMs(estimate: number): number {
@@ -184,6 +215,40 @@ export class HermesRest {
       }
 
       return (text ? JSON.parse(text) : undefined) as T
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  /**
+   * A raw body, for the routes that serve bytes rather than JSON.
+   *
+   * Same credential handling as `request` — bearer header or platform cookie
+   * — which is the whole reason artifact bytes come through here and not
+   * through an `<Image>` pointed at the URL: on Android the image pipeline
+   * carries neither.
+   */
+  async requestBytes(path: string, timeoutMs = ARTIFACT_BYTES_TIMEOUT_MS): Promise<{ bytes: Uint8Array; mimeType: string }> {
+    const url = `${this.baseUrl}${this.withProfile(path)}`
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+    try {
+      const response = await this.fetchImpl(url, {
+        method: 'GET',
+        headers: this.config.token ? { Authorization: `Bearer ${this.config.token}` } : {},
+        credentials: 'include',
+        signal: controller.signal
+      })
+
+      if (!response.ok) {
+        throw new HermesRestError(response.status, await response.text().catch(() => ''), url)
+      }
+
+      const buffer = await response.arrayBuffer()
+      const mimeType = (response.headers.get('content-type') ?? 'application/octet-stream').split(';')[0].trim()
+
+      return { bytes: new Uint8Array(buffer), mimeType }
     } finally {
       clearTimeout(timer)
     }
@@ -351,6 +416,57 @@ export class HermesRest {
 
   unregisterPush(token: string): Promise<void> {
     return this.request<void>(PUSH_ROUTE, { method: 'DELETE', body: { token }, timeoutMs: 15_000 })
+  }
+
+  // --- Artifacts ----------------------------------------------------------
+  //
+  // The same plugin's artifact routes (`docs/artifacts.md` §4). A host without
+  // the plugin answers 404 to the list, which is how the screen tells "not set
+  // up" from "broken", exactly as registration does.
+
+  listArtifacts(query: { session?: string; kind?: string; limit?: number; offset?: number } = {}): Promise<ArtifactsPage> {
+    const params = new URLSearchParams()
+
+    if (query.session) params.set('session', query.session)
+    if (query.kind) params.set('kind', query.kind)
+    if (query.limit !== undefined) params.set('limit', String(query.limit))
+    if (query.offset) params.set('offset', String(query.offset))
+
+    const suffix = params.toString()
+
+    return this.request<ArtifactsPage>(`${ARTIFACTS_ROUTE}${suffix ? `?${suffix}` : ''}`, { timeoutMs: 15_000 })
+  }
+
+  artifact(id: string): Promise<ArtifactRow> {
+    return this.request<ArtifactRow>(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}`, { timeoutMs: 15_000 })
+  }
+
+  artifactBytes(id: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
+    return this.requestBytes(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}/content`)
+  }
+
+  uploadArtifact(body: { name: string; mimeType: string; sessionId: string; dataUrl: string }): Promise<{ ok: boolean; artifact: ArtifactRow }> {
+    return this.request<{ ok: boolean; artifact: ArtifactRow }>(ARTIFACTS_ROUTE, {
+      method: 'POST',
+      body,
+      timeoutMs: ARTIFACT_BYTES_TIMEOUT_MS
+    })
+  }
+
+  deleteArtifact(id: string): Promise<void> {
+    return this.request<void>(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}`, { method: 'DELETE', timeoutMs: 15_000 })
+  }
+
+  shareArtifact(id: string, body: { expiresInHours?: number }): Promise<{ ok: boolean; artifact: ArtifactRow }> {
+    return this.request<{ ok: boolean; artifact: ArtifactRow }>(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}/share`, {
+      method: 'POST',
+      body,
+      timeoutMs: 15_000
+    })
+  }
+
+  unshareArtifact(id: string): Promise<void> {
+    return this.request<void>(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}/share`, { method: 'DELETE', timeoutMs: 15_000 })
   }
 
   transcribe(dataUrl: string, mimeType: string): Promise<AudioTranscriptionResponse> {

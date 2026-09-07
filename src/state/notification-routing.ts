@@ -32,6 +32,8 @@ interface NotificationPayload {
   sessionId?: string
   requestId?: string
   kind?: string
+  /** Set on an artifact push, so a tap opens the file rather than the chat. */
+  artifactId?: string
   /** Set on the data-only push that says an approval was answered elsewhere. */
   resolved?: boolean
 }
@@ -62,6 +64,15 @@ export function useNotificationRouting(): void {
         if (!agents.some(agent => agent.id === target)) return
 
         select(target)
+      }
+
+      // An artifact is the thing worth opening — the chat it came from is one
+      // tap away from there, and the reverse is a scroll through a transcript
+      // looking for a tool card.
+      if (payload.kind === 'artifacts' && payload.artifactId) {
+        router.push(`/artifacts/${payload.artifactId}` as never)
+
+        return
       }
 
       if (payload.sessionId) router.push(`/chat/${payload.sessionId}`)

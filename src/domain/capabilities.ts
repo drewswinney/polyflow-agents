@@ -25,6 +25,16 @@ export interface Capabilities {
    * plugin is a host that has not been set up, not a broken app.
    */
   push: { register: boolean }
+  /**
+   * Whether this backend *kind* keeps artifacts (`docs/artifacts.md`).
+   *
+   * Structural like `push.register`: a Hermes host has the routes once the
+   * plugin is installed, and a host without it answers 404, which the
+   * Artifacts screen reports as "not set up" rather than as a failure.
+   * `share` is whether links can be minted at all; whether one works for an
+   * outsider is the host's auth gate's decision, which the screen says.
+   */
+  artifacts: { store: boolean; share: boolean }
 }
 
 /** Everything off — the floor a backend builds up from. */
@@ -35,7 +45,8 @@ export const NO_CAPABILITIES: Capabilities = {
   approvals: { requests: false, policy: false },
   logs: { events: false },
   media: { images: false, audioIn: false, audioOut: false },
-  push: { register: false }
+  push: { register: false },
+  artifacts: { store: false, share: false }
 }
 
 /**
@@ -51,6 +62,7 @@ export function missingCapabilityLabels(caps: Capabilities): string[] {
   if (!caps.extras.mcp) missing.push('MCP')
   if (!caps.extras.boards) missing.push('Boards')
   if (!caps.approvals.requests) missing.push('Approvals')
+  if (!caps.artifacts.store) missing.push('Artifacts')
 
   return missing
 }
