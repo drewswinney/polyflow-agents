@@ -83,7 +83,7 @@ each one:
 ```
 profiles:
   ok   greg
-         install: linked -> /home/drew/.hermes/plugins/polyflow_agents_push
+         install: linked -> ~/.hermes/plugins/polyflow_agents_push
          enabled: yes
   GAP  devqa
          install: not installed

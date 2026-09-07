@@ -134,7 +134,7 @@ Three consequences for the UI:
 
 ### 2.5 Current host state
 
-Observed on the `hermes` host (`10.0.0.68`, Debian 13 on Proxmox, key auth via
+Observed on the `hermes` host (`hermes.lan`, Debian 13 on Proxmox, key auth via
 `~/.ssh/hermes`):
 
 - Hermes installed at `~/.local/bin/hermes`, source tree at `~/.hermes/hermes-agent`
@@ -1016,7 +1016,7 @@ per-OS VPN behaviour. Everything else is shared.
 
 ## 11. Host prerequisites
 
-Before the app can connect to `10.0.0.68`:
+Before the app can connect to the host (`hermes.lan` below):
 
 1. Install Tailscale on the host and the phone; join both to the tailnet
 2. Run `hermes serve` bound to the tailnet address (it is not running today)
