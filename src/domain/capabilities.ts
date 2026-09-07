@@ -10,7 +10,7 @@
 
 export interface Capabilities {
   sessions: { search: boolean; rename: boolean; pin: boolean }
-  settings: { schemaDriven: boolean; model: boolean; providers: boolean }
+  settings: { schemaDriven: boolean; model: boolean; providers: boolean; sessionModel: boolean }
   extras: { cron: boolean; skills: boolean; mcp: boolean; boards: boolean }
   approvals: { requests: boolean; policy: boolean }
   logs: { events: boolean }
@@ -30,7 +30,7 @@ export interface Capabilities {
 /** Everything off — the floor a backend builds up from. */
 export const NO_CAPABILITIES: Capabilities = {
   sessions: { search: false, rename: false, pin: false },
-  settings: { schemaDriven: false, model: false, providers: false },
+  settings: { schemaDriven: false, model: false, providers: false, sessionModel: false },
   extras: { cron: false, skills: false, mcp: false, boards: false },
   approvals: { requests: false, policy: false },
   logs: { events: false },

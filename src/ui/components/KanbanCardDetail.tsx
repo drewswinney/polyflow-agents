@@ -1,5 +1,4 @@
-import { Modal, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native'
 import * as Clipboard from 'expo-clipboard'
 import { useEffect, useState } from 'react'
 
@@ -8,7 +7,8 @@ import { useKanbanCardUpdate } from '@/state/boards'
 
 import { Markdown } from '../markdown/Markdown'
 import { useTheme } from '../ThemeProvider'
-import { Card } from './Card'
+import { Segmented } from './Segmented'
+import { Sheet } from './Sheet'
 import { Icon } from './Icon'
 import { IconButton } from './IconButton'
 import { Text } from './Text'
@@ -38,7 +38,6 @@ export function KanbanCardDetail({
   editable?: boolean
 }) {
   const theme = useTheme()
-  const insets = useSafeAreaInsets()
   const [copied, setCopied] = useState(false)
   const [editing, setEditing] = useState(false)
   const [editTitle, setEditTitle] = useState('')
@@ -55,8 +54,9 @@ export function KanbanCardDetail({
 
   if (!card) return null
 
+  // No Status here. The meta row names it and the move chips tick it — a third
+  // copy in the grid was the widest of the three and said the least.
   const details = [
-    ['Status', card.statusLabel],
     ['Risk', card.risk],
     ['Branch', card.branch],
     ['PR', card.pr]
@@ -113,93 +113,81 @@ export function KanbanCardDetail({
     )
   }
 
-  const chip = (status: KanbanStatus, label: string, color: string) => {
-    const current = card.status === status
-    return (
-      <Pressable
-        key={status}
-        accessibilityRole="button"
-        accessibilityLabel={current ? `${label} (current column)` : `Move to ${label}`}
-        disabled={!editable || move.isPending}
-        onPress={() => attemptMove(status)}
-        style={({ pressed }) => [
-          styles.chip,
-          { borderColor: current ? color : theme.color.border, backgroundColor: current ? theme.color.bgSubtle : 'transparent' },
-          pressed && !current ? { opacity: 0.55 } : undefined
-        ]}
-      >
-        <Text variant="pill" color={current ? color : theme.color.gray500}>
-          {label}
-        </Text>
-        {current ? (
-          <Icon name="check" size={11} color={color} />
-        ) : (
-          <Icon name="arrow-right" size={11} color={theme.color.gray400} />
-        )}
-      </Pressable>
-    )
-  }
+  /**
+   * The status, as one control that both reports and sets it.
+   *
+   * It used to be two things saying the same thing: a `BACKLOG` label on the
+   * meta row, and four chips below it of which one was ticked and three were
+   * arrows. A segmented track is the same decision along one axis (design
+   * §Interactions) — the filled segment *is* the label, so there is nothing
+   * left to keep in sync with it.
+   */
+  const statuses: { value: KanbanStatus; label: string }[] = [
+    { value: 'backlog', label: 'Backlog' },
+    { value: 'testing', label: 'Testing' },
+    { value: 'blocked', label: 'Blocked' },
+    { value: 'done', label: 'Done' }
+  ]
 
   return (
-    <Modal transparent visible animationType="fade" onRequestClose={onDismiss}>
-      <View
-        style={[
-          styles.root,
-          { backgroundColor: theme.color.scrim, paddingTop: insets.top + 28, paddingBottom: insets.bottom + 28 }
-        ]}
-      >
-        <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} accessibilityLabel="Close card details" />
-        <Card style={styles.card}>
+    // The sheet carries the title and owns dismissal, so the header keeps only
+    // the status and the actions — and loses its close button, which a sheet
+    // you can drag or tap away from does not need.
+    <Sheet visible title={card.title} onDismiss={onDismiss}>
+      <View style={styles.sheetBody}>
           <View style={styles.header}>
-            <View style={styles.titleWrap}>
-              <Text variant="sectionHeader">{card.statusLabel}</Text>
-              <Text variant="sheetTitle">{card.title}</Text>
-            </View>
-            {editable ? (
-              <View style={styles.headerActions}>
-                <IconButton
-                  name="trash"
-                  size={15}
-                  slot={38}
-                  accessibilityLabel="Archive card"
-                  disabled={move.isPending}
-                  onPress={archive}
-                />
-                <IconButton
-                  name="pen"
-                  size={15}
-                  slot={38}
-                  accessibilityLabel={editing ? 'Close edit' : 'Edit card'}
-                  onPress={toggleEdit}
-                />
-                <IconButton name="xmark" accessibilityLabel="Close card details" onPress={onDismiss} />
-              </View>
-            ) : (
+              {/* Where the status label used to be, before the segmented
+                  track took over saying that. Rendered only when the host
+                  reports one: a plugin predating the field sends nothing, and
+                  a "P0" invented for it would be a claim, not a reading. */}
+              {card.priority != null ? (
+                <View style={[styles.priority, { borderColor: theme.color.border }]}>
+                  <Text variant="sectionHeader" color={theme.color.gray500}>
+                    {`P${card.priority}`}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.metaSpacer} />
+
+              {/* The ticket id, copyable: it is the handle for this card in chat,
+                  PRs, and the `hermes kanban` CLI, and nowhere else in the app
+                  it was previously surfaced. */}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={copied ? 'Copied ticket id' : `Copy ticket id ${card.id}`}
+                onPress={() => void copyId()}
+                hitSlop={8}
+                style={[
+                  styles.idPill,
+                  { borderColor: copied ? theme.color.primary : theme.color.border, backgroundColor: theme.color.bgSubtle }
+                ]}
+              >
+                <Text variant="sectionHeader">ID</Text>
+                <Text variant="monoSmall" numberOfLines={1} style={styles.idValue}>
+                  {card.id}
+                </Text>
+                <Icon name={copied ? 'check' : 'copy'} size={12} color={copied ? theme.color.primary : theme.color.gray400} />
+              </Pressable>
+
+            {editable ? null : (
               <IconButton name="xmark" accessibilityLabel="Close card details" onPress={onDismiss} />
             )}
           </View>
 
-          <ScrollView contentContainerStyle={styles.body}>
-            {/* The ticket id, copyable: it is the handle for this card in chat,
-                PRs, and the `hermes kanban` CLI, and nowhere else in the app
-                it was previously surfaced. */}
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={copied ? 'Copied ticket id' : `Copy ticket id ${card.id}`}
-              onPress={() => void copyId()}
-              hitSlop={8}
-              style={[
-                styles.idPill,
-                { borderColor: copied ? theme.color.primary : theme.color.border, backgroundColor: theme.color.bgSubtle }
-              ]}
-            >
-              <Text variant="sectionHeader">ID</Text>
-              <Text variant="monoSmall" numberOfLines={1} style={styles.idValue}>
-                {card.id}
-              </Text>
-              <Icon name={copied ? 'check' : 'copy'} size={12} color={copied ? theme.color.primary : theme.color.gray400} />
-            </Pressable>
+          <View style={styles.statusBar}>
+            <Segmented
+              options={statuses}
+              value={card.status}
+              onChange={next => {
+                if (next !== card.status) attemptMove(next)
+              }}
+              label="Ticket status"
+              compact
+            />
+          </View>
 
+          <ScrollView contentContainerStyle={styles.body}>
             {details.length > 0 ? (
               <View style={styles.detailGrid}>
                 {details.map(([label, value]) => (
@@ -213,15 +201,6 @@ export function KanbanCardDetail({
                     </Text>
                   </View>
                 ))}
-              </View>
-            ) : null}
-
-            {editable ? (
-              <View style={styles.chipRow}>
-                {chip('backlog', 'Backlog', theme.color.gray600)}
-                {chip('testing', 'Testing', theme.color.warning700)}
-                {chip('blocked', 'Blocked', theme.color.error700)}
-                {chip('done', 'Done', theme.color.success700)}
               </View>
             ) : null}
 
@@ -295,19 +274,69 @@ export function KanbanCardDetail({
                   </Pressable>
                 </View>
               </View>
-            ) : card.body ? (
-              // The ticket body is markdown on disk, so it renders as markdown
-              // here — same component the transcript uses, so a heading, a
-              // checklist and a fenced block land in the app's type scale
-              // rather than arriving as one wall of escaped text. The
-              // description is the body's first prose line, so showing both
-              // would just repeat it.
-              <Markdown source={card.body} />
-            ) : card.description ? (
-              <Text variant="body">{card.description}</Text>
             ) : (
-              <Text variant="secondary">No ticket file for this card.</Text>
+              <View style={styles.description}>
+                {/* The pencil sits on the thing it edits. Everything else here
+                    already changes the card the moment you touch it — a status
+                    chip moves it, the id pill copies itself — so the body was
+                    the only part still asking to be put into a mode, and it is
+                    the only part that carries one. */}
+                <View style={styles.descriptionHead}>
+                  <Text variant="sectionHeader" style={styles.metaLabel}>
+                    Description
+                  </Text>
+                  {editable ? (
+                    <IconButton
+                      name="pen"
+                      size={13}
+                      slot={32}
+                      accessibilityLabel="Edit description"
+                      onPress={toggleEdit}
+                    />
+                  ) : null}
+                </View>
+
+                {card.body ? (
+                  // The ticket body is markdown on disk, so it renders as
+                  // markdown here — same component the transcript uses, so a
+                  // heading, a checklist and a fenced block land in the app's
+                  // type scale rather than arriving as one wall of escaped
+                  // text. The description is the body's first prose line, so
+                  // showing both would just repeat it.
+                  <Markdown source={card.body} />
+                ) : card.description ? (
+                  <Text variant="body">{card.description}</Text>
+                ) : (
+                  <Text variant="secondary">No ticket file for this card.</Text>
+                )}
+              </View>
             )}
+
+            {editable && !editing ? (
+              // Full width and last: you scroll past everything the card is
+              // before you reach the button that removes it. Worded as what it
+              // does — the card is archived on the board, not deleted from the
+              // host.
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Archive card"
+                disabled={move.isPending}
+                onPress={archive}
+                style={({ pressed }) => [
+                  styles.archive,
+                  {
+                    borderColor: theme.color.error200,
+                    backgroundColor: theme.color.error50,
+                    opacity: move.isPending ? 0.5 : pressed ? 0.75 : 1
+                  }
+                ]}
+              >
+                <Icon name="trash" size={13} color={theme.color.error700} />
+                <Text variant="rowLabelStrong" color={theme.color.error700}>
+                  {move.isPending ? 'Archiving…' : 'Archive card'}
+                </Text>
+              </Pressable>
+            ) : null}
 
             {error ? (
               <View style={[styles.errorRow, { backgroundColor: theme.color.error50, borderColor: theme.color.error200 }]}>
@@ -318,50 +347,68 @@ export function KanbanCardDetail({
               </View>
             ) : null}
           </ScrollView>
-        </Card>
+
       </View>
-    </Modal>
+    </Sheet>
   )
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, justifyContent: 'center', paddingHorizontal: 16 },
-  card: { maxHeight: '82%' },
-  header: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 10 },
-  titleWrap: { flex: 1, minWidth: 0, gap: 4 },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 0 },
+  // Lets the scrolling content shrink inside the sheet's own max height.
+  sheetBody: { flexShrink: 1 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingBottom: 6 },
+  // Takes the row's slack so a heading's own control sits at its end.
+  metaLabel: { flex: 1, minWidth: 0 },
+  metaSpacer: { flex: 1 },
+  // Outside the scroll: the status is what you came to change, and it should
+  // not leave the sheet when the description is long.
+  statusBar: { paddingHorizontal: 16, paddingBottom: 12 },
+  priority: {
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 100,
+    paddingHorizontal: 9,
+    paddingVertical: 4
+  },
   body: { paddingHorizontal: 16, paddingBottom: 18, gap: 12 },
   detailGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 999,
-    paddingHorizontal: 11,
-    paddingVertical: 7
-  },
   idPill: {
+    alignSelf: 'flex-start',
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
+    borderRadius: 100,
     paddingHorizontal: 10,
-    paddingVertical: 8
+    paddingVertical: 5
   },
-  idValue: { flex: 1 },
+  idValue: { flexShrink: 1 },
+  // Sized to their contents and set on one line: "Risk High" reads as a fact,
+  // where a half-width box with a heading over a word read as a form field
+  // that had been filled in.
   detailPill: {
-    minWidth: '46%',
-    flexGrow: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
     borderWidth: StyleSheet.hairlineWidth,
-    borderRadius: 10,
+    borderRadius: 100,
     paddingHorizontal: 10,
-    paddingVertical: 8,
-    gap: 2
+    paddingVertical: 5
+  },
+  archive: {
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 12,
+    marginTop: 4
   },
   editBlock: { gap: 8 },
+  // The gap below separates the prose from the archive button under it, which
+  // wants more room than a heading needs above its own text.
+  description: { gap: 4, paddingBottom: 10 },
+  descriptionHead: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 32 },
   input: {
     borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 10,

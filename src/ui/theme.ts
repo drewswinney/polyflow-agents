@@ -33,6 +33,15 @@ export const NEUTRAL_LIGHT = {
   gray600: '#4b5563',
   gray500: '#6b7280',
   gray400: '#a3adbd',
+  /**
+   * Quiet UI ink: the collapsed-steps header, the copy buttons under a message.
+   *
+   * A role, not a step on the ramp, because the two palettes do not want the
+   * same step. `gray500` is pitched for the dark theme, whose greys are already
+   * lifted off `bg`; on white it sits close enough to the background to read as
+   * disabled rather than quiet, so light mode takes one step darker.
+   */
+  muted: '#4b5563',
   border: '#dfe3ea',
   divider: '#eef1f5',
   surface: '#ffffff',
@@ -54,6 +63,15 @@ export const NEUTRAL_LIGHT = {
   error200: '#fecaca',
   error50: '#fef2f2',
   highlight: '#fef9c3',
+  /**
+   * Tool calls in the work section's list.
+   *
+   * Its own role rather than `info700`, which it happens to match today: the
+   * status column already speaks in `info`/`warning`/`error`, and a label
+   * sharing a role with the outcome beside it could not change without
+   * changing that too. A tool call is an action, not a state.
+   */
+  toolInk: '#1d4ed8',
   /** Text/icons that sit on the accent gradient or a filled accent button. */
   onAccent: '#ffffff',
   /** Scrim behind sheets and the sidebar. */
@@ -85,6 +103,8 @@ export const NEUTRAL_DARK = {
   gray600: '#b6c2d2',
   gray500: '#94a3b8',
   gray400: '#8593a6',
+  /** Quiet UI ink — see the light palette. Already lifted off `bg` here. */
+  muted: '#94a3b8',
   // Structure.
   border: '#2c3444',
   divider: '#212936',
@@ -104,6 +124,8 @@ export const NEUTRAL_DARK = {
   warning200: '#6b3d13',
   warning50: '#2b1a0b',
   warningText: '#fdba74',
+  /** Tool calls in the work section's list — see the light palette. */
+  toolInk: '#93b4f8',
   error700: '#fca5a5',
   error200: '#7a2626',
   error50: '#2d1113',
@@ -184,7 +206,15 @@ export const RADIUS = {
   row: 10,
   card: 12,
   pill: 100,
-  sheet: 14
+  sheet: 14,
+  /**
+   * The floating chrome — the header and the composer.
+   *
+   * Bigger than `card` on purpose: these are tall controls sitting over the
+   * content rather than panels within it, and at `card`'s 12 they read as
+   * boxes pinned to the edges instead of as something afloat.
+   */
+  floating: 24
 } as const
 
 /** 4px base. Screen padding 16 horizontal, headers 20. */

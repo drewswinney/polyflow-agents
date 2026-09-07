@@ -5,6 +5,9 @@ import Animated from 'react-native-reanimated'
 
 import { PermissionDenied, type PickedImage, type PickSource, pickImages } from '@/platform/image-attachments'
 
+import { modelLabel } from '../format'
+import { useSheet } from '@/state/sheet'
+
 import { useBottomBarPadding } from '../keyboard'
 import { useGradient, useTheme } from '../ThemeProvider'
 import { Icon } from './Icon'
@@ -30,7 +33,10 @@ export function Composer({
   onSend,
   onStop,
   onVoice,
-  canAttach = false
+  canAttach = false,
+  model,
+  effort,
+  onPressModel
 }: {
   streaming: boolean
   offline: boolean
@@ -43,6 +49,13 @@ export function Composer({
   /** False when the agent reports no image support; the clip is then absent,
    *  not disabled (§4.1). */
   canAttach?: boolean
+  /** The model this session runs on. Absent before a session exists, and the
+   *  chip is then absent too — an empty chip names nothing. */
+  model?: string | null
+  /** Reasoning effort beside the model, when the harness reports one. */
+  effort?: string | null
+  /** Opens the model picker. Without it the chip is a label, not a control. */
+  onPressModel?: (() => void) | undefined
 }) {
   const theme = useTheme()
   const gradient = useGradient()
@@ -52,6 +65,7 @@ export function Composer({
   const [draft, setDraft] = useState('')
   const [images, setImages] = useState<PickedImage[]>([])
   const [picking, setPicking] = useState(false)
+  const openSheet = useSheet(store => store.open)
 
   const typing = draft.trim().length > 0
   // A picture with no caption is a message; the send button has to agree, or
@@ -84,14 +98,13 @@ export function Composer({
     }
   }
 
+  // A sheet rather than `Alert.alert`. The OS action sheet could hold two
+  // labels and nothing else — no thumbnails, no room for what else might be
+  // added to a chat — and on Android it draws as an error dialog.
   const chooseSource = () => {
     if (picking) return
 
-    Alert.alert('Attach an image', undefined, [
-      { text: 'Photo Library', onPress: () => void attach('library') },
-      { text: 'Take Photo', onPress: () => void attach('camera') },
-      { text: 'Cancel', style: 'cancel' }
-    ])
+    openSheet({ kind: 'add-to-chat', onPick: source => void attach(source) })
   }
 
   return (
@@ -121,22 +134,35 @@ export function Composer({
         </ScrollView>
       ) : null}
 
-      {/* `box-none`: the row spans the pill↔button gap, which is transparent
-          and must pass touches to whatever is behind the bar. The pill and
-          the action button are real Views with their own hit targets and
-          keep `auto` behavior. */}
-      <View style={styles.row} pointerEvents="box-none">
-        <View
-          style={[
-            styles.field,
-            {
-              backgroundColor: theme.color.bgSubtle,
-              borderColor: typing ? theme.color.secondaryMuted : theme.color.border,
-              borderRadius: theme.radius.pill,
-              borderStyle: offline ? 'dashed' : 'solid'
-            }
-          ]}
-        >
+      {/* One card, two rows: what you are writing, and what it will go out
+          with. The controls used to sit inside the input's own pill, which
+          worked while there were two of them — a clip and a mic — and stopped
+          working the moment the model belonged there too: a chip long enough
+          to name a model squeezed the text into a slot too narrow to read a
+          sentence in. */}
+      <View
+        style={[
+          styles.card,
+          {
+            backgroundColor: theme.color.bgSubtle,
+            borderColor: typing ? theme.color.secondaryMuted : theme.color.border,
+            borderRadius: theme.radius.floating,
+            borderStyle: offline ? 'dashed' : 'solid'
+          }
+        ]}
+      >
+        <TextInput
+          value={draft}
+          onChangeText={setDraft}
+          placeholder="Message the agent"
+          placeholderTextColor={theme.color.gray400}
+          keyboardAppearance={theme.dark ? 'dark' : 'light'}
+          multiline
+          style={[styles.input, { color: theme.color.gray800, fontFamily: theme.font.body }]}
+          onSubmitEditing={submit}
+        />
+
+        <View style={styles.controls}>
           {canAttach ? (
             <Pressable
               accessibilityRole="button"
@@ -144,52 +170,71 @@ export function Composer({
               accessibilityState={{ disabled: picking }}
               disabled={picking}
               onPress={chooseSource}
-              // Grown to clear 44 without moving the glyph: a 15px icon is a
-              // 15px target, and the misses read as a dead button rather than
-              // as a miss. Kept inside the pill's own 48px box on every side,
-              // because Android does not deliver a touch that lands outside
-              // the parent's bounds however much slop is asked for.
-              hitSlop={{ top: 16, bottom: 16, left: 13, right: 12 }}
-              style={({ pressed }) => ({ opacity: pressed || picking ? 0.5 : 1 })}
+              hitSlop={6}
+              style={({ pressed }) => [
+                styles.round,
+                { backgroundColor: theme.color.surface, opacity: pressed || picking ? 0.5 : 1 }
+              ]}
             >
-              <Icon name="paperclip" size={15} color={theme.color.gray400} />
+              <Icon name="plus" size={15} color={theme.color.gray600} />
             </Pressable>
           ) : null}
-          <TextInput
-            value={draft}
-            onChangeText={setDraft}
-            placeholder="Message the agent"
-            placeholderTextColor={theme.color.gray400}
-            keyboardAppearance={theme.dark ? 'dark' : 'light'}
-            multiline
-            style={[styles.input, { color: theme.color.gray800, fontFamily: theme.font.body }]}
-            onSubmitEditing={submit}
-          />
+
+          {model ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Model: ${model}${effort ? `, ${effort} effort` : ''}`}
+              disabled={!onPressModel}
+              onPress={onPressModel}
+              hitSlop={6}
+              style={({ pressed }) => [
+                styles.chip,
+                {
+                  backgroundColor: theme.color.surface,
+                  borderRadius: theme.radius.pill,
+                  opacity: pressed && onPressModel ? 0.6 : 1
+                }
+              ]}
+            >
+              {/* Two weights, one line: the model is the answer to "what am I
+                  talking to", the effort is a qualifier on it. */}
+              <Text variant="secondary" color={theme.color.gray800} numberOfLines={1}>
+                {modelLabel(model)}
+              </Text>
+              {effort ? (
+                <Text variant="secondary" color={theme.color.muted} numberOfLines={1}>
+                  {effort}
+                </Text>
+              ) : null}
+            </Pressable>
+          ) : null}
+
+          {/* Pushes the send cluster to the trailing edge whatever sits left. */}
+          <View style={styles.spacer} pointerEvents="none" />
+
           {!typing && onVoice ? (
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Talk to the agent"
               onPress={onVoice}
-              // The circle is 36px by the design; the remaining 8px in each
-              // direction is made up invisibly so the target still clears 44.
-              hitSlop={4}
+              hitSlop={6}
               style={({ pressed }) => [
-                styles.mic,
-                { backgroundColor: theme.color.secondaryTint, opacity: pressed ? 0.6 : 1 }
+                styles.round,
+                { backgroundColor: theme.color.surface, opacity: pressed ? 0.6 : 1 }
               ]}
             >
-              <Icon name="microphone" size={14} color={theme.color.secondary} />
+              <Icon name="microphone" size={14} color={theme.color.gray600} />
             </Pressable>
           ) : null}
-        </View>
 
-        <ActionButton
-          state={action}
-          gradient={gradient}
-          // Driven by the state it renders, not by `streaming` a second time,
-          // so the icon and what pressing it does cannot drift apart.
-          onPress={action === 'stop' ? onStop : submit}
-        />
+          <ActionButton
+            state={action}
+            gradient={gradient}
+            // Driven by the state it renders, not by `streaming` a second time,
+            // so the icon and what pressing it does cannot drift apart.
+            onPress={action === 'stop' ? onStop : submit}
+          />
+        </View>
       </View>
     </Animated.View>
   )
@@ -283,17 +328,23 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center'
   },
-  row: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
-  field: {
-    flex: 1,
-    minHeight: 48,
+  card: { borderWidth: 1, paddingHorizontal: 8, paddingTop: 4, paddingBottom: 8, gap: 2 },
+  // No flex: the input sizes to its own content between one line and `maxHeight`,
+  // and the control row sits under whatever that comes to.
+  input: { fontSize: 15, minHeight: 40, maxHeight: 120, paddingHorizontal: 8, paddingVertical: 9 },
+  controls: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  spacer: { flexGrow: 1, flexShrink: 0, flexBasis: 0 },
+  round: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  // `flexShrink` with `minWidth: 0` so a long model id truncates inside the
+  // chip instead of pushing the send button off the end of the row.
+  chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    paddingHorizontal: 14,
-    borderWidth: 1
+    gap: 6,
+    paddingHorizontal: 12,
+    height: 34,
+    flexShrink: 1,
+    minWidth: 0
   },
-  input: { flex: 1, fontSize: 15, maxHeight: 120, paddingVertical: 12 },
-  mic: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  action: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center' }
+  action: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' }
 })

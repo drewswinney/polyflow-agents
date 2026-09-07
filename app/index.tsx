@@ -1,15 +1,19 @@
 import { LinearGradient } from 'expo-linear-gradient'
+import { useQuery } from '@tanstack/react-query'
 import { Redirect, router } from 'expo-router'
+import { useState } from 'react'
 import { StyleSheet, View } from 'react-native'
 
 import { useBackend, useConnectionState } from '@/state/ConnectionProvider'
 import { useSelectedAgent, useSelectedAgentOrNull } from '@/state/agents'
+import type { PickedImage } from '@/platform/image-attachments'
 import { useChatInbox } from '@/state/chat-inbox'
 import { useCreateSession } from '@/state/queries'
+import { useSheet } from '@/state/sheet'
 import { useSidebar } from '@/state/sidebar'
 import { Composer } from '@/ui/components/Composer'
 import { AgentGlyph } from '@/ui/components/Icon'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { KeyboardInset } from '@/ui/keyboard'
 import { useGradient, useTheme } from '@/ui/ThemeProvider'
@@ -27,6 +31,7 @@ import { useGradient, useTheme } from '@/ui/ThemeProvider'
  */
 export default function NewSessionScreen() {
   const theme = useTheme()
+  const headerInset = useHeaderInset()
   const gradient = useGradient()
   // Home is the gate: with no agents there is nothing to message, and every
   // other screen assumes one exists. Hooks all run first — an early return
@@ -39,19 +44,45 @@ export default function NewSessionScreen() {
   const submitMessage = useChatInbox(inbox => inbox.submit)
 
   const createSession = useCreateSession(maybeAgent?.id ?? '', backend)
+  const openSheet = useSheet(store => store.open)
+
+  /**
+   * The model the session will be *born* on.
+   *
+   * Null until you pick one, and the chip then falls back to whatever the host
+   * reports as its default — so it always names the model the next message
+   * will actually run on rather than going blank until you choose.
+   */
+  const [model, setModel] = useState<string | null>(null)
+
+  /**
+   * The agent's own default, straight from the host.
+   *
+   * Asked for rather than inferred from the model list's `selected` flag: this
+   * agent reaches its model through a proxy, so the id it runs on
+   * (`openrouter/qwen/qwen3.8-27b`) is not one of the rows any provider group
+   * offers, and nothing would ever have been ticked to read it off.
+   */
+  const agentModel = useQuery({
+    queryKey: ['agent', maybeAgent?.id ?? '', 'model'] as const,
+    enabled: Boolean(backend) && (backend?.capabilities.settings.model ?? false),
+    queryFn: () => backend!.getModel()
+  })
+
+  const chosen = model ?? agentModel.data ?? null
 
   if (!maybeAgent) return <Redirect href="/welcome" />
 
-  const start = (text: string) => {
+  const start = (text: string, images: PickedImage[] = []) => {
     if (createSession.isPending) return
 
-    createSession.mutate(undefined, {
+    createSession.mutate(model ?? undefined, {
       onSuccess: id => {
         // Addressed to the session just created, so no other chat screen can
         // take it — the message is handed over before its screen exists, and
         // an unaddressed one went to whichever chat was already mounted and
         // loaded (see `chat-inbox`).
-        submitMessage(id, text)
+        submitMessage(id, text, images)
 
         // Pushed, not replaced. Home is the stack's root and the drawer
         // returns to it with `navigate` (§7.17), which can only *return* to a
@@ -63,12 +94,28 @@ export default function NewSessionScreen() {
     })
   }
 
+  /**
+   * Talking from home creates the session first.
+   *
+   * Voice records *into* a session — it transcribes and hands the text to
+   * chat's send path through the inbox — so there has to be one before the
+   * screen opens. That is the same order home already uses for a typed first
+   * message; only the screen it lands on differs.
+   */
+  const talk = () => {
+    if (createSession.isPending) return
+
+    createSession.mutate(model ?? undefined, {
+      onSuccess: id => router.push(`/voice/${id}`)
+    })
+  }
+
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
       <ScreenHeader title="New session" onMenu={openSidebar} />
 
       <KeyboardInset style={styles.flex}>
-        <View style={styles.body}>
+        <View style={[styles.body, { paddingTop: headerInset }]}>
           <View style={styles.empty}>
             <LinearGradient
               colors={gradient.colors}
@@ -97,7 +144,22 @@ export default function NewSessionScreen() {
           queued={0}
           onSend={start}
           onStop={() => undefined}
-          // No mic: dictation records into a session, and there isn't one yet.
+          canAttach={backend?.capabilities.media.images ?? false}
+          {...(backend?.capabilities.media.audioIn ? { onVoice: talk } : {})}
+          model={chosen}
+          {...(backend?.capabilities.settings.model
+            ? {
+                onPressModel: () =>
+                  openSheet({
+                    kind: 'model',
+                    // No session to re-point — the pick rides on the one this
+                    // screen is about to create.
+                    sessionId: null,
+                    currentModel: chosen,
+                    onPick: setModel
+                  })
+              }
+            : {})}
         />
       </KeyboardInset>
 

@@ -14,7 +14,7 @@ import { AgentGlyph, Icon } from '@/ui/components/Icon'
 import { IconButton } from '@/ui/components/IconButton'
 import { SessionRow } from '@/ui/components/SessionRow'
 import { Text } from '@/ui/components/Text'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { relativeTime, recencyGroup } from '@/ui/format'
 import { useTheme } from '@/ui/ThemeProvider'
 
@@ -30,6 +30,7 @@ import { useTheme } from '@/ui/ThemeProvider'
 export default function SessionsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  const headerInset = useHeaderInset()
   const agent = useSelectedAgent()
   const backend = useBackend()
   const connection = useConnectionState()
@@ -83,6 +84,7 @@ export default function SessionsScreen() {
               name="magnifying-glass"
               accessibilityLabel="Search sessions"
               edge="right"
+              outlined
               onPress={() => setSearchActive(true)}
             />
           }
@@ -90,7 +92,7 @@ export default function SessionsScreen() {
       )}
 
       <ScrollView
-        contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}
+        contentContainerStyle={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}
         refreshControl={<RefreshControl refreshing={sessions.isFetching} onRefresh={() => void sessions.refetch()} />}
       >
         {searchActive ? (

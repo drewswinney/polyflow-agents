@@ -9,7 +9,7 @@ import { useAgents, useSelectedAgent, useSelectedAgentOrNull, useSelectedServerO
 import { useSidebar } from '@/state/sidebar'
 import { Card, Divider } from '@/ui/components/Card'
 import { AgentGlyph, Icon } from '@/ui/components/Icon'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { useTheme } from '@/ui/ThemeProvider'
 
@@ -27,6 +27,7 @@ import { useTheme } from '@/ui/ThemeProvider'
 export default function SettingsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  const headerInset = useHeaderInset()
   // Nullable *and* not: removing the agent this screen is about empties the
   // registry under it, and the render that follows must not read a row that is
   // no longer there. The redirect below is the guard; `agent` is what every
@@ -133,7 +134,7 @@ export default function SettingsScreen() {
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
       <ScreenHeader title="Settings" onMenu={openSidebar} />
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}>
         <Card style={styles.connection}>
           <View style={styles.connectionHead}>
             <View style={[styles.tile, { backgroundColor: theme.color.secondaryTint }]}>

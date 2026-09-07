@@ -20,6 +20,7 @@ import type {
   KanbanCardUpdate,
   McpServerStatus,
   ModelOption,
+  ModelSwitch,
   NewSessionOptions,
   PermissionOutcome,
   PermissionRequest,
@@ -67,6 +68,17 @@ export type SessionUpdate =
   | { kind: 'clarify_request'; req: ClarifyRequest }
   | { kind: 'turn_complete'; stopReason: StopReason }
   | { kind: 'usage'; usage: Usage }
+  /**
+   * The session's model changed, and this is what it is now.
+   *
+   * Not only from this app: a switch made in the TUI or the desktop client
+   * reaches the same session, and the chip has to follow it rather than report
+   * whatever the transcript happened to load with. A switch asked for mid-turn
+   * arrives here too — the host reports the *pending* pick, because that is
+   * the model the next turn runs on and blipping back to the old one for the
+   * rest of the turn would be a lie about what was chosen.
+   */
+  | { kind: 'model_changed'; model: string }
   | { kind: 'error'; error: AgentError }
   /** Raw passthrough for the Logs & events screen (§7.15). Never rendered in chat. */
   | { kind: 'event'; record: EventRecord }
@@ -144,8 +156,27 @@ export interface AgentBackend {
   listSkills(): Promise<SkillSummary[]>
   /** Requires `capabilities.settings.model`. */
   listModels(): Promise<ModelOption[]>
+  /**
+   * The model this agent runs on when nothing overrides it.
+   *
+   * Asked for directly rather than read off `listModels`' `selected` flag: that
+   * flag can only tick a row the list actually contains, and a host reaching
+   * its model through a proxy or an aggregator answers with an id that is not
+   * in any of the groups it offers. Null when the backend cannot say.
+   */
+  getModel(): Promise<string | null>
   /** Requires `capabilities.settings.model`. */
   setModel(option: ModelOption): Promise<void>
+  /**
+   * Switches the model for **one session**, leaving every other session and
+   * the profile default alone.
+   *
+   * Separate from {@link setModel} because they are different decisions with
+   * different blast radii, not one call with a flag: `setModel` rewrites the
+   * profile's config and is reached from Settings, while this pins an override
+   * on a single conversation. Gated on `settings.sessionModel`.
+   */
+  setSessionModel(id: SessionId, option: ModelOption): Promise<ModelSwitch>
 
   /** Requires `capabilities.approvals.policy`. */
   getApprovalPolicy(): Promise<ApprovalPolicy>

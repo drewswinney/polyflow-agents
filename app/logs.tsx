@@ -9,7 +9,7 @@ import { useSelectedAgent } from '@/state/agents'
 import { type EventFilter, matchesFilter, useEventLog } from '@/state/event-log'
 import { Card, Divider } from '@/ui/components/Card'
 import { EventRow } from '@/ui/components/EventRow'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { useTheme } from '@/ui/ThemeProvider'
 
@@ -31,6 +31,7 @@ const FILTERS: Array<{ key: EventFilter; label: string }> = [
 export default function LogsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  const headerInset = useHeaderInset()
   const agent = useSelectedAgent()
   const backend = useBackend()
   const [filter, setFilter] = useState<EventFilter>('all')
@@ -52,7 +53,7 @@ export default function LogsScreen() {
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
       <ScreenHeader title="Logs & events" onBack={() => router.back()} />
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           {FILTERS.map(option => {
             const selected = option.key === filter

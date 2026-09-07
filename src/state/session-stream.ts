@@ -57,6 +57,15 @@ export interface SessionStream {
   entries: TranscriptEntry[]
   tail: StreamTail
   transcript: SessionTranscript | null
+  /**
+   * The model this session is on *now*.
+   *
+   * Not `transcript.model`, which is a snapshot from whenever the transcript
+   * last loaded: a switch — from this app, the TUI or the desktop — changes
+   * the session without reloading it, and the composer's chip has to follow.
+   * Falls back to the loaded value until the host says otherwise.
+   */
+  model: string | null
   loading: boolean
   loadError: string | null
   usage: Usage | null
@@ -128,6 +137,13 @@ export function useSessionStream(
    */
   const query = useTranscript(scope, backend, sessionId)
   const transcript = query.data ?? null
+  // Cleared on the session id rather than on transcript load: a reload that
+  // races a switch would otherwise reinstate the model the switch replaced.
+  const [liveModel, setLiveModel] = useState<string | null>(null)
+
+  useEffect(() => {
+    setLiveModel(null)
+  }, [sessionId])
 
   /**
    * Loading is "nothing to show", not "nothing in flight".
@@ -325,6 +341,10 @@ export function useSessionStream(
           setClarify(update.req)
           break
 
+        case 'model_changed':
+          setLiveModel(update.model)
+          break
+
         case 'usage':
           setUsage(update.usage)
           break
@@ -487,6 +507,7 @@ export function useSessionStream(
     entries,
     tail,
     transcript,
+    model: liveModel ?? transcript?.model ?? null,
     loading,
     loadError,
     usage,

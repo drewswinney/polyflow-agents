@@ -127,7 +127,15 @@ export function toTranscriptEntries(messages: SessionMessage[]): TranscriptEntry
       return
     }
 
-    if (message.role === 'system' || message.display_kind === 'hidden') {
+    // `model_switch` is not conversation. The host records a live model switch
+    // as a marker in the history and persists it with `role: 'user'` on
+    // purpose — strict OpenAI-compatible providers (vLLM, Qwen) reject a system
+    // message that is not first in the list — and tags it `display_kind` so a
+    // reader can tell it apart from something you actually typed. Taken at face
+    // value it renders as your own message, in your own bubble, saying "[System:
+    // the active model for this chat has changed to …]". It is addressed to the
+    // model, and the composer's chip is what answers "which model" for you.
+    if (message.role === 'system' || message.display_kind === 'hidden' || message.display_kind === 'model_switch') {
       return
     }
 

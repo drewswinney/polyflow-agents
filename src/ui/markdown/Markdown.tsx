@@ -49,11 +49,12 @@ export const Markdown = memo(function Markdown({ source }: { source: string }) {
     )
   }
 
-  return (
-    <RNText selectable>
-      <View style={styles.root}>{blocks}</View>
-    </RNText>
-  )
+  // Not wrapped in a <Text>. A <View> nested inside one is laid out as an
+  // inline image on Android — selection stops at that boundary and never
+  // reaches the blocks, which is why no rendered markdown could be selected —
+  // and the code block and table below mount ScrollViews, which are not legal
+  // Text children at all. Each block is its own selection root instead.
+  return <View style={styles.root}>{blocks}</View>
 })
 
 /** Walks the flat token stream, consuming nested ranges as it goes. */
@@ -72,6 +73,7 @@ function renderBlocks(tokens: MarkdownToken[], theme: Theme, mention: MentionRen
         out.push(
           <RNText
             key={key++}
+            selectable
             style={[
               styles.heading,
               {
@@ -94,6 +96,7 @@ function renderBlocks(tokens: MarkdownToken[], theme: Theme, mention: MentionRen
         out.push(
           <RNText
             key={key++}
+            selectable
             style={[styles.paragraph, { fontFamily: theme.font.body, color: theme.color.gray800 }]}
           >
             {renderInline(inline?.children ?? [], theme, mention)}
@@ -301,7 +304,9 @@ function CodeBlock({ code, language }: { code: string; language?: string }) {
         </RNText>
       ) : null}
       <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-        <RNText style={[styles.codeText, { fontFamily: theme.font.mono, color: theme.color.gray800 }]}>{code}</RNText>
+        <RNText selectable style={[styles.codeText, { fontFamily: theme.font.mono, color: theme.color.gray800 }]}>
+          {code}
+        </RNText>
       </ScrollView>
     </View>
   )
@@ -345,6 +350,7 @@ function MarkdownTable({ tokens }: { tokens: MarkdownToken[] }) {
             {row.cells.map((cell, cellIndex) => (
               <RNText
                 key={cellIndex}
+                selectable
                 style={[
                   styles.tableCell,
                   {

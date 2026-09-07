@@ -331,7 +331,7 @@ def _read_native_board(db_path: Path, board_slug: str, display_name: str) -> dic
     try:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT id, title, body, status, branch_name, created_at, "
+            "SELECT id, title, body, status, branch_name, priority, created_at, "
             "COALESCE(completed_at, started_at, created_at) AS changed_at "
             "FROM tasks WHERE status != 'archived' ORDER BY created_at"
         ).fetchall()
@@ -355,6 +355,10 @@ def _read_native_board(db_path: Path, board_slug: str, display_name: str) -> dic
             "statusLabel": column_label,
             "checked": row["status"] == "done",
             "branch": row["branch_name"] or None,
+            # Higher is more urgent: `hermes kanban` orders by `priority DESC`.
+            # Sent even when zero — absent and "no priority set" are different
+            # answers, and the app draws them differently.
+            "priority": int(row["priority"] or 0),
             "pr": None,
             "risk": None,
             "body": body[:4000],
