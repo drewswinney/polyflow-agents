@@ -1,7 +1,6 @@
 import * as Clipboard from 'expo-clipboard'
 import { File } from 'expo-file-system'
 import { router, useLocalSearchParams } from 'expo-router'
-import * as Sharing from 'expo-sharing'
 import { useEffect, useState } from 'react'
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -13,17 +12,38 @@ import { useAgentScopedRoute } from '@/state/agent-scope'
 import { useSelectedAgent, useSelectedServer } from '@/state/agents'
 import { useArtifact, useArtifactActions } from '@/state/artifacts'
 import { withAgent } from '@/ui/components/AgentGate'
+import { ArtifactPreview } from '@/ui/components/ArtifactPreview'
 import { Card, Divider } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
 import { ImageViewer } from '@/ui/components/ImageViewer'
 import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
-import { ARTIFACT_GLYPH, describeOrigin, formatBytes, isTextLike, kindLabel, shareCaption } from '@/ui/artifacts'
+import { describeOrigin, formatBytes, isTextLike, kindLabel, shareCaption } from '@/ui/artifacts'
 import { clockTime, relativeTime } from '@/ui/format'
 import { useTheme } from '@/ui/ThemeProvider'
 
 /** How long "Copied" stays on the button before it reads "Copy link" again. */
 const COPIED_FOR_MS = 1_800
+
+/**
+ * `expo-sharing`, loaded when the button is pressed rather than when the
+ * screen's module is.
+ *
+ * It is the one native module this feature added, and an Expo module resolves
+ * its native half at *import* time — so a static import here made every build
+ * that predates it fail to boot at all, with the error pointing at this file.
+ * That is not a theoretical build: the app ships JS over the air onto native
+ * builds keyed by app version, and a phone on the old native would have
+ * opened to a red screen. Loaded here, a stale build still opens, still shows
+ * artifacts, and says "needs a newer build" on the one button that does.
+ */
+async function loadSharing(): Promise<typeof import('expo-sharing') | null> {
+  try {
+    return await import('expo-sharing')
+  } catch {
+    return null
+  }
+}
 
 /**
  * One artifact (`docs/artifacts.md` §6): preview, provenance, and the four
@@ -70,6 +90,13 @@ function ArtifactScreen() {
 
     try {
       const uri = await ensureArtifactFile(artifact, () => backend.readArtifact(artifact.id))
+      const Sharing = await loadSharing()
+
+      if (!Sharing) {
+        setNotice('Sharing a file needs a newer build of the app. The file is downloaded and the rest of this screen works.')
+
+        return
+      }
 
       if (!(await Sharing.isAvailableAsync())) {
         setNotice('Sharing is not available on this device.')
@@ -292,9 +319,12 @@ function Preview({ artifact }: { artifact: Artifact }) {
     )
   }
 
+  // A PDF, a Word file, a rendered HTML page: the host's first-page render,
+  // shown whole. `ArtifactPreview` falls back to the kind's glyph on its own
+  // when the host could not render this one.
   return (
-    <View style={[styles.glyphTile, { backgroundColor: theme.color.secondaryTint, borderColor: theme.color.border, borderRadius: theme.radius.card }]}>
-      <PreviewFallback icon={ARTIFACT_GLYPH[artifact.kind]} label={`${kindLabel(artifact.kind)} · ${formatBytes(artifact.size)}`} />
+    <View style={styles.pageWrap}>
+      <ArtifactPreview artifact={artifact} mode="natural" height={Math.round(edge * 0.95)} maxWidth={edge} radius={theme.radius.card} />
     </View>
   )
 }
@@ -375,7 +405,7 @@ const styles = StyleSheet.create({
   group: { gap: 8 },
   groupLabel: { paddingHorizontal: 4 },
   picture: { alignSelf: 'center', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth },
-  glyphTile: { height: 140, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth },
+  pageWrap: { alignItems: 'center' },
   fallback: { alignItems: 'center', gap: 8, paddingHorizontal: 20 },
   fallbackLabel: { textAlign: 'center' },
   textCard: { padding: 14, maxHeight: 360, overflow: 'hidden' },

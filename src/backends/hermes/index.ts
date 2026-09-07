@@ -1114,6 +1114,10 @@ export class HermesBackend implements AgentBackend {
     return this.rest.artifactBytes(id)
   }
 
+  readArtifactThumbnail(id: string): Promise<ArtifactBytes> {
+    return this.rest.artifactThumbnail(id)
+  }
+
   /**
    * Same read path as `attachImage`: the phone's file exists only on the
    * phone, so the bytes go up base64 in a data URL. The picture was downscaled

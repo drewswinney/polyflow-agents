@@ -144,6 +144,15 @@ def file_path(row: Dict[str, Any]) -> Path:
     return files_dir() / str(row["file"])
 
 
+def thumbnail_path(row: Dict[str, Any]) -> Path:
+    """Where `thumbnails.py` keeps the rendered first page. Beside the bytes, so delete finds both."""
+    return files_dir() / f"{row['id']}.thumb.png"
+
+
+def thumbnail_marker_path(row: Dict[str, Any]) -> Path:
+    return files_dir() / f"{row['id']}.thumb.sha"
+
+
 # ── Schema ───────────────────────────────────────────────────────────────────
 
 _SCHEMA = """
@@ -442,12 +451,15 @@ def delete(artifact_id: str) -> bool:
     finally:
         conn.close()
 
-    try:
-        file_path(_row_to_dict(row)).unlink()
-    except FileNotFoundError:
-        pass
-    except OSError:
-        logger.warning("[polyflow_agents_push] artifact %s: row deleted, bytes remain", artifact_id, exc_info=True)
+    gone = _row_to_dict(row)
+
+    for path in (file_path(gone), thumbnail_path(gone), thumbnail_marker_path(gone)):
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.warning("[polyflow_agents_push] artifact %s: row deleted, %s remains", artifact_id, path.name, exc_info=True)
 
     return True
 

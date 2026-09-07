@@ -1,10 +1,9 @@
 import { router, useLocalSearchParams } from 'expo-router'
 import { useMemo, useState } from 'react'
-import { ActivityIndicator, Image, Pressable, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native'
+import { ActivityIndicator, Pressable, RefreshControl, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { Artifact } from '@/domain'
-import { useArtifactFile } from '@/platform/artifact-cache'
 import { useBackend, useConnectionFault, useConnectionState } from '@/state/ConnectionProvider'
 import { useAgentScopedRoute } from '@/state/agent-scope'
 import { useSelectedAgent } from '@/state/agents'
@@ -12,13 +11,13 @@ import { artifactsNotInstalled, useArtifacts } from '@/state/artifacts'
 import { useSessions } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
 import { withAgent } from '@/ui/components/AgentGate'
+import { ArtifactPreview } from '@/ui/components/ArtifactPreview'
 import { Card, Divider } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
 import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import {
   ARTIFACT_FILTERS,
-  ARTIFACT_GLYPH,
   type ArtifactFilter,
   describeOrigin,
   formatBytes,
@@ -81,9 +80,11 @@ function ArtifactsScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
+      {/* No subtitle: the floating header's inset is one row tall, and a
+          second line there lands on the filter chips. The session's name
+          goes in the body instead, where it scrolls with everything else. */}
       <ScreenHeader
         title={session ? 'Session artifacts' : 'Artifacts'}
-        subtitle={sessionTitle ? <Text variant="secondary" numberOfLines={1}>{sessionTitle}</Text> : undefined}
         {...(session ? { onBack: () => router.back() } : { onMenu: openSidebar })}
       />
 
@@ -91,6 +92,12 @@ function ArtifactsScreen() {
         contentContainerStyle={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}
         refreshControl={<RefreshControl refreshing={artifacts.isFetching} onRefresh={() => void artifacts.refetch()} />}
       >
+        {sessionTitle ? (
+          <Text variant="secondary" numberOfLines={1} style={styles.scopeLabel}>
+            {sessionTitle}
+          </Text>
+        ) : null}
+
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chips}>
           {ARTIFACT_FILTERS.map(option => {
             const selected = option.key === filter
@@ -193,32 +200,17 @@ function PictureGrid({ artifacts, onOpen }: { artifacts: Artifact[]; onOpen: (ar
 }
 
 /**
- * A picture, fetched on first sight and cached on disk after that.
- *
- * The tile is drawn before the bytes arrive — a tinted square with the glyph —
- * so a grid of twelve pictures lays out once rather than shuffling as each
- * download lands.
+ * A picture in the grid: the host's thumbnail, or the picture itself when the
+ * host had none. The tile is laid out before the bytes arrive — a tinted
+ * square with the glyph — so a grid of twelve lays out once rather than
+ * shuffling as each download lands.
  */
 function PictureTile({ artifact, size, onPress }: { artifact: Artifact; size: number; onPress: () => void }) {
   const theme = useTheme()
-  const backend = useBackend()
-  const file = useArtifactFile(backend, artifact)
 
   return (
-    <Pressable
-      accessibilityRole="imagebutton"
-      accessibilityLabel={artifact.name}
-      onPress={onPress}
-      style={[
-        styles.tile,
-        { width: size, height: size, backgroundColor: theme.color.secondaryTint, borderColor: theme.color.border, borderRadius: theme.radius.row }
-      ]}
-    >
-      {file.data ? (
-        <Image source={{ uri: file.data }} style={StyleSheet.absoluteFill} resizeMode="cover" accessibilityLabel={artifact.name} />
-      ) : (
-        <Icon name={file.error ? 'triangle-exclamation' : ARTIFACT_GLYPH.image} size={18} color={file.error ? theme.color.warning700 : theme.color.secondaryMuted} />
-      )}
+    <Pressable accessibilityRole="imagebutton" accessibilityLabel={artifact.name} onPress={onPress}>
+      <ArtifactPreview artifact={artifact} mode="cover" width={size} height={size} />
 
       {artifact.origin === 'upload' ? (
         <View style={[styles.tileBadge, { backgroundColor: theme.color.scrim }]}>
@@ -239,9 +231,8 @@ function ArtifactRow({ artifact, onPress }: { artifact: Artifact; onPress: () =>
       onPress={onPress}
       style={({ pressed }) => [styles.row, pressed && { backgroundColor: theme.color.bgSubtle }]}
     >
-      <View style={[styles.rowTile, { backgroundColor: theme.color.secondaryTint }]}>
-        <Icon name={ARTIFACT_GLYPH[artifact.kind]} size={14} color={theme.color.secondary} />
-      </View>
+      {/* The page itself when the host rendered one; the kind's glyph when not. */}
+      <ArtifactPreview artifact={artifact} mode="cover" width={40} height={40} radius={8} />
 
       <View style={styles.rowBody}>
         <View style={styles.rowTitle}>
@@ -281,6 +272,7 @@ function EmptyState({ scoped, filtered, agentName }: { scoped: boolean; filtered
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   body: { paddingHorizontal: SCREEN_PAD, paddingTop: 14, gap: 13 },
+  scopeLabel: { paddingHorizontal: 4 },
   chips: { flexDirection: 'row', gap: 8, paddingRight: 16 },
   chip: { height: 34, justifyContent: 'center', paddingHorizontal: 14, borderWidth: StyleSheet.hairlineWidth },
   loading: { marginTop: 24 },
@@ -288,10 +280,8 @@ const styles = StyleSheet.create({
   groupLabel: { paddingHorizontal: 4 },
   dayGroup: { gap: 10 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: GRID_GAP },
-  tile: { alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth },
   tileBadge: { position: 'absolute', right: 6, bottom: 6, width: 18, height: 18, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   row: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 11 },
-  rowTile: { width: 34, height: 34, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   rowBody: { flex: 1, minWidth: 0, gap: 3 },
   rowTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   rowName: { flex: 1, minWidth: 0 },

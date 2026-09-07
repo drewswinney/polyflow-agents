@@ -138,6 +138,15 @@ export function groupArtifactsByDay(artifacts: Artifact[], now = Date.now()): Ar
 /** Tools whose output is generated rather than written, for the provenance line. */
 const GENERATORS = new Set(['image_gen', 'image_generate', 'generate_image', 'video_gen', 'generate_video'])
 
+/**
+ * The tools whose finishing means an artifact may exist.
+ *
+ * Mirrors `ARTIFACT_TOOLS` in the host plugin's `adapter.py` — the app cannot
+ * ask the host which tools it captures, so this is what tells the chat when a
+ * settled tool call is worth re-reading the session's artifacts for.
+ */
+export const ARTIFACT_TOOLS: ReadonlySet<string> = new Set(['write_file', ...GENERATORS])
+
 /** Where it came from, in one line: `Sent from this app`, `Written by write_file`. */
 export function describeOrigin(artifact: Pick<Artifact, 'origin' | 'tool'>): string {
   if (artifact.origin === 'upload') return 'Sent from this app'

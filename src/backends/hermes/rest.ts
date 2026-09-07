@@ -445,6 +445,11 @@ export class HermesRest {
     return this.requestBytes(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}/content`)
   }
 
+  /** Rendered on first request; a cold LibreOffice can take most of a minute. */
+  artifactThumbnail(id: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
+    return this.requestBytes(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}/thumbnail`, 90_000)
+  }
+
   uploadArtifact(body: { name: string; mimeType: string; sessionId: string; dataUrl: string }): Promise<{ ok: boolean; artifact: ArtifactRow }> {
     return this.request<{ ok: boolean; artifact: ArtifactRow }>(ARTIFACTS_ROUTE, {
       method: 'POST',

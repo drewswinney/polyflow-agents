@@ -37,6 +37,7 @@ and can never share memory (see `devices.py`).
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import importlib
 import importlib.util
@@ -101,6 +102,7 @@ def _sibling(name: str) -> Any:
 devices = _sibling("devices")
 push = _sibling("push")
 artifacts = _sibling("artifacts")
+thumbnails = _sibling("thumbnails")
 
 
 def _redacted(device: Dict[str, Any]) -> Dict[str, Any]:
@@ -861,6 +863,31 @@ async def get_artifact(artifact_id: str, request: Request) -> Dict[str, Any]:
 async def artifact_content(artifact_id: str, download: bool = False) -> FileResponse:
     """The bytes. Inline by default so an image renders; `?download=1` for a save-as."""
     return _serve(_artifact_or_404(artifact_id), download=download)
+
+
+@router.get("/artifacts/{artifact_id}/thumbnail")
+async def artifact_thumbnail(artifact_id: str) -> FileResponse:
+    """A first-page PNG, rendered on the host the first time it is asked for.
+
+    404 when nothing here can render this kind of file — the app shows a glyph
+    instead. Off the event loop: a cold LibreOffice takes seconds, and every
+    other request on this server would otherwise wait for it.
+    """
+    row = _artifact_or_404(artifact_id)
+    path = await asyncio.to_thread(thumbnails.ensure, row)
+
+    if path is None:
+        raise HTTPException(status_code=404, detail="no thumbnail for this artifact")
+
+    return FileResponse(
+        path=str(path),
+        media_type="image/png",
+        headers={
+            "X-Content-Type-Options": "nosniff",
+            "Cache-Control": "private, max-age=86400",
+            "ETag": f'"{row["sha256"]}-thumb"',
+        },
+    )
 
 
 @router.post("/artifacts")

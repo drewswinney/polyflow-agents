@@ -7,6 +7,7 @@ import { ActivityIndicator, Keyboard, Platform, StyleSheet, View } from 'react-n
 import { useBackend, useConnectionState } from '@/state/ConnectionProvider'
 import { useAgentScopedRoute } from '@/state/agent-scope'
 import { useSelectedAgent, useSelectedServer } from '@/state/agents'
+import { useArtifacts } from '@/state/artifacts'
 import { useSheet } from '@/state/sheet'
 import { useSidebar } from '@/state/sidebar'
 import { useSessionStream } from '@/state/session-stream'
@@ -14,6 +15,7 @@ import { useIsStreaming } from '@/state/stream-tail'
 import { useChatInbox } from '@/state/chat-inbox'
 import { withAgent } from '@/ui/components/AgentGate'
 import { ApprovalCard, ApprovalNudge } from '@/ui/components/ApprovalCard'
+import { ArtifactCards } from '@/ui/components/ArtifactCards'
 import { ClarifyCard } from '@/ui/components/ClarifyCard'
 import { Composer } from '@/ui/components/Composer'
 import { IconButton } from '@/ui/components/IconButton'
@@ -24,7 +26,8 @@ import { Text } from '@/ui/components/Text'
 import { KanbanMentionProvider } from '@/ui/components/KanbanMentions'
 import { TranscriptEntryView } from '@/ui/components/TranscriptEntryView'
 import { WorkSection } from '@/ui/components/WorkSection'
-import { groupTranscript, type TranscriptRow } from '@/ui/transcript-rows'
+import { ARTIFACT_TOOLS } from '@/ui/artifacts'
+import { groupTranscript, type TranscriptRow, withArtifactRows } from '@/ui/transcript-rows'
 import { KeyboardInset } from '@/ui/keyboard'
 import { useTheme } from '@/ui/ThemeProvider'
 
@@ -261,7 +264,37 @@ function ChatScreen() {
     if (handed) streamSend(handed.text, handed.images)
   }, [pendingMessage, takeMessage, streamLoading, streamSend, id])
 
-  const rows = useMemo(() => groupTranscript(stream.entries), [stream.entries])
+  /**
+   * What this conversation produced, slotted into the transcript as cards.
+   *
+   * Read from the artifact store rather than inferred from tool cards: a tool
+   * card says `write_file` ran, the store says what exists now and where to
+   * open it. Re-read when a producing tool settles and again when the turn
+   * ends — the host copies the file on a thread just after the tool returns,
+   * so the first read can land a beat early and the second is the backstop.
+   */
+  const scope = agent.scope ?? ''
+  const artifacts = useArtifacts(scope, stale ? null : backend, { sessionId: id })
+  const producedSettled = useMemo(
+    () => stream.entries.filter(entry => entry.kind === 'tool' && entry.call.status === 'ok' && ARTIFACT_TOOLS.has(entry.call.name)).length,
+    [stream.entries]
+  )
+  const refetchArtifacts = artifacts.refetch
+  const artifactsSeen = useRef({ produced: producedSettled, active: stream.turnActive })
+
+  useEffect(() => {
+    const seen = artifactsSeen.current
+    const producedMore = producedSettled > seen.produced
+    const turnEnded = seen.active && !stream.turnActive
+
+    artifactsSeen.current = { produced: producedSettled, active: stream.turnActive }
+
+    if (producedMore || turnEnded) void refetchArtifacts()
+  }, [producedSettled, stream.turnActive, refetchArtifacts])
+
+  const baseRows = useMemo(() => groupTranscript(stream.entries), [stream.entries])
+  const rows = useMemo(() => withArtifactRows(baseRows, artifacts.data?.artifacts ?? []), [baseRows, artifacts.data])
+  const artifactCount = artifacts.data?.total ?? 0
 
   /**
    * Which working-out sections are open, by row id.
@@ -282,8 +315,10 @@ function ChatScreen() {
   }, [])
 
   // Only the last row can be the one the agent is still inside, and only it is
-  // handed the tail — so a token flush repaints that header alone.
-  const liveRowId = rows[rows.length - 1]?.id
+  // handed the tail — so a token flush repaints that header alone. Read off
+  // the rows *before* artifacts are slotted in: a card that lands after the
+  // work section is not a place the agent can be.
+  const liveRowId = baseRows[baseRows.length - 1]?.id
 
   const renderItem = useCallback(
     ({ item }: { item: TranscriptRow }) => (
@@ -295,6 +330,8 @@ function ChatScreen() {
             onToggle={() => toggleWork(item.id)}
             {...(item.id === liveRowId ? { tail: stream.tail } : {})}
           />
+        ) : item.kind === 'artifacts' ? (
+          <ArtifactCards artifacts={item.artifacts} />
         ) : (
           <TranscriptEntryView entry={item.entry} />
         )}
@@ -324,13 +361,25 @@ function ChatScreen() {
             // that keeps artifacts; the placeholder stays otherwise so the
             // row's shape does not change with the host.
             backend?.capabilities.artifacts.store ? (
-              <IconButton
-                name="box-archive"
-                accessibilityLabel="Artifacts from this session"
-                edge="right"
-                outlined
-                onPress={() => router.push({ pathname: '/artifacts', params: { session: id } } as never)}
-              />
+              <View>
+                <IconButton
+                  name="box-archive"
+                  accessibilityLabel={artifactCount ? `${artifactCount} artifacts from this session` : 'Artifacts from this session'}
+                  edge="right"
+                  outlined
+                  onPress={() => router.push({ pathname: '/artifacts', params: { session: id } } as never)}
+                />
+                {/* The count, so the button says whether there is anything
+                    behind it before you tap. Absent at zero rather than "0":
+                    an empty badge is noise on every chat that made nothing. */}
+                {artifactCount > 0 ? (
+                  <View pointerEvents="none" style={[styles.badge, { backgroundColor: theme.color.secondary, borderColor: theme.color.bg }]}>
+                    <Text variant="tabLabel" color={theme.color.onAccent}>
+                      {artifactCount > 99 ? '99+' : String(artifactCount)}
+                    </Text>
+                  </View>
+                ) : null}
+              </View>
             ) : (
               <IconButton name="ellipsis" accessibilityLabel="Session options" edge="right" outlined />
             )
@@ -496,6 +545,18 @@ function ChatScreen() {
 }
 
 const styles = StyleSheet.create({
+  badge: {
+    position: 'absolute',
+    top: -2,
+    right: -4,
+    minWidth: 18,
+    height: 18,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
   screen: { flex: 1 },
   flex: { flex: 1 },
   stage: { flex: 1 },

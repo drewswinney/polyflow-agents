@@ -241,6 +241,14 @@ export interface AgentBackend {
    */
   readArtifact(id: string): Promise<ArtifactBytes>
   /**
+   * A first-page PNG the host rendered, for a card or a tile.
+   *
+   * Rejects when the host has none for this kind of file — no Pillow for
+   * pictures, no `pdftoppm` for a PDF, nothing at all for a video — and the
+   * caller draws a glyph instead. Never a substitute for `readArtifact`.
+   */
+  readArtifactThumbnail(id: string): Promise<ArtifactBytes>
+  /**
    * File a picture this app sent, under the name the host gave it.
    *
    * Called after `prompt()` reports the name, which is the only moment both

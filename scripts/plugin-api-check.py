@@ -18,6 +18,9 @@ check cannot, each of which was a real failure mode rather than a hypothetical:
 4. **The artifact store round-trips.** Capture from a tool result, the upload
    route, the content and share routes, versioning on rewrite and delete — all
    against a real SQLite file under the temporary home (`docs/artifacts.md`).
+5. **Thumbnails render with whatever this machine has**, and 404 cleanly with
+   what it lacks — never a 500. Pillow, `pdftoppm` and a Chromium are each
+   probed rather than assumed.
 
 Run against a temporary HERMES_HOME so it never touches a real registry:
 
@@ -40,6 +43,15 @@ REPO = Path(__file__).resolve().parent.parent
 PLUGIN = REPO / "host" / "polyflow_agents_push"
 TOKEN = "ExponentPushToken[abcdefghij1234567890]"
 SESSION = "20260907_132822_3b37eb"
+# One blank page. Enough for pdftoppm to rasterise, and hand-checkable.
+MINIMAL_PDF = (
+    b"%PDF-1.1\n"
+    b"1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n"
+    b"2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n"
+    b"3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 260]>>endobj\n"
+    b"xref\n0 4\n0000000000 65535 f \n0000000009 00000 n \n0000000052 00000 n \n0000000101 00000 n \n"
+    b"trailer<</Size 4/Root 1 0 R>>\nstartxref\n168\n%%EOF\n"
+)
 # A 1×1 PNG, the smallest thing that is unambiguously an image.
 PNG_B64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=="
 
@@ -323,13 +335,77 @@ def check_artifacts(module, client, base: str, home: Path) -> None:
     if client.get(f"{base}/share/definitely-not-a-token").status_code != 404:
         fail("an unknown share should 404")
 
+    # --- Thumbnails ---------------------------------------------------------
+    # Each renderer is optional on purpose, so the assertion is conditional on
+    # the tool being present here: with it, a PNG; without, a clean 404 that
+    # the app falls back from. What must never happen is a 500 either way.
+    thumbs = module.thumbnails
+
+    def thumb(artifact_id):
+        return client.get(f"{base}/artifacts/{artifact_id}/thumbnail")
+
+    for label, artifact_id, expected in (
+        ("image", image[0]["id"], thumbs.has_pillow()),
+        ("markdown page", first["id"], thumbs.has_pillow()),
+    ):
+        response = thumb(artifact_id)
+
+        if expected and (response.status_code != 200 or not response.content.startswith(b"\x89PNG")):
+            fail(f"{label} thumbnail should be a PNG, got {response.status_code}")
+        if not expected and response.status_code != 404:
+            fail(f"{label} thumbnail without a renderer should 404, got {response.status_code}")
+
+    # A second ask is served from the cache: the marker matches the sha.
+    if thumbs.has_pillow():
+        if not arts.thumbnail_marker_path(arts.get(first["id"])).read_text().strip() == arts.get(first["id"])["sha256"]:
+            fail("a rendered thumbnail should be marked with the sha it came from")
+        if thumb(first["id"]).status_code != 200:
+            fail("a cached thumbnail should be served again")
+
+    pdf = arts.record(data=MINIMAL_PDF, name="one-page.pdf", session_id=SESSION, origin="agent", tool="write_file")
+    response = thumb(pdf["id"])
+
+    if thumbs.has_pdftoppm():
+        if response.status_code != 200 or not response.content.startswith(b"\x89PNG"):
+            fail(f"PDF thumbnail should render through pdftoppm, got {response.status_code}")
+    elif response.status_code != 404:
+        fail(f"PDF thumbnail without pdftoppm should 404, got {response.status_code}")
+
+    page = arts.record(data=b"<html><body><h1>Artifact check</h1><p>rendered by a browser</p></body></html>", name="page.html", session_id=SESSION, origin="agent", tool="write_file")
+    response = thumb(page["id"])
+
+    # A browser that is present may still refuse to screenshot headlessly —
+    # Google Chrome on macOS hangs with another Chrome open — and that is a
+    # timeout the plugin turns into a miss, not a failure. So: a PNG or a
+    # clean 404, and a line saying which, never a 500.
+    if response.status_code == 200:
+        if not response.content.startswith(b"\x89PNG"):
+            fail("HTML thumbnail answered 200 with something that is not a PNG")
+    elif response.status_code == 404:
+        print(f"note: no HTML thumbnail here (browser: {thumbs.chromium_binary() or 'none'}); the route 404s cleanly")
+    else:
+        fail(f"HTML thumbnail should be a PNG or a 404, got {response.status_code}")
+
+    binary = arts.record(data=bytes(range(256)) * 4, name="blob.bin", session_id=SESSION, origin="agent", tool="write_file")
+
+    if thumb(binary["id"]).status_code != 404:
+        fail("a file nothing can render should 404, not 500")
+    if thumb("nope").status_code != 404:
+        fail("a thumbnail for an unknown id should 404")
+
+    for extra in (pdf, page, binary):
+        client.request("DELETE", f"{base}/artifacts/{extra['id']}")
+
     # --- Delete -----------------------------------------------------------
     bytes_path = arts.file_path(arts.get(first["id"]))
+    thumb_path = arts.thumbnail_path(arts.get(first["id"]))
 
     if client.request("DELETE", f"{base}/artifacts/{first['id']}").json() != {"ok": True}:
         fail("delete did not report success")
     if bytes_path.exists():
         fail("delete left the bytes behind")
+    if thumb_path.exists():
+        fail("delete left the thumbnail behind")
     if client.get(f"{base}/artifacts/{first['id']}").status_code != 404:
         fail("a deleted artifact is still listed")
     if client.request("DELETE", f"{base}/artifacts/{first['id']}").status_code != 404:

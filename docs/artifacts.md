@@ -93,6 +93,7 @@ the same auth the app already clears.
 | `GET /artifacts?session=&kind=&limit=&offset=` | newest first |
 | `GET /artifacts/{id}` | one row |
 | `GET /artifacts/{id}/content` | the bytes, inline; `?download=1` for attachment |
+| `GET /artifacts/{id}/thumbnail` | a first-page PNG, rendered on first ask (§4.1); 404 when nothing on the host can |
 | `POST /artifacts` | the app filing a sent image: `{name, mimeType, sessionId, dataUrl}` |
 | `DELETE /artifacts/{id}` | row and bytes |
 | `POST /artifacts/{id}/share` | mint (or return) a share token; `{expiresInHours?}` |
@@ -118,6 +119,26 @@ One row:
   "share": { "url": "http://host:9119/api/plugins/polyflow_agents_push/share/…", "expiresAt": null, "createdAt": 1757250100000 }
 }
 ```
+
+### 4.1 Thumbnails
+
+A card in the chat should look like the thing it opens, and a phone cannot
+rasterise a PDF or a Word file. The host can, with tools it very likely has:
+
+| Kind | Renderer | Absent → |
+|---|---|---|
+| image | Pillow | 404; the app draws the picture itself |
+| PDF | `pdftoppm`, first page | 404; glyph |
+| HTML | headless Chromium screenshot (`POLYFLOW_ARTIFACT_CHROMIUM`, PATH, or Hermes's Playwright cache), else LibreOffice → PDF | 404; glyph |
+| Word, Excel, PowerPoint, ODF, RTF, EPUB | LibreOffice → PDF → `pdftoppm` | 404; glyph |
+| text, code, data | Pillow draws the first page in a monospace font | 404; glyph |
+
+Rendered lazily on the first request, kept as `files/<id>.thumb.png` beside a
+marker holding the sha it came from — a rewrite re-renders, a delete removes
+both. A failed render is remembered for an hour so a broken file does not
+cost a Chromium launch on every scroll. Renders run off the event loop, one at
+a time per artifact. Every renderer is optional: the plugin still imports
+nothing beyond the stdlib, and probes each tool when it is needed.
 
 `kind` is derived from the MIME type and extension on the host, once, so every
 client agrees on what is an image. `sessionId` is the **stored** id — the one
@@ -168,6 +189,17 @@ reverse proxy that satisfies the gate for that one prefix — is the whole gap.
   header links to the same screen scoped to that session.
 - **Detail:** `/artifacts/[id]`. Preview, provenance, *Open session*, *Share
   file*, *Copy link* / *Stop sharing*, *Delete*.
+- **In the chat itself:** each file the agent produced appears as a tile in the
+  transcript, slotted by time under the work section that made it and above
+  the reply that mentions it (`withArtifactRows` in `transcript-rows.ts`). The
+  tile is the thing at its own proportions — the host's thumbnail (§4.1) via
+  `ArtifactPreview`, which every tile in the app draws through, with nothing
+  painted behind it — then the filename and *Open*. A glyph stands in when the
+  host could not render one. Several files from one stretch of work sit in a
+  strip you scroll sideways. Tap to open the detail. The header's artifacts button carries a count, and opens
+  the session-scoped list. The chat re-reads the session's artifacts when a
+  producing tool settles and when the turn ends. Pictures the user sent are not
+  carded: they already show in the user's bubble.
 - **Bytes on the phone:** `platform/artifact-cache.ts`, keyed by server, id and
   version under the cache directory — the OS may evict it, and a miss is one
   download. Fetched with the app's own `fetch` so it carries whichever

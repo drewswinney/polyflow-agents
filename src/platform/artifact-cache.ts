@@ -24,28 +24,39 @@ const ROOT = 'artifacts'
 
 /** One path segment, and nothing that could climb out of the cache directory. */
 function safeSegment(value: string): string {
-  return value.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+/, '').slice(0, 80) || 'artifact'
-}
-
-/** The extension the OS share sheet and image decoder key on, kept from the name. */
-function extensionOf(name: string): string {
-  const match = /\.[A-Za-z0-9]{1,8}$/.exec(name)
-
-  return match ? match[0].toLowerCase() : ''
+  return value.replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^\.+/, '').slice(0, 120) || 'artifact'
 }
 
 function cacheDirectory(): Directory {
   return new Directory(Paths.cache, ROOT)
 }
 
-function cacheFile(artifact: Pick<Artifact, 'id' | 'version' | 'name'>): File {
-  return new File(cacheDirectory(), `${safeSegment(artifact.id)}-v${artifact.version}${extensionOf(artifact.name)}`)
+/**
+ * One directory per id and version, and inside it the file under its *own*
+ * name. The share sheet and every app it hands the file to show the filename,
+ * so a flat `<id>-v<n>.md` would have put a hash in front of the recipient
+ * where "report.md" belonged. The directory carries the identity; the file
+ * carries the name.
+ */
+/**
+ * Which rendering of an artifact: the bytes themselves, or the host's
+ * first-page thumbnail. Both live in the artifact's directory, and the
+ * thumbnail is always a PNG whatever the file is.
+ */
+export type ArtifactVariant = 'file' | 'thumbnail'
+
+type ArtifactRef = Pick<Artifact, 'id' | 'version' | 'name'>
+
+function cacheFile(artifact: ArtifactRef, variant: ArtifactVariant = 'file'): File {
+  const directory = `${safeSegment(artifact.id)}-v${artifact.version}`
+
+  return new File(cacheDirectory(), directory, variant === 'thumbnail' ? 'thumbnail.png' : safeSegment(artifact.name))
 }
 
 /** The local copy, if this device still has one. Cheap: a stat. */
-export function cachedArtifactUri(artifact: Pick<Artifact, 'id' | 'version' | 'name'>): string | undefined {
+export function cachedArtifactUri(artifact: ArtifactRef, variant: ArtifactVariant = 'file'): string | undefined {
   try {
-    const file = cacheFile(artifact)
+    const file = cacheFile(artifact, variant)
 
     return file.exists ? file.uri : undefined
   } catch {
@@ -64,25 +75,25 @@ const inflight = new Map<string, Promise<string>>()
  * picture looks like.
  */
 export function ensureArtifactFile(
-  artifact: Pick<Artifact, 'id' | 'version' | 'name'>,
-  read: () => Promise<ArtifactBytes>
+  artifact: ArtifactRef,
+  read: () => Promise<ArtifactBytes>,
+  variant: ArtifactVariant = 'file'
 ): Promise<string> {
-  const cached = cachedArtifactUri(artifact)
+  const cached = cachedArtifactUri(artifact, variant)
 
   if (cached) return Promise.resolve(cached)
 
-  const key = `${artifact.id}:${artifact.version}`
+  const key = `${artifact.id}:${artifact.version}:${variant}`
   const pending = inflight.get(key)
 
   if (pending) return pending
 
   const download = (async () => {
     const { bytes } = await read()
-    const directory = cacheDirectory()
+    const file = cacheFile(artifact, variant)
+    const directory = file.parentDirectory
 
     if (!directory.exists) directory.create({ intermediates: true, idempotent: true })
-
-    const file = cacheFile(artifact)
 
     file.write(bytes)
 
@@ -116,5 +127,24 @@ export function useArtifactFile(backend: AgentBackend | null, artifact: Artifact
     staleTime: Infinity,
     gcTime: 60 * 60 * 1000,
     retry: 1
+  })
+}
+
+/**
+ * The host's first-page thumbnail for an artifact, fetched on first use.
+ *
+ * A miss is final for this version — the host has no renderer for that kind
+ * of file — so there is no retry, and the error is the signal a tile reads
+ * to fall back to the full picture or a glyph. Kept as long as the file
+ * itself.
+ */
+export function useArtifactThumbnail(backend: AgentBackend | null, artifact: Artifact | null | undefined) {
+  return useQuery<string>({
+    queryKey: ['artifact-thumbnail', artifact?.id ?? '', artifact?.version ?? 0],
+    enabled: Boolean(backend && artifact),
+    queryFn: () => ensureArtifactFile(artifact!, () => backend!.readArtifactThumbnail(artifact!.id), 'thumbnail'),
+    staleTime: Infinity,
+    gcTime: 60 * 60 * 1000,
+    retry: false
   })
 }

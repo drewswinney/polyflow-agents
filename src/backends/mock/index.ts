@@ -750,6 +750,17 @@ export class MockBackend implements AgentBackend {
     return { bytes, mimeType: artifact.mimeType }
   }
 
+  async readArtifactThumbnail(id: string): Promise<ArtifactBytes> {
+    // The demo has no renderer. Pictures are their own thumbnail; everything
+    // else is honestly a miss, which is what draws the glyph the real host
+    // draws when it has no Pillow or `pdftoppm`.
+    const artifact = await this.getArtifact(id)
+
+    if (artifact.kind !== 'image') throw new Error('The demo agent renders no thumbnails.')
+
+    return this.readArtifact(id)
+  }
+
   async uploadArtifact(upload: ArtifactUpload): Promise<Artifact> {
     const base64 = upload.uri.startsWith('data:') ? upload.uri.slice(upload.uri.indexOf(',') + 1) : await new File(upload.uri).base64()
     const bytes = bytesFromBase64(base64)
@@ -970,8 +981,9 @@ function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] 
       origin: 'agent',
       tool: 'write_file',
       sourcePath: '/home/agent/reports/scrub-report.md',
-      createdAt: now - 40 * MINUTE,
-      updatedAt: now - 2 * MINUTE,
+      // Between the question and the reply in `ses-zfs`, where its card belongs.
+      createdAt: now - 3 * MINUTE + 20_000,
+      updatedAt: now - 2 * MINUTE - 10_000,
       version: 3,
       share: { url: 'https://demo.polyflow.local/share/k3v9x1', expiresAt: null, createdAt: now - 20 * MINUTE },
       bytes: bytesFromText(
@@ -992,8 +1004,8 @@ function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] 
       origin: 'agent',
       tool: 'image_generate',
       sourcePath: '/home/agent/.hermes/image_cache/pool-layout.png',
-      createdAt: now - 12 * MINUTE,
-      updatedAt: now - 12 * MINUTE,
+      createdAt: now - 2 * MINUTE - 30_000,
+      updatedAt: now - 2 * MINUTE - 30_000,
       version: 1,
       share: null,
       bytes: bytesFromBase64(DEMO_IMAGE_PNG_BASE64)
@@ -1008,8 +1020,8 @@ function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] 
       origin: 'agent',
       tool: 'write_file',
       sourcePath: '/etc/cron.d/backup-window.sh',
-      createdAt: now - 48 * MINUTE,
-      updatedAt: now - 48 * MINUTE,
+      createdAt: now - 48 * MINUTE - 20_000,
+      updatedAt: now - 48 * MINUTE - 20_000,
       version: 1,
       share: null,
       bytes: bytesFromText('#!/bin/sh\n# Nightly backup, moved clear of the scrub.\n15 3 * * * root /usr/local/bin/pve-backup --all\n')
@@ -1024,8 +1036,8 @@ function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] 
       origin: 'agent',
       tool: 'write_file',
       sourcePath: '/home/agent/reconnects.json',
-      createdAt: now - 26 * 60 * MINUTE,
-      updatedAt: now - 26 * 60 * MINUTE,
+      createdAt: now - 5 * 60 * MINUTE - 20_000,
+      updatedAt: now - 5 * 60 * MINUTE - 20_000,
       version: 1,
       share: null,
       bytes: bytesFromText(JSON.stringify({ attempts: 6, lastError: 'ECONNREFUSED', container: 'exited' }, null, 2) + '\n')

@@ -209,6 +209,10 @@ export class OpenAiCompatBackend implements AgentBackend {
     throw new NotImplemented('artifacts')
   }
 
+  async readArtifactThumbnail(): Promise<never> {
+    throw new NotImplemented('artifacts')
+  }
+
   async uploadArtifact(): Promise<never> {
     throw new NotImplemented('artifacts')
   }

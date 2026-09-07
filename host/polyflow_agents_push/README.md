@@ -144,6 +144,7 @@ the same store, which is how a sent picture comes back on a different phone.
 | `GET /artifacts?session=&kind=&limit=&offset=` | newest first |
 | `GET /artifacts/{id}` | one row |
 | `GET /artifacts/{id}/content` | the bytes, inline; `?download=1` for a save-as |
+| `GET /artifacts/{id}/thumbnail` | a first-page PNG, rendered on first ask with Pillow / `pdftoppm` / Chromium / LibreOffice, whichever this host has; 404 otherwise |
 | `POST /artifacts` | the app filing a sent picture: `{name, mimeType, sessionId, dataUrl}` |
 | `DELETE /artifacts/{id}` | row and bytes |
 | `POST /artifacts/{id}/share` | mint or return a share token; `{expiresInHours?}` |
