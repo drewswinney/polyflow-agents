@@ -1,8 +1,8 @@
 {
   "name": "polyflow_agents_push",
   "label": "Polyflow Agents",
-  "description": "Device registration for the Polyflow Agents app. Backend routes only — no dashboard UI.",
-  "version": "0.2.1",
+  "description": "Device registration and the artifact store for the Polyflow Agents app. Backend routes only — no dashboard UI.",
+  "version": "0.4.0",
   "icon": "Smartphone",
   "api": "plugin_api.py",
   "tab": {
