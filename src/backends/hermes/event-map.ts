@@ -93,7 +93,6 @@ function completedStatus(payload: Payload): ToolStatus {
 /** Events that carry no chat meaning but belong in Logs & events (§7.15). */
 const LOG_ONLY: ReadonlySet<string> = new Set([
   'gateway.ready',
-  'session.info',
   'status.update',
   'skin.changed',
   'message.start',
@@ -148,6 +147,17 @@ export function mapGatewayEvent(event: GatewayEvent, ctx: MapContext): SessionUp
       const text = coerceText(payload?.text)
 
       if (text) updates.push({ kind: 'agent_message_snapshot', text })
+      break
+    }
+
+    case 'session.info': {
+      // Log-only until the composer could act on it. The payload carries the
+      // live model for the session, which is the one thing here that no other
+      // event reports.
+      const model = String((payload as { model?: unknown })?.model ?? '').trim()
+
+      if (model) updates.push({ kind: 'model_changed', model })
+
       break
     }
 

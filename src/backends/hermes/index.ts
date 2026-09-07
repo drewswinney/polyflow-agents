@@ -34,6 +34,7 @@ import {
   type KanbanCardUpdate,
   type McpServerStatus,
   type ModelOption,
+  type ModelSwitch,
   type NewSessionOptions,
   NO_IMAGES,
   type PromptResult,
@@ -159,7 +160,7 @@ const LOGIN_REUSE_MS = 300_000
 /** Hermes reports nearly everything (§4.1). */
 export const HERMES_CAPABILITIES: Capabilities = {
   sessions: { search: true, rename: true, pin: true },
-  settings: { schemaDriven: true, model: true, providers: true },
+  settings: { schemaDriven: true, model: true, providers: true, sessionModel: true },
   extras: { cron: true, skills: true, mcp: true, boards: true },
   approvals: { requests: true, policy: true },
   logs: { events: true },
@@ -892,14 +893,32 @@ export class HermesBackend implements AgentBackend {
     }))
   }
 
+  async getModel(): Promise<string | null> {
+    // Profile-scoped like every other REST call, so this is *this agent's*
+    // default rather than the host's launch profile.
+    const info = await this.rest.modelInfo()
+
+    return info.model?.trim() || null
+  }
+
   async listModels(): Promise<ModelOption[]> {
     const [options, info] = await Promise.all([this.rest.modelOptions(), this.rest.modelInfo()])
+
+    // Two reports of the same fact, and they do not always agree. `/model/info`
+    // answers with the *resolved* runtime identity — provider `custom` for a
+    // named proxy entry, the routed id it forwards — while the options payload
+    // names the pick in the same namespace as the rows it is listing. Matching
+    // either is what gets a row ticked on a host whose model is reached through
+    // an aggregator, where the two spellings differ.
+    const current = { model: options.model ?? info.model, provider: options.provider ?? info.provider }
 
     return (options.providers ?? []).flatMap(provider =>
       (provider.models ?? []).map(model => ({
         id: model,
         provider: provider.slug,
-        selected: model === info.model && provider.slug === info.provider
+        selected:
+          (model === current.model && provider.slug === current.provider) ||
+          (model === info.model && provider.slug === info.provider)
       }))
     )
   }
@@ -909,6 +928,54 @@ export class HermesBackend implements AgentBackend {
       method: 'POST',
       body: { scope: 'main', provider: option.provider, model: option.id }
     })
+  }
+
+  /**
+   * The per-session model switch (§7.11).
+   *
+   * `config.set` with a `session_id`, which is the same method the approval
+   * policy goes through — the host reads `key: 'model'` and routes it into its
+   * own `/model` machinery rather than writing a config value. Without a
+   * session id that call rewrites the *profile* default, so the id is not
+   * optional here even though the wire format would accept its absence.
+   *
+   * Resolved through `runtimeIdFor`, which resumes the session if it is not
+   * live: the host looks the id up in its live-session map, and a miss falls
+   * through to the profile-wide branch — the one outcome this must never
+   * produce by accident.
+   */
+  async setSessionModel(id: SessionId, option: ModelOption): Promise<ModelSwitch> {
+    const runtimeId = await this.runtimeIdFor(id)
+
+    const result = await this.gateway.request<{
+      value?: string
+      warning?: string
+      deferred?: boolean
+      confirm_required?: boolean
+      confirm_message?: string
+    }>('config.set', {
+      key: 'model',
+      // The raw `/model` argument string, which is what the host parses.
+      // `--provider` rather than a `vendor/model` slug: it names the provider
+      // unambiguously, and an explicit one lets the host resolve the pick
+      // without having to build the agent first.
+      value: `${option.id} --provider ${option.provider}`,
+      session_id: runtimeId
+    })
+
+    // A model the host wants confirmed (an expensive one) comes back as a
+    // question, not a switch. Surfaced as an error rather than silently
+    // re-sent with the confirm flag — the point of the prompt is that someone
+    // agrees to the bill.
+    if (result?.confirm_required) {
+      throw new Error(result.confirm_message || `${option.id} needs confirming before it can be used.`)
+    }
+
+    return {
+      model: String(result?.value ?? option.id),
+      deferred: result?.deferred === true,
+      warning: String(result?.warning ?? '')
+    }
   }
 
   async getApprovalPolicy(): Promise<ApprovalPolicy> {

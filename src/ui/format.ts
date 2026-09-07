@@ -57,3 +57,18 @@ export function recencyGroup(at: number, now = Date.now()): 'Today' | 'Earlier' 
 
   return at >= startOfToday.getTime() ? 'Today' : 'Earlier'
 }
+
+/**
+ * A model id, short enough to wear on the composer.
+ *
+ * Hosts name models by route — `openrouter/qwen/qwen3.8-27b` — and the useful
+ * half is the last segment: the provider prefix is the same on every model you
+ * can pick, so it is the part that carries no information while taking most of
+ * the room. The full id stays in the chat header, where there is space for it
+ * and where "which route exactly" is the question being asked.
+ */
+export function modelLabel(model: string): string {
+  const last = model.split('/').filter(Boolean).pop() ?? model
+
+  return last.trim() || model
+}

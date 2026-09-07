@@ -8,7 +8,7 @@ import { useBackend } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { Card, Divider } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Segmented } from '@/ui/components/Segmented'
 import { Text } from '@/ui/components/Text'
 import { useTheme } from '@/ui/ThemeProvider'
@@ -28,6 +28,7 @@ import { useTheme } from '@/ui/ThemeProvider'
 export default function ToolsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  const headerInset = useHeaderInset()
   const agent = useSelectedAgent()
   const backend = useBackend()
   const queryClient = useQueryClient()
@@ -63,7 +64,7 @@ export default function ToolsScreen() {
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
       <ScreenHeader title="Tools & integrations" onBack={() => router.back()} />
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}>
         {capabilities?.extras.mcp ? (
           <View style={styles.group}>
             <Text variant="sectionHeader" style={styles.groupLabel}>

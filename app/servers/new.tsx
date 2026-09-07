@@ -12,7 +12,7 @@ import { useAgents } from '@/state/agents'
 import { Card } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
 import { IconButton } from '@/ui/components/IconButton'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { KeyboardInset } from '@/ui/keyboard'
 import { useGradient, useTheme } from '@/ui/ThemeProvider'
@@ -42,6 +42,7 @@ export default function AddServerScreen() {
   const theme = useTheme()
   const gradient = useGradient()
   const insets = useSafeAreaInsets()
+  const headerInset = useHeaderInset()
   const addServer = useAgents(state => state.addServer)
   const scroller = useRef<ScrollView>(null)
 
@@ -246,7 +247,6 @@ export default function AddServerScreen() {
         onBack={canGoBack ? () => router.back() : undefined}
         // No agent selector on a modal that exists to add one. Switching from
         // inside it would send you to New session with this sheet still up.
-        center={null}
         insetTop={!hostedInCard}
       />
 
@@ -255,7 +255,7 @@ export default function AddServerScreen() {
       <KeyboardInset style={styles.flex}>
         <ScrollView
           ref={scroller}
-          contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}
+          contentContainerStyle={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
         >

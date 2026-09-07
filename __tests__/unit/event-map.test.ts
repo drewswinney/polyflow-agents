@@ -112,3 +112,25 @@ describe('turn boundaries', () => {
     expect(chatUpdates('thinking.delta', { text: 'hmm' })).toEqual([{ kind: 'agent_thought_chunk', text: 'hmm' }])
   })
 })
+
+describe('session.info carries the live model', () => {
+  // It used to be log-only, so a model switch — from this app, the TUI or the
+  // desktop — changed the session and the composer went on naming the model
+  // the transcript happened to load with.
+  it('maps a model to a model_changed update', () => {
+    expect(chatUpdates('session.info', { model: 'claude-opus-5' })).toEqual([
+      { kind: 'model_changed', model: 'claude-opus-5' }
+    ])
+  })
+
+  it('says nothing about chat when there is no model on it', () => {
+    expect(chatUpdates('session.info', {})).toEqual([])
+    expect(chatUpdates('session.info', { model: '   ' })).toEqual([])
+  })
+
+  it('trims what the host sent', () => {
+    expect(chatUpdates('session.info', { model: '  sonnet-4.5 ' })).toEqual([
+      { kind: 'model_changed', model: 'sonnet-4.5' }
+    ])
+  })
+})

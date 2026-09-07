@@ -25,7 +25,9 @@ import { useSessions } from '@/state/queries'
 import { useSessionListSync } from '@/state/session-list-sync'
 import { restoreQueryCache, startPersistingQueryCache } from '@/state/query-cache-persistence'
 import { useSidebar } from '@/state/sidebar'
+import { AppSheet } from '@/ui/components/AppSheet'
 import { Sidebar } from '@/ui/components/Sidebar'
+import { SidebarShell } from '@/ui/components/SidebarShell'
 import { useIsDarkMode } from '@/state/theme-prefs'
 import { ThemeProvider, useTheme } from '@/ui/ThemeProvider'
 import { NEUTRAL_DARK, NEUTRAL_LIGHT } from '@/ui/theme'
@@ -212,26 +214,32 @@ export default function RootLayout() {
         <ThemeProvider accent={agent?.accent}>
           <ConnectionProvider server={server} agent={agent}>
             <ThemedChrome />
-            <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: stackBg } }}>
-              <Stack.Screen name="index" />
-              <Stack.Screen name="welcome" />
-              <Stack.Screen name="sessions" />
-              <Stack.Screen name="boards" />
-              <Stack.Screen name="settings" />
-              <Stack.Screen name="chat/[id]" />
-              <Stack.Screen name="logs" />
-              <Stack.Screen name="tools" />
-              <Stack.Screen name="model" />
-              <Stack.Screen name="cron" />
-              <Stack.Screen name="config" />
-              <Stack.Screen name="notifications" />
-              <Stack.Screen name="voice/[id]" />
-              <Stack.Screen name="servers/new" options={{ presentation: 'modal' }} />
-            </Stack>
 
-            {/* Mounted beside the router, not inside a screen, so the same
-                sidebar serves every screen that shows the hamburger. */}
-            <AppSidebar />
+            {/* The drawer is underneath and the Stack slides off it, so the two
+                have to be siblings inside one shell rather than the drawer
+                being mounted over the router. */}
+            <SidebarShell sidebar={<AppSidebar />}>
+              <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: stackBg } }}>
+                <Stack.Screen name="index" />
+                <Stack.Screen name="welcome" />
+                <Stack.Screen name="sessions" />
+                <Stack.Screen name="boards" />
+                <Stack.Screen name="settings" />
+                <Stack.Screen name="chat/[id]" />
+                <Stack.Screen name="logs" />
+                <Stack.Screen name="tools" />
+                <Stack.Screen name="model" />
+                <Stack.Screen name="cron" />
+                <Stack.Screen name="config" />
+                <Stack.Screen name="notifications" />
+                <Stack.Screen name="voice/[id]" />
+                <Stack.Screen name="servers/new" options={{ presentation: 'modal' }} />
+              </Stack>
+            </SidebarShell>
+
+            {/* Still above everything: a sheet is asked for from the page and
+                answers over it. */}
+            <AppSheet />
             <NotificationRouting />
           </ConnectionProvider>
         </ThemeProvider>
@@ -258,7 +266,6 @@ function ThemedChrome() {
 function AppSidebar() {
   const agent = useSelectedAgentOrNull()
   const backend = useBackend()
-  const open = useSidebar(state => state.open)
   const hide = useSidebar(state => state.hide)
   const pathname = usePathname()
 
@@ -270,7 +277,6 @@ function AppSidebar() {
 
   return (
     <Sidebar
-      visible={open}
       sessions={sessions.data ?? []}
       // Pending covers the switch as well as the first load: the backend is
       // withheld until it matches the selected agent, and the drawer's Recent

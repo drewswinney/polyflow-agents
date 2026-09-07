@@ -19,6 +19,10 @@ import { Text } from './Text'
  * closing marker arrives. The settled entry renders through the same
  * pipeline, so the tail's last frame and the settled message are one tree.
  *
+ * No "Thinking…" line: the work section's header above it already names the
+ * step the agent is on, and reports it whether or not this tail is mounted.
+ * Two live indicators for one turn is one more than the turn has.
+ *
  * The block cursor sits on its own line under the last block rather than
  * inline in the text: threading it through the token stream would leave the
  * caret at the mercy of whatever the message's final token turns out to be,
@@ -29,21 +33,12 @@ import { Text } from './Text'
  * (§7.3 steps 1–2). The block cursor is the 8×17 violet caret from the design.
  */
 export function StreamingTail({ tail }: { tail: StreamTail }) {
-  const theme = useTheme()
   const snapshot = useSyncExternalStore(tail.subscribe, tail.getSnapshot, tail.getSnapshot)
 
   if (!snapshot.streaming && !snapshot.text) return null
 
   return (
     <View style={styles.wrap}>
-      {/* Plain text, to match the settled thinking link rather than sitting
-          above it as a filled pill. */}
-      {snapshot.thinking ? (
-        <Text variant="secondary" color={theme.color.gray500}>
-          Thinking…
-        </Text>
-      ) : null}
-
       {snapshot.text ? (
         <View style={styles.body}>
           <Markdown source={snapshot.text} />

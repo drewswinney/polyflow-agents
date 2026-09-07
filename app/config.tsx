@@ -9,7 +9,7 @@ import { useBackend } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { Card, Divider } from '@/ui/components/Card'
 import { Segmented } from '@/ui/components/Segmented'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { Toggle } from '@/ui/components/Toggle'
 import { useTheme } from '@/ui/ThemeProvider'
@@ -30,6 +30,7 @@ import { useTheme } from '@/ui/ThemeProvider'
 export default function ConfigScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  const headerInset = useHeaderInset()
   const agent = useSelectedAgent()
   const backend = useBackend()
   const queryClient = useQueryClient()
@@ -55,7 +56,7 @@ export default function ConfigScreen() {
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
       <ScreenHeader title="Agent configuration" onBack={() => router.back()} />
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}>
         {fields.isLoading ? (
           <Text variant="secondary">Reading the agent schema…</Text>
         ) : fields.error ? (

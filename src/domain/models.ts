@@ -364,6 +364,25 @@ export interface SkillSummary {
   provenance: 'agent' | 'bundled' | 'hub' | 'unknown'
 }
 
+/**
+ * What came back from switching a session's model.
+ *
+ * `deferred` is the case worth designing for: a switch asked for while a turn
+ * is streaming cannot be applied in place — the worker thread reads the
+ * agent's model and base URL every iteration, so a mid-turn swap can fire a
+ * request with the new URL and the old model. The host stashes the pick and
+ * applies it at the next turn start instead, which is a success the screen has
+ * to report differently: the model has changed, but not yet.
+ */
+export interface ModelSwitch {
+  /** The model now in effect, or queued to be. */
+  model: string
+  /** True when it takes effect on the next turn rather than immediately. */
+  deferred: boolean
+  /** Host-supplied caveat — an expensive model, a fallback. Empty when none. */
+  warning: string
+}
+
 export interface ModelOption {
   /** The model id as the harness names it, e.g. `sonnet-4.5`. */
   id: string
@@ -423,6 +442,13 @@ export interface KanbanCardSummary {
   branch?: string | null
   pr?: string | null
   risk?: string | null
+  /**
+   * The board's own ordering weight — higher is more urgent, matching
+   * `hermes kanban`'s `priority DESC`. Absent from a host whose plugin
+   * predates it, which is why it is optional rather than defaulted to zero:
+   * "not reported" and "set to zero" should not look the same.
+   */
+  priority?: number | null
   updatedAt?: number | null
   body?: string
 }

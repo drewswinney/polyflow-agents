@@ -1,5 +1,4 @@
-import { Modal, Pressable, StyleSheet, useWindowDimensions, View } from 'react-native'
-import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native'
 
 import type { Agent, AgentId, Server, ServerId } from '@/domain'
 
@@ -8,7 +7,13 @@ import { AgentGlyph, Icon } from './Icon'
 import { Text } from './Text'
 
 /**
- * The agent switcher popover (§7.13), grouped by server.
+ * The agent switcher's contents (§7.13), grouped by server.
+ *
+ * A list, not a popover. It used to carry its own `Modal`, a scrim and a
+ * popover anchored under the pill; it is presented in the app's bottom sheet
+ * now, like every other choice with more than two answers. That also settles
+ * what happened when the pill moved into the sidebar — a modal opening from
+ * inside another modal — by leaving only one modal in the stack.
  *
  * Selecting an agent re-scopes the entire app — sessions, activity, settings,
  * history. Nothing merges across agents (§5.2), which is why this is a switch
@@ -19,81 +24,47 @@ import { Text } from './Text'
  * (§5.2 rule 4). Offline servers stay listed and dimmed rather than
  * disappearing — a host you cannot reach is still a host you own.
  */
-export function AgentSwitcher({
+export function AgentSwitcherList({
   servers,
   agents,
   selectedId,
-  visible,
   onSelect,
   onDismissAgent,
-  onAddServer,
-  onDismiss
+  onAddServer
 }: {
   servers: Server[]
   agents: Agent[]
   selectedId: AgentId
-  visible: boolean
   onSelect: (id: AgentId) => void
   /** Forgets an agent the host has stopped reporting (§5.2a). */
   onDismissAgent: (id: AgentId) => void
   onAddServer: () => void
-  onDismiss: () => void
 }) {
   const theme = useTheme()
-  const insets = useSafeAreaInsets()
-
-  if (!visible) return null
 
   return (
-    <Modal transparent visible animationType="fade" onRequestClose={onDismiss}>
-      {/* The scrim covers the list region only; the header stays clear so the
-          pill you just tapped remains legible. */}
-      <Pressable
-        style={[styles.scrim, { backgroundColor: theme.color.scrim, top: insets.top + 52 }]}
-        onPress={onDismiss}
-      />
+    <View>
+      {servers.map((server, index) => (
+        <ServerGroup
+          key={server.id}
+          server={server}
+          first={index === 0}
+          agents={agents.filter(agent => agent.serverId === server.id)}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onDismissAgent={onDismissAgent}
+        />
+      ))}
 
-      <View style={[styles.anchor, { top: insets.top + 52 + 10 }]} pointerEvents="box-none">
-        <View
-          style={[
-            styles.popover,
-            theme.shadow.sheet,
-            { backgroundColor: theme.color.surface, borderRadius: theme.radius.row }
-          ]}
-        >
-          {servers.map((server, index) => (
-            <ServerGroup
-              key={server.id}
-              server={server}
-              first={index === 0}
-              agents={agents.filter(agent => agent.serverId === server.id)}
-              selectedId={selectedId}
-              onSelect={id => {
-                onSelect(id)
-                onDismiss()
-              }}
-              onDismissAgent={onDismissAgent}
-            />
-          ))}
-
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => {
-              onDismiss()
-              onAddServer()
-            }}
-            style={styles.row}
-          >
-            <View style={styles.dotSlot}>
-              <Icon name="plus" size={10} color={theme.color.primary} />
-            </View>
-            <Text variant="rowLabel" color={theme.color.primary} style={styles.addLabel}>
-              Connect a server
-            </Text>
-          </Pressable>
+      <Pressable accessibilityRole="button" onPress={onAddServer} style={styles.row}>
+        <View style={styles.dotSlot}>
+          <Icon name="plus" size={10} color={theme.color.primary} />
         </View>
-      </View>
-    </Modal>
+        <Text variant="rowLabel" color={theme.color.primary} style={styles.addLabel}>
+          Connect a server
+        </Text>
+      </Pressable>
+    </View>
   )
 }
 
@@ -239,9 +210,6 @@ function AgentRow({
 }
 
 const styles = StyleSheet.create({
-  scrim: { position: 'absolute', left: 0, right: 0, bottom: 0 },
-  anchor: { position: 'absolute', left: 0, right: 0, alignItems: 'center' },
-  popover: { width: '92%', maxWidth: 360, paddingVertical: 5, overflow: 'hidden' },
   groupHead: { minHeight: 26, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 11, paddingVertical: 4 },
   groupName: { flex: 1, minWidth: 0 },
   row: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 11, paddingVertical: 7 },

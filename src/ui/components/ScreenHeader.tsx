@@ -1,30 +1,125 @@
 import { BlurView } from 'expo-blur'
+import { LinearGradient } from 'expo-linear-gradient'
 import type { ReactNode } from 'react'
 import { StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { useTheme } from '../ThemeProvider'
-import { AgentSelector } from './AgentSelector'
 import { IconButton } from './IconButton'
 import { Text } from './Text'
 
-const SCREEN_PAD = 20
+/** Inside the card. The card's own margin adds to it to reach the screen edge. */
+const SCREEN_PAD = 14
+/** Between the card and the screen edge, matching the composer's. */
+const CARD_INSET = 12
 const ROW_GAP = 6
-/** The design's back-chevron slot: smaller than 44, topped up with hitSlop. */
-const BACK_SLOT = 34
-const BACK_GLYPH = 17
+/** The control's touch slot. Never smaller than the ring it draws: Android
+ *  does not deliver a touch that lands outside the parent's bounds, so a ring
+ *  overhanging its own Pressable would have a dead rim. */
+const BACK_SLOT = 44
+/** The drawn circle inside that slot. */
+const BACK_RING = 40
+
+/** The title row's floor, which is also the action's touch slot. */
+const TITLE_ROW = 44
+
+/**
+ * How many blur layers the header's fade is built from, and how hard each one is.
+ *
+ * React Native cannot vary a blur radius across a single view, so the gradient
+ * is stacked rather than interpolated: each layer covers less of the header
+ * than the one under it, so at the top all of them overlap and at the bottom
+ * only the first does. Five steps is where the banding stops reading as bands;
+ * fewer and the steps are visible, more and the top layers cost frames for a
+ * difference nobody sees.
+ */
+const BLUR_LAYERS = 5
+const BLUR_STEP = 24
+
+/** The same colour at zero alpha, so a fade ends in nothing rather than in black. */
+function clear(rgba: string): string {
+  return rgba.replace(/,\s*[\d.]+\)$/, ',0)')
+}
+
+/**
+ * What makes a floating header readable over the content it floats on.
+ *
+ * Blur alone does not do it — blurred text is still text-coloured, and a title
+ * over it competes with the smear. The wash on top is what actually separates
+ * them; the blur is what stops the wash looking like a flat bar laid over the
+ * screen. Both fade out downward, so the content is untouched a few pixels
+ * below the controls.
+ */
+function HeaderScrim() {
+  const theme = useTheme()
+  const wash = theme.color.headerWash
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      {Array.from({ length: BLUR_LAYERS }, (_, index) => (
+        <BlurView
+          key={index}
+          intensity={BLUR_STEP}
+          tint={theme.dark ? 'dark' : 'light'}
+          style={[styles.blurLayer, { height: `${100 - (index * 100) / BLUR_LAYERS}%` }]}
+        />
+      ))}
+      {/* Held, then dropped. A straight wash-to-nothing spreads the fade over
+          the whole header and leaves the top too thin to read a title on; this
+          keeps it solid behind the controls and spends the falloff in the last
+          third, where the content is coming back anyway. */}
+      <LinearGradient
+        colors={[theme.color.bg, wash, clear(wash)]}
+        locations={[0, 0.62, 1]}
+        style={StyleSheet.absoluteFill}
+      />
+    </View>
+  )
+}
+
+/**
+ * How much of the top of a screen the floating header covers.
+ *
+ * Screens add this to their scrolling content's `paddingTop`, so the first row
+ * starts below the controls while the content behind them still runs to the
+ * top of the page. Computed rather than measured: every part of it is a
+ * constant or an inset, and a measured height would arrive a frame after the
+ * list had already laid out against the wrong one.
+ *
+ * A subtitle is not counted. Only chat has one and only while the connection
+ * is unhappy, and reserving its height on every screen for good would be a
+ * permanent gap paid for a rare row.
+ */
+export function useHeaderInset(insetTop = true): number {
+  const theme = useTheme()
+  const insets = useSafeAreaInsets()
+
+  return (insetTop ? insets.top : 0) + theme.space.headerTop + TITLE_ROW + theme.space.headerBottom
+}
 
 /**
  * Where the title's left edge actually lands once the chevron's slot and its
  * overhang are accounted for. Derived rather than eyeballed so the subtitle
  * cannot drift out of alignment with the title it belongs to.
  */
-const TITLE_INDENT = SCREEN_PAD - (BACK_SLOT - BACK_GLYPH) / 2 + BACK_SLOT + ROW_GAP
+const TITLE_INDENT = SCREEN_PAD - (BACK_SLOT - BACK_RING) / 2 + BACK_SLOT + ROW_GAP
 
 /**
- * The Polyflow navbar treatment: translucent white over 12px blur, a 1px bottom
- * border, pinned above a scrolling body. Right-side actions are bare icons in a
- * 44px tap slot — no chip, no border (design §Design system).
+ * The agent switcher is not here: it says which agent the whole app is pointed
+ * at, which is a property of the app rather than of the screen under it, so it
+ * lives at the top of the sidebar with the rest of the app-wide navigation.
+ *
+ * The Polyflow navbar treatment: translucent wash over 12px blur, as a rounded
+ * card floating inside the screen's padding rather than a full-width bar ruled
+ * off with a bottom border. It answers the composer at the other end of the
+ * screen — the two are the app's floating chrome and share `radius.floating`.
+ *
+ * The blur stays. It is what lets a floating element sit over content without
+ * turning into a slab: a solid fill would be the composer's treatment applied
+ * to the one piece of chrome that content actually passes under.
+ *
+ * Right-side actions are bare icons in a 44px tap slot — no chip, no border
+ * (design §Design system).
  *
  * Laid out as three explicit rows — pill, title line, subtitle — rather than the
  * mock's construction of one bottom-aligned row with the pill absolutely
@@ -37,23 +132,15 @@ const TITLE_INDENT = SCREEN_PAD - (BACK_SLOT - BACK_GLYPH) / 2 + BACK_SLOT + ROW
 export function ScreenHeader({
   title,
   subtitle,
-  center,
   onBack,
   onMenu,
   titleVariant,
   right,
   insetTop = true
 }: {
-  title: string
+  /** Absent on a screen whose content already names itself. */
+  title?: string
   subtitle?: ReactNode
-  /**
-   * What sits in the pill row above the title.
-   *
-   * Left out, it is the agent selector — which is why every screen has one
-   * without asking. Pass `null` for a screen that must not offer a switch;
-   * pass a node to put something else there.
-   */
-  center?: ReactNode | null
   onBack?: () => void
   /**
    * Opens the sidebar. Top-level screens pass this where a sub-screen passes
@@ -90,38 +177,32 @@ export function ScreenHeader({
   const leftControl = onBack ? (
     // The design draws a 34px slot; the shortfall against the 44px minimum is
     // made up in hitSlop rather than by moving the chevron.
-    <IconButton name="chevron-left" accessibilityLabel="Back" slot={BACK_SLOT} edge="left" onPress={onBack} />
+    <IconButton name="chevron-left" accessibilityLabel="Back" slot={BACK_SLOT} edge="left" outlined onPress={onBack} />
   ) : onMenu ? (
-    <IconButton name="bars" accessibilityLabel="Open navigation" slot={BACK_SLOT} edge="left" onPress={onMenu} />
+    <IconButton name="bars" accessibilityLabel="Open navigation" slot={BACK_SLOT} edge="left" outlined onPress={onMenu} />
   ) : null
 
   return (
-    <BlurView
-      intensity={12}
-      tint={theme.dark ? 'dark' : 'light'}
+    // Bare and floating: no fill, no blur, no border, and pinned over the
+    // screen rather than stacked above it — the content runs to the top of the
+    // page and scrolls under these controls. `box-none` so only the controls
+    // themselves take touches; the empty width between them belongs to
+    // whatever has scrolled beneath.
+    <View
+      pointerEvents="box-none"
       style={[
-        styles.wrap,
+        styles.frame,
         {
-          // The translucent wash over the blur has to follow the theme; a fixed
-          // white left every header a bright band across a dark screen.
-          backgroundColor: theme.color.headerWash,
-          // Both pads sit on the wrap, not inside a row, so the header actually
-          // grows rather than shuffling its contents within a fixed height.
           paddingTop: (insetTop ? insets.top : 0) + theme.space.headerTop,
-          paddingBottom: theme.space.headerBottom,
-          borderBottomColor: theme.color.border
+          // Height for the fade to happen in. Without it the gradient has only
+          // the controls' own row to work with and has to fall off inside the
+          // glyphs; the padding is what lets it finish below them. Counted by
+          // `useHeaderInset`, so the clearance screens leave matches it.
+          paddingBottom: theme.space.headerBottom
         }
       ]}
     >
-      {/* `undefined` means "not specified" and gets the selector; `null` means
-          "deliberately nothing", which is how a screen opts out. */}
-      {center === undefined ? (
-        <View style={styles.pillRow}>
-          <AgentSelector />
-        </View>
-      ) : center ? (
-        <View style={styles.pillRow}>{center}</View>
-      ) : null}
+      <HeaderScrim />
 
       {/* Everything on this row shares one vertical centre — that is the whole
           point of it being its own row. */}
@@ -132,13 +213,21 @@ export function ScreenHeader({
             and `TITLE_INDENT` is derived from exactly that. */}
         {centred ? <View style={styles.side}>{leftControl}</View> : leftControl}
 
-        <Text
-          variant={(titleVariant ?? (onBack ? 'sub' : 'screen')) === 'sub' ? 'subTitle' : 'screenTitle'}
-          numberOfLines={1}
-          style={[styles.title, centred ? styles.titleCentred : null]}
-        >
-          {title}
-        </Text>
+        {/* Chat has none: the session's name is already the thing you tapped
+            to get here, and repeating it over the transcript spent the widest
+            line on the screen restating what you just read. A spacer keeps the
+            action on the trailing edge without it. */}
+        {title ? (
+          <Text
+            variant={(titleVariant ?? (onBack ? 'sub' : 'screen')) === 'sub' ? 'subTitle' : 'screenTitle'}
+            numberOfLines={1}
+            style={[styles.title, centred ? styles.titleCentred : null]}
+          >
+            {title}
+          </Text>
+        ) : (
+          <View style={styles.title} />
+        )}
 
         {centred ? <View style={[styles.side, styles.sideRight]}>{right}</View> : right}
       </View>
@@ -155,15 +244,27 @@ export function ScreenHeader({
           {subtitle}
         </View>
       ) : null}
-    </BlurView>
+    </View>
   )
 }
 
 const styles = StyleSheet.create({
-  wrap: {
-    borderBottomWidth: StyleSheet.hairlineWidth
+  frame: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    // Above the screen's own content, below anything modal.
+    zIndex: 10,
+    paddingHorizontal: CARD_INSET,
+    // The scrim is drawn edge to edge behind the padding, so it must not be
+    // clipped to the content box.
+    overflow: 'visible'
   },
-  pillRow: { alignItems: 'center', paddingBottom: 6 },
+  blurLayer: { position: 'absolute', top: 0, left: 0, right: 0 },
+  // Separates two siblings now, rather than padding inside the card — so it
+  // wants more than the 6 it had when it was one row stacked on another.
+  pillRow: { alignItems: 'center', paddingBottom: 14 },
   titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -171,7 +272,7 @@ const styles = StyleSheet.create({
     gap: ROW_GAP,
     // Tall enough for the 44px action slot, so a header with an action is not
     // taller than one without.
-    minHeight: 44
+    minHeight: TITLE_ROW
   },
   title: { flex: 1, minWidth: 0 },
   titleCentred: { textAlign: 'center' },

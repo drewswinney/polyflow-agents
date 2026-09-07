@@ -15,7 +15,7 @@ import { useBackend } from '@/state/ConnectionProvider'
 import { useAgentScopedRoute } from '@/state/agent-scope'
 import { useChatInbox } from '@/state/chat-inbox'
 import { Icon } from '@/ui/components/Icon'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { useTheme } from '@/ui/ThemeProvider'
 
@@ -35,6 +35,7 @@ import { useTheme } from '@/ui/ThemeProvider'
 export default function VoiceScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  const headerInset = useHeaderInset()
   const { id } = useLocalSearchParams<{ id: string }>()
   const backend = useBackend()
   const submit = useChatInbox(state => state.submit)
@@ -126,7 +127,7 @@ export default function VoiceScreen() {
         subtitle={<Text variant="monoSmall">push to talk · not realtime</Text>}
       />
 
-      <View style={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
+      <View style={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}>
         <View style={styles.stage}>
           {/* A static aura, layered circles rather than a radial gradient —
               React Native has none (design §Platform notes). */}

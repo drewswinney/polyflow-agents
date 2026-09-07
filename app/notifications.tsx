@@ -9,7 +9,7 @@ import { useNotificationPrefs } from '@/state/notification-prefs'
 import { usePushRegistration, type PushStatus } from '@/state/push-sync'
 import { Card, Divider } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { Toggle } from '@/ui/components/Toggle'
 import { useTheme } from '@/ui/ThemeProvider'
@@ -28,6 +28,7 @@ import { useTheme } from '@/ui/ThemeProvider'
 export default function NotificationsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  const headerInset = useHeaderInset()
   const prefs = useNotificationPrefs()
   const agent = useSelectedAgent()
   const backend = useBackend()
@@ -41,7 +42,7 @@ export default function NotificationsScreen() {
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
       <ScreenHeader title="Notifications" onBack={() => router.back()} />
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}>
         <Card>
           <PrefRow
             label="Approval requests"

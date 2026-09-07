@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useThemePrefs } from '@/state/theme-prefs'
 import { Card, Divider } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { useTheme } from '@/ui/ThemeProvider'
 
@@ -21,6 +21,7 @@ const THEME_OPTIONS: { value: ThemeMode; label: string; icon: string; descriptio
 export default function ThemeSettingsScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  const headerInset = useHeaderInset()
   const mode = useThemePrefs(state => state.mode)
   const setMode = useThemePrefs(state => state.set)
   const [pressed, setPressed] = useState<string | null>(null)
@@ -33,7 +34,7 @@ export default function ThemeSettingsScreen() {
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
       <ScreenHeader title="Theme" onBack={() => router.back()} />
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}>
         <Card>
           {THEME_OPTIONS.map((option, index) => (
             <View key={option.value}>
