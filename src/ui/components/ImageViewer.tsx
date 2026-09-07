@@ -15,6 +15,13 @@ import { Text } from './Text'
 const VIEWER_BG = '#000'
 const VIEWER_INK = '#fff'
 const VIEWER_INK_DIM = 'rgba(255,255,255,0.7)'
+/**
+ * Behind the close button, the counter and the caption. The picture under
+ * them is as likely to be a white screenshot as a dark photo, and white ink
+ * straight onto a white screenshot is invisible — so every piece of chrome
+ * sits on its own scrim, which no picture can wash out.
+ */
+const VIEWER_SCRIM = 'rgba(0,0,0,0.45)'
 
 /**
  * A message's pictures, full screen, one per page.
@@ -69,14 +76,22 @@ export function ImageViewer({
         />
 
         <View style={[styles.chrome, { top: insets.top + 8 }]} pointerEvents="box-none">
-          <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={onClose} hitSlop={12} style={styles.close}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Close"
+            onPress={onClose}
+            hitSlop={12}
+            style={[styles.close, { backgroundColor: VIEWER_SCRIM }]}
+          >
             <Icon name="xmark" size={18} color={VIEWER_INK} />
           </Pressable>
 
           {images.length > 1 ? (
-            <Text variant="rowLabelStrong" color={VIEWER_INK}>
-              {`${current + 1} / ${images.length}`}
-            </Text>
+            <View style={[styles.pill, { backgroundColor: VIEWER_SCRIM }]}>
+              <Text variant="rowLabelStrong" color={VIEWER_INK}>
+                {`${current + 1} / ${images.length}`}
+              </Text>
+            </View>
           ) : null}
 
           {/* Balances the close button so the counter sits centred. */}
@@ -84,9 +99,11 @@ export function ImageViewer({
         </View>
 
         <View style={[styles.caption, { bottom: insets.bottom + 16 }]} pointerEvents="none">
-          <Text variant="secondary" color={VIEWER_INK_DIM} numberOfLines={1}>
-            {images[current]?.name ?? ''}
-          </Text>
+          <View style={[styles.pill, { backgroundColor: VIEWER_SCRIM }]}>
+            <Text variant="secondary" color={VIEWER_INK_DIM} numberOfLines={1}>
+              {images[current]?.name ?? ''}
+            </Text>
+          </View>
         </View>
       </View>
     </Modal>
@@ -106,5 +123,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12
   },
   close: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
+  pill: { height: 32, paddingHorizontal: 12, borderRadius: 16, justifyContent: 'center', maxWidth: '80%' },
   caption: { position: 'absolute', left: 24, right: 24, alignItems: 'center' }
 })
