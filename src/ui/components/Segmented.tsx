@@ -14,12 +14,22 @@ export function Segmented<T extends string>({
   options,
   value,
   onChange,
-  label
+  label,
+  compact = false
 }: {
   options: Array<{ value: T; label: string }>
   value: T
   onChange: (next: T) => void
   label: string
+  /**
+   * A shorter track, for a control pinned above scrolling content rather than
+   * sitting in a settings list.
+   *
+   * It costs height that the 44px touch floor would otherwise claim — the
+   * segments are full-width, so what they lose vertically they keep
+   * horizontally, and the target stays comfortably larger than a glyph.
+   */
+  compact?: boolean
 }) {
   const theme = useTheme()
 
@@ -40,6 +50,7 @@ export function Segmented<T extends string>({
             onPress={() => onChange(option.value)}
             style={[
               styles.segment,
+              compact ? styles.segmentCompact : null,
               selected && {
                 backgroundColor: theme.color.surface,
                 borderColor: theme.color.border,
@@ -61,5 +72,6 @@ export function Segmented<T extends string>({
 const styles = StyleSheet.create({
   track: { flexDirection: 'row', padding: 3, gap: 3 },
   segment: { flex: 1, height: 38, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  segmentCompact: { height: 30 },
   label: { fontSize: 13.5 }
 })

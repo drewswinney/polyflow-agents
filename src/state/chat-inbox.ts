@@ -20,26 +20,32 @@
 import { create } from 'zustand'
 
 import type { SessionId } from '@/domain'
+import type { PickedImage } from '@/platform/image-attachments'
 
 interface PendingMessage {
   sessionId: SessionId
   text: string
+  /** Staged on the producing screen; sent with the message that creates the
+   *  session, so a picture attached on home is not lost on the way to chat. */
+  images: PickedImage[]
 }
 
 interface ChatInboxState {
   pending: PendingMessage | null
-  submit: (sessionId: SessionId, text: string) => void
+  submit: (sessionId: SessionId, text: string, images?: PickedImage[]) => void
   /** The message, but only if it was addressed to this session. */
-  take: (sessionId: SessionId) => string | null
+  take: (sessionId: SessionId) => { text: string; images: PickedImage[] } | null
 }
 
 export const useChatInbox = create<ChatInboxState>((set, get) => ({
   pending: null,
 
-  submit(sessionId, text) {
+  submit(sessionId, text, images = []) {
     const trimmed = text.trim()
 
-    if (trimmed) set({ pending: { sessionId, text: trimmed } })
+    // A picture with no caption is a message. Gating the handover on text
+    // alone dropped one composed on home before its chat existed.
+    if (trimmed || images.length > 0) set({ pending: { sessionId, text: trimmed, images } })
   },
 
   take(sessionId) {
@@ -49,6 +55,6 @@ export const useChatInbox = create<ChatInboxState>((set, get) => ({
 
     set({ pending: null })
 
-    return pending.text
+    return { text: pending.text, images: pending.images }
   }
 }))

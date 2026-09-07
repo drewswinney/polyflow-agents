@@ -1,13 +1,13 @@
 import { FlashList, type FlashListRef } from '@shopify/flash-list'
 import { router, useLocalSearchParams } from 'expo-router'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { LayoutChangeEvent, NativeScrollEvent, NativeSyntheticEvent } from 'react-native'
 import { ActivityIndicator, Keyboard, Platform, StyleSheet, View } from 'react-native'
 
-import type { TranscriptEntry } from '@/domain'
 import { useBackend, useConnectionState } from '@/state/ConnectionProvider'
 import { useAgentScopedRoute } from '@/state/agent-scope'
 import { useSelectedAgent, useSelectedServer } from '@/state/agents'
+import { useSheet } from '@/state/sheet'
 import { useSidebar } from '@/state/sidebar'
 import { useSessionStream } from '@/state/session-stream'
 import { useIsStreaming } from '@/state/stream-tail'
@@ -17,13 +17,14 @@ import { ApprovalCard, ApprovalNudge } from '@/ui/components/ApprovalCard'
 import { ClarifyCard } from '@/ui/components/ClarifyCard'
 import { Composer } from '@/ui/components/Composer'
 import { IconButton } from '@/ui/components/IconButton'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { ScrollToBottomButton } from '@/ui/components/ScrollToBottomButton'
 import { StreamingTail } from '@/ui/components/StreamingTail'
 import { Text } from '@/ui/components/Text'
 import { KanbanMentionProvider } from '@/ui/components/KanbanMentions'
 import { TranscriptEntryView } from '@/ui/components/TranscriptEntryView'
-import { compactTokens, usd } from '@/ui/format'
+import { WorkSection } from '@/ui/components/WorkSection'
+import { groupTranscript, type TranscriptRow } from '@/ui/transcript-rows'
 import { KeyboardInset } from '@/ui/keyboard'
 import { useTheme } from '@/ui/ThemeProvider'
 
@@ -47,7 +48,9 @@ function ChatScreen() {
   const backend = useBackend()
   const state = useConnectionState()
   const openSidebar = useSidebar(store => store.show)
-  const listRef = useRef<FlashListRef<TranscriptEntry>>(null)
+  const openSheet = useSheet(store => store.open)
+  const headerInset = useHeaderInset()
+  const listRef = useRef<FlashListRef<TranscriptRow>>(null)
 
   /**
    * Whether the agent moved on under this session.
@@ -253,45 +256,70 @@ function ChatScreen() {
   useEffect(() => {
     if (pendingMessage?.sessionId !== id || streamLoading) return
 
-    const text = takeMessage(id)
+    const handed = takeMessage(id)
 
-    if (text) streamSend(text)
+    if (handed) streamSend(handed.text, handed.images)
   }, [pendingMessage, takeMessage, streamLoading, streamSend, id])
 
+  const rows = useMemo(() => groupTranscript(stream.entries), [stream.entries])
+
+  /**
+   * Which working-out sections are open, by row id.
+   *
+   * Held here rather than in the section: FlashList recycles cells, so state
+   * kept inside one belongs to whichever row last used that view.
+   */
+  const [openWork, setOpenWork] = useState<ReadonlySet<string>>(() => new Set())
+
+  const toggleWork = useCallback((rowId: string) => {
+    setOpenWork(open => {
+      const next = new Set(open)
+
+      if (!next.delete(rowId)) next.add(rowId)
+
+      return next
+    })
+  }, [])
+
+  // Only the last row can be the one the agent is still inside, and only it is
+  // handed the tail — so a token flush repaints that header alone.
+  const liveRowId = rows[rows.length - 1]?.id
+
   const renderItem = useCallback(
-    ({ item }: { item: TranscriptEntry }) => (
+    ({ item }: { item: TranscriptRow }) => (
       <View style={styles.entry}>
-        <TranscriptEntryView entry={item} />
+        {item.kind === 'work' ? (
+          <WorkSection
+            entries={item.entries}
+            open={openWork.has(item.id)}
+            onToggle={() => toggleWork(item.id)}
+            {...(item.id === liveRowId ? { tail: stream.tail } : {})}
+          />
+        ) : (
+          <TranscriptEntryView entry={item.entry} />
+        )}
       </View>
     ),
-    []
+    [openWork, toggleWork, liveRowId, stream.tail]
   )
-
-  const meta = [
-    stream.transcript?.model,
-    stream.usage?.contextTokens ? `${compactTokens(stream.usage.contextTokens)} ctx` : null,
-    stream.usage?.costUsd !== undefined ? usd(stream.usage.costUsd) : null
-  ]
-    .filter(Boolean)
-    .join(' · ')
 
   return (
     <KanbanMentionProvider>
       <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
         <ScreenHeader
-          title={stream.transcript?.title ?? 'Session'}
+          // No title: the session's name is what you tapped to get here, and
+          // the transcript under it says what it is. The subtitle is silent on
+          // a healthy connection for the same reason — it exists to report
+          // trouble, not to fill the row.
           onMenu={openSidebar}
-          titleVariant="sub"
           subtitle={
-            state === 'open' ? (
-              meta ? <Text variant="monoSmall">{meta}</Text> : null
-            ) : (
+            state === 'open' ? null : (
               <Text variant="monoSmall" color={theme.color.warning700}>
                 {stream.approval || stream.clarify ? 'blocked on you' : 'reconnecting…'}
               </Text>
             )
           }
-          right={<IconButton name="ellipsis" accessibilityLabel="Session options" edge="right" />}
+          right={<IconButton name="ellipsis" accessibilityLabel="Session options" edge="right" outlined />}
         />
 
         <KeyboardInset style={styles.flex}>
@@ -311,9 +339,12 @@ function ChatScreen() {
                   the last one clear of the pill. */}
               <FlashList
                 ref={listRef}
-                data={stream.entries}
-                keyExtractor={entry => entry.id}
+                data={rows}
+                keyExtractor={row => row.id}
                 renderItem={renderItem}
+                // Two shapes in one list; without this FlashList recycles a
+                // section's view into a message's and back on every scroll.
+                getItemType={row => row.kind}
                 // Always flexed so it fills the stage from first mount; only
                 // opacity is gated on `placed` (hidden until onLoad +
                 // scrollToEnd land it). A non-flexed list before placed would
@@ -322,7 +353,7 @@ function ChatScreen() {
                 // spread StyleSheet entries, they are numeric registry IDs,
                 // and `{...aNumericId}` is `{}`.)
                 style={placed ? styles.flex : styles.unplaced}
-                contentContainerStyle={[styles.list, { paddingBottom: composerHeight }]}
+                contentContainerStyle={[styles.list, { paddingTop: headerInset, paddingBottom: composerHeight }]}
                 // Only when there is something to say. An always-mounted header
                 // that grows and shrinks with the connection is a height change at
                 // the top of the list, which every scroll position below it then
@@ -417,6 +448,20 @@ function ChatScreen() {
                     touch shield either. */}
                 <View onLayout={onComposerLayout} pointerEvents="box-none">
                   <Composer
+                    // The chip is absent until the session reports a model —
+                    // an empty one names nothing — and inert against a backend
+                    // that cannot re-point a single session (§4.1).
+                    model={stream.model}
+                    onPressModel={
+                      backend?.capabilities.settings.sessionModel
+                        ? () =>
+                            openSheet({
+                              kind: 'model',
+                              sessionId: id,
+                              currentModel: stream.model
+                            })
+                        : undefined
+                    }
                     streaming={running}
                     offline={state !== 'open'}
                     queued={stream.outbox.length}
@@ -447,7 +492,8 @@ const styles = StyleSheet.create({
   unplaced: { flex: 1, opacity: 0 },
   list: { paddingHorizontal: 16, paddingVertical: 16 },
   header: { gap: 10, paddingBottom: 6 },
-  entry: { paddingVertical: 7 },
+  // Every transcript row's gutter, so the gap between two rows is twice this.
+  entry: { paddingVertical: 9 },
   approval: { paddingTop: 7 },
   scrollButtonContainer: {
     position: 'absolute',

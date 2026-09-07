@@ -1,7 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import {
   ActivityIndicator,
-  Modal,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -20,9 +19,10 @@ import { useSidebar } from '@/state/sidebar'
 import { withAgent } from '@/ui/components/AgentGate'
 import { Card } from '@/ui/components/Card'
 import { KanbanCardDetail } from '@/ui/components/KanbanCardDetail'
+import { Sheet } from '@/ui/components/Sheet'
 import { KanbanCardTile } from '@/ui/components/KanbanCardTile'
 import { IconButton } from '@/ui/components/IconButton'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { kanbanErrorText, statusTone } from '@/ui/kanban'
 import { useTheme } from '@/ui/ThemeProvider'
@@ -33,6 +33,7 @@ const BOARD_INSET = 16
 
 function BoardsScreen() {
   const theme = useTheme()
+  const headerInset = useHeaderInset()
   const insets = useSafeAreaInsets()
   const { width } = useWindowDimensions()
   const agent = useSelectedAgent()
@@ -69,7 +70,7 @@ function BoardsScreen() {
         onMenu={openSidebar}
         right={
           supportsBoards ? (
-            <IconButton name="plus" slot={38} size={17} accessibilityLabel="New card" onPress={() => setCreating(true)} />
+            <IconButton name="plus" size={17} accessibilityLabel="New card" outlined onPress={() => setCreating(true)} />
           ) : null
         }
       />
@@ -79,7 +80,7 @@ function BoardsScreen() {
           <MessageCard title="Boards unavailable" body="This agent does not expose a kanban board endpoint." />
         </MessagePane>
       ) : board.data ? (
-        <View style={styles.board}>
+        <View style={[styles.board, { paddingTop: headerInset }]}>
           <View style={styles.hero}>
             <Text variant="secondary" style={styles.source} numberOfLines={1}>
               {board.data.source}
@@ -238,21 +239,15 @@ function CreateCardSheet({
   onSubmit: (title: string, body: string) => void
   onDismiss: () => void
 }) {
-  const insets = useSafeAreaInsets()
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')
 
   return (
-    <Modal transparent visible animationType="fade" onRequestClose={onDismiss}>
-      <View
-        style={[
-          styles.sheetRoot,
-          { backgroundColor: theme.color.scrim, paddingTop: insets.top + 28, paddingBottom: insets.bottom + 28 }
-        ]}
-      >
-        <Pressable style={StyleSheet.absoluteFill} onPress={onDismiss} accessibilityLabel="Dismiss new card" />
-        <Card style={styles.sheetCard}>
-          <Text variant="sheetTitle">New card</Text>
+    // The sheet draws the heading and owns dismissal — the scrim, the centred
+    // card and the "New card" title above all belonged to the dialog this used
+    // to be.
+    <Sheet visible title="New card" onDismiss={onDismiss}>
+      <View style={styles.sheetBody}>
           <Text variant="secondary" style={styles.sheetSubtitle}>
             Lands in Backlog. The dispatcher picks it up from there.
           </Text>
@@ -331,9 +326,8 @@ function CreateCardSheet({
               </Text>
             </Pressable>
           </View>
-        </Card>
       </View>
-    </Modal>
+    </Sheet>
   )
 }
 
@@ -372,8 +366,7 @@ const styles = StyleSheet.create({
     paddingVertical: 14
   },
   messageCard: { padding: 14, gap: 4 },
-  sheetRoot: { flex: 1, justifyContent: 'center', paddingHorizontal: 16 },
-  sheetCard: { padding: 16, gap: 12, maxHeight: '82%' },
+  sheetBody: { paddingHorizontal: 16, paddingBottom: 8, gap: 12 },
   sheetSubtitle: { marginTop: -6 },
   sheetInput: {
     borderWidth: StyleSheet.hairlineWidth,

@@ -7,12 +7,10 @@ import type { ModelOption } from '@/domain'
 import { useBackend } from '@/state/ConnectionProvider'
 import { useSelectedAgent } from '@/state/agents'
 import { withAgent } from '@/ui/components/AgentGate'
-import { Card, Divider } from '@/ui/components/Card'
-import { Icon } from '@/ui/components/Icon'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ModelList } from '@/ui/components/ModelList'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { useTheme } from '@/ui/ThemeProvider'
-import { Pressable } from 'react-native'
 
 /**
  * Model & behavior (§7.11).
@@ -26,6 +24,7 @@ import { Pressable } from 'react-native'
 function ModelScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
+  const headerInset = useHeaderInset()
   const agent = useSelectedAgent()
   const backend = useBackend()
   const queryClient = useQueryClient()
@@ -45,13 +44,11 @@ function ModelScreen() {
     onSettled: () => queryClient.invalidateQueries({ queryKey: modelsKey })
   })
 
-  const byProvider = groupByProvider(models.data ?? [])
-
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
       <ScreenHeader title="Model & behavior" onBack={() => router.back()} />
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}>
         {models.isLoading ? (
           <Text variant="secondary">Loading models…</Text>
         ) : models.error ? (
@@ -59,52 +56,13 @@ function ModelScreen() {
             {String((models.error as Error).message)}
           </Text>
         ) : (
-          byProvider.map(group => (
-            <View key={group.provider} style={styles.group}>
-              <Text variant="sectionHeader" style={styles.groupLabel}>
-                {group.provider}
-              </Text>
-              <Card>
-                {group.models.map((option, index) => (
-                  <View key={`${option.provider}/${option.id}`}>
-                    {index > 0 ? <Divider /> : null}
-                    <Pressable
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected: option.selected }}
-                      disabled={choose.isPending}
-                      onPress={() => choose.mutate(option)}
-                      style={[styles.row, option.selected && { backgroundColor: theme.color.secondaryTint }]}
-                    >
-                      <Icon
-                        name={option.selected ? 'circle-check' : 'circle'}
-                        size={16}
-                        color={option.selected ? theme.color.secondary : theme.color.gray400}
-                      />
-                      <Text variant={option.selected ? 'rowLabelStrong' : 'rowLabel'} style={styles.rowLabel}>
-                        {option.id}
-                      </Text>
-                    </Pressable>
-                  </View>
-                ))}
-              </Card>
-            </View>
-          ))
+          // No `isSelected`: this screen sets the profile default, which is
+          // exactly what the host's own `selected` flag reports.
+          <ModelList models={models.data ?? []} busy={choose.isPending} onChoose={option => choose.mutate(option)} />
         )}
       </ScrollView>
     </View>
   )
-}
-
-function groupByProvider(models: ModelOption[]): Array<{ provider: string; models: ModelOption[] }> {
-  const groups = new Map<string, ModelOption[]>()
-
-  for (const model of models) {
-    const bucket = groups.get(model.provider) ?? []
-    bucket.push(model)
-    groups.set(model.provider, bucket)
-  }
-
-  return [...groups].map(([provider, entries]) => ({ provider, models: entries }))
 }
 
 const styles = StyleSheet.create({

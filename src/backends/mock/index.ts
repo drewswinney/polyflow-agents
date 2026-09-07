@@ -24,6 +24,7 @@ import {
   type KanbanCardUpdate,
   type McpServerStatus,
   type ModelOption,
+  type ModelSwitch,
   type NewSessionOptions,
   type Observable,
   type PermissionOutcome,
@@ -39,7 +40,7 @@ import {
 
 export const MOCK_CAPABILITIES: Capabilities = {
   sessions: { search: true, rename: true, pin: true },
-  settings: { schemaDriven: true, model: true, providers: false },
+  settings: { schemaDriven: true, model: true, providers: false, sessionModel: true },
   extras: { cron: true, skills: true, mcp: true, boards: true },
   approvals: { requests: true, policy: true },
   logs: { events: true },
@@ -412,7 +413,7 @@ export class MockBackend implements AgentBackend {
           id: 'backlog',
           title: 'Backlog',
           cards: [
-            { id: 'settings-screen', title: 'Settings screen polish', description: 'Tighten grouped rows and empty states', status: 'backlog', statusLabel: 'Backlog', checked: false, risk: 'low' }
+            { id: 'settings-screen', title: 'Settings screen polish', description: 'Tighten grouped rows and empty states', status: 'backlog', statusLabel: 'Backlog', checked: false, risk: 'low', priority: 5 }
           ]
         },
         {
@@ -534,6 +535,12 @@ export class MockBackend implements AgentBackend {
     ]
   }
 
+  async getModel(): Promise<string | null> {
+    await tick(80)
+
+    return 'sonnet-4.5'
+  }
+
   async listModels(): Promise<ModelOption[]> {
     await tick(90)
 
@@ -542,6 +549,15 @@ export class MockBackend implements AgentBackend {
 
   async setModel(option: ModelOption): Promise<void> {
     this.models = this.models.map(model => ({ ...model, selected: model.id === option.id }))
+  }
+
+  async setSessionModel(_id: SessionId, option: ModelOption): Promise<ModelSwitch> {
+    await tick(120)
+
+    // Never deferred: the scripted turn is the only thing that streams here,
+    // and a mock that reported a queued switch would be inventing a state the
+    // screen could not then resolve.
+    return { model: option.id, deferred: false, warning: '' }
   }
 
   private approvalPolicy: ApprovalPolicy = 'destructive'

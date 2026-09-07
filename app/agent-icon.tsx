@@ -7,7 +7,7 @@ import { useAgents, useSelectedAgentOrNull } from '@/state/agents'
 import type { AgentIconName } from '@/domain'
 import { Card } from '@/ui/components/Card'
 import { AGENT_ICONS, AgentGlyph } from '@/ui/components/Icon'
-import { ScreenHeader } from '@/ui/components/ScreenHeader'
+import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { useGradient, useTheme } from '@/ui/ThemeProvider'
 
@@ -26,6 +26,7 @@ export default function AgentIconScreen() {
   const theme = useTheme()
   const gradient = useGradient()
   const insets = useSafeAreaInsets()
+  const headerInset = useHeaderInset()
   const agent = useSelectedAgentOrNull()
   const setAgentIcon = useAgents(state => state.setAgentIcon)
 
@@ -51,7 +52,7 @@ export default function AgentIconScreen() {
         onBack={() => router.back()}
       />
 
-      <ScrollView contentContainerStyle={[styles.body, { paddingBottom: insets.bottom + 24 }]}>
+      <ScrollView contentContainerStyle={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}>
         <Card style={styles.grid}>
           {AGENT_ICONS.map(icon => (
             <IconTile

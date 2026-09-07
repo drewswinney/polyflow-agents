@@ -6,12 +6,14 @@ import { Image, Pressable, StyleSheet, View } from 'react-native'
 import type { MessageImage, TranscriptEntry } from '@/domain'
 
 import { clockTime, duration } from '../format'
+import { thinkingSynopsis } from '../transcript-rows'
 import { Markdown } from '../markdown/Markdown'
 import { useGradient, useTheme } from '../ThemeProvider'
 import { Icon } from './Icon'
 import { KanbanUnfurls } from './KanbanMentions'
 import { Text } from './Text'
-import { ToolCard } from './ToolCard'
+import { ToolRow } from './ToolRow'
+import { WorkRow } from './WorkRow'
 
 /**
  * One settled transcript entry. Memoised: while text streams into the tail
@@ -28,22 +30,22 @@ export const TranscriptEntryView = memo(function TranscriptEntryView({ entry }: 
     case 'thinking':
       return <ThinkingLink text={entry.text} durationMs={entry.durationMs} />
     case 'tool':
-      return <ToolCard call={entry.call} />
+      return <ToolRow call={entry.call} />
     case 'stream_cut':
       return <StreamCut at={entry.at} />
   }
 })
 
+/**
+ * A message you sent.
+ *
+ * No copy button under it, unlike the agent's. You wrote this one — the reason
+ * to copy a message is to take the agent's answer somewhere else, and the text
+ * is selectable either way if you want a piece of your own back.
+ */
 function UserBubble({ text, images }: { text: string; images?: MessageImage[] }) {
   const theme = useTheme()
   const gradient = useGradient()
-  const [copied, setCopied] = useState(false)
-
-  const handleCopy = async () => {
-    await Clipboard.setStringAsync(text)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
-  }
 
   return (
     <View style={styles.userRow}>
@@ -69,19 +71,6 @@ function UserBubble({ text, images }: { text: string; images?: MessageImage[] })
               {text}
             </Text>
           </LinearGradient>
-        ) : null}
-        {text ? (
-          <View style={styles.buttonBar}>
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={copied ? 'Copied' : 'Copy message'}
-              onPress={handleCopy}
-              hitSlop={COPY_HIT_SLOP}
-              style={styles.copyButton}
-            >
-              <Icon name={copied ? 'check' : 'copy'} size={12} color={theme.color.gray400} />
-            </Pressable>
-          </View>
         ) : null}
       </View>
     </View>
@@ -145,7 +134,7 @@ function AgentText({ text, role }: { text: string; role: 'agent' | 'system' }) {
             hitSlop={COPY_HIT_SLOP}
             style={styles.copyButton}
           >
-            <Icon name={copied ? 'check' : 'copy'} size={12} color={theme.color.secondary} />
+            <Icon name={copied ? 'check' : 'copy'} size={12} color={theme.color.muted} />
           </Pressable>
         </View>
       </View>
@@ -168,7 +157,7 @@ function AgentText({ text, role }: { text: string; role: 'agent' | 'system' }) {
           hitSlop={COPY_HIT_SLOP}
           style={styles.copyButton}
         >
-          <Icon name={copied ? 'check' : 'copy'} size={12} color={theme.color.secondary} />
+          <Icon name={copied ? 'check' : 'copy'} size={12} color={theme.color.muted} />
         </Pressable>
       </View>
     </View>
@@ -176,49 +165,32 @@ function AgentText({ text, role }: { text: string; role: 'agent' | 'system' }) {
 }
 
 /**
- * Font size of the thinking link, which the brain glyph matches so the two read
- * as one line rather than an icon with a caption. Tracks the `secondary` text
- * variant — change them together.
- */
-const THINKING_TEXT_SIZE = 13
-
-/**
- * Thinking is a link, not a control.
+ * A thought, as a line in the work section's list.
  *
- * It is an aside about the turn, not something to act on, and a filled pill gave
- * it the visual weight of the tool cards beside it — which *are* actions with
- * consequences on a host. Collapsed by default: a phone has no room to hold them
- * open, and the reasoning is rarely what you came for.
+ * It says what the thought was *about* rather than how long it took. "Thought
+ * for a moment" is the same sentence under every thought in the transcript, so
+ * a column of them told you only that thinking had happened — the synopsis is
+ * the part you would have opened the row to find. The duration keeps its place
+ * on the right, where every other row reports its outcome.
  */
 function ThinkingLink({ text, durationMs }: { text: string; durationMs?: number }) {
   const theme = useTheme()
-  const [open, setOpen] = useState(false)
 
-  const label = open ? 'Hide thinking' : durationMs ? `Thought for ${duration(durationMs)}` : 'Thought for a moment'
+  const synopsis = thinkingSynopsis(text)
 
   return (
-    <View style={styles.thinking}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        accessibilityLabel={label}
-        onPress={() => setOpen(value => !value)}
-        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-        style={({ pressed }) => [styles.thinkingLink, { opacity: pressed ? 0.6 : 1 }]}
-      >
-        <Icon name="brain" size={THINKING_TEXT_SIZE} color={theme.color.secondary} />
-        <Text variant="secondary" color={theme.color.secondary}>
-          {label}
-        </Text>
-        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={9} color={theme.color.secondary} />
-      </Pressable>
-
-      {open ? (
-        <Text variant="secondary" style={styles.thinkingBody}>
+    <WorkRow
+      glyph={<Icon name="brain" size={12} color={theme.color.secondary} />}
+      label={synopsis}
+      ink={theme.color.secondary}
+      {...(durationMs === undefined ? {} : { meta: duration(durationMs) })}
+      accessibilityLabel={`Thinking. ${synopsis}`}
+      body={
+        <Text variant="secondary" selectable>
           {text}
         </Text>
-      ) : null}
-    </View>
+      }
+    />
   )
 }
 
@@ -295,12 +267,13 @@ const styles = StyleSheet.create({
     paddingLeft: 4
   },
   copyButton: {
-    opacity: 0.4,
+    // No opacity. It used to carry 0.4, which put the icon at roughly 2:1
+    // against the background — under the 3:1 a control needs, and far fainter
+    // than the collapsed-steps header it is supposed to match. The receding is
+    // done by `muted` itself now; dimming a colour already chosen to be quiet
+    // only took it out of reach.
     padding: 2
   },
-  thinking: { alignItems: 'flex-start' },
-  thinkingLink: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 2 },
-  thinkingBody: { marginTop: 8 },
   cutRow: { alignItems: 'center' },
   cutPill: { borderWidth: 1, borderStyle: 'dashed', paddingHorizontal: 12, paddingVertical: 6 }
 })

@@ -1,7 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
 import {
-  Animated,
-  Modal,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,6 +11,7 @@ import type { SessionSummary } from '@/domain'
 
 import { relativeTime } from '../format'
 import { useTheme } from '../ThemeProvider'
+import { AgentSelector } from './AgentSelector'
 import { Divider } from './Card'
 import { Icon } from './Icon'
 import { Text } from './Text'
@@ -23,7 +21,19 @@ export type SidebarPath = '/' | '/sessions' | '/boards' | '/settings'
 
 const MAX_WIDTH = 320
 const WIDTH_FRACTION = 0.84
-const SLIDE_MS = 190
+
+/**
+ * How wide the drawer is, and therefore how far the page slides off it.
+ *
+ * Shared with the shell that does the sliding: the page has to come to rest on
+ * the panel's edge, so one of them owning the number and the other guessing it
+ * is a gap that only shows up on some screen sizes.
+ */
+export function useSidebarWidth(): number {
+  const { width } = useWindowDimensions()
+
+  return Math.min(MAX_WIDTH, width * WIDTH_FRACTION)
+}
 
 /**
  * The slide-out sidebar (§7.17) — the app's primary navigation, in place of the
@@ -38,10 +48,11 @@ const SLIDE_MS = 190
  * "New session" navigates home rather than creating anything: home *is* the new
  * session, and it holds off creating one until there is a message to send.
  *
- * Mounted once above the router, so the hamburger works from any screen.
+ * Mounted once *below* the router by `SidebarShell`, which slides the page off
+ * it — so there is no `visible` here. It is on screen the whole time; whether
+ * you can see it is a question about where the page is.
  */
 export function Sidebar({
-  visible,
   sessions,
   loading,
   activePath,
@@ -51,7 +62,6 @@ export function Sidebar({
   onNavigate,
   onDismiss
 }: {
-  visible: boolean
   sessions: SessionSummary[]
   loading: boolean
   /** Drives the selected row's tint; the route the drawer is sitting over. */
@@ -73,61 +83,31 @@ export function Sidebar({
 }) {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
-  const { width: screenWidth } = useWindowDimensions()
+  const width = useSidebarWidth()
 
-  const width = Math.min(MAX_WIDTH, screenWidth * WIDTH_FRACTION)
-
-  // `visible` flips instantly; `mounted` trails it so the panel can animate out
-  // before the Modal is torn down.
-  const [mounted, setMounted] = useState(visible)
-  const progress = useRef(new Animated.Value(visible ? 1 : 0)).current
-
-  useEffect(() => {
-    if (visible) setMounted(true)
-
-    const animation = Animated.timing(progress, {
-      toValue: visible ? 1 : 0,
-      duration: SLIDE_MS,
-      useNativeDriver: true
-    })
-
-    animation.start(({ finished }) => {
-      if (finished && !visible) setMounted(false)
-    })
-
-    return () => animation.stop()
-  }, [visible, progress])
-
-  if (!mounted) return null
-
-  const translateX = progress.interpolate({ inputRange: [0, 1], outputRange: [-width, 0] })
   const recents = sessions.slice(0, 8)
 
   return (
-    <Modal transparent visible animationType="none" onRequestClose={onDismiss}>
-      <Animated.View style={[styles.scrim, { backgroundColor: theme.color.scrim, opacity: progress }]}>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Close navigation"
-          style={StyleSheet.absoluteFill}
-          onPress={onDismiss}
-        />
-      </Animated.View>
+    <View
+      style={[
+        styles.panel,
+        {
+          width,
+          backgroundColor: theme.color.surface,
+          borderRightColor: theme.color.border,
+          paddingTop: insets.top + 8,
+          paddingBottom: insets.bottom + 8
+        }
+      ]}
+    >
+        {/* The switcher heads the sidebar because that is what the sidebar is:
+            where you go to change what the app is pointed at. Renders nothing
+            before an agent exists, which is the same state that disables the
+            rows under it. */}
+        <View style={styles.agent}>
+          <AgentSelector />
+        </View>
 
-      <Animated.View
-        style={[
-          styles.panel,
-          theme.shadow.sheet,
-          {
-            width,
-            transform: [{ translateX }],
-            backgroundColor: theme.color.surface,
-            borderRightColor: theme.color.border,
-            paddingTop: insets.top + 8,
-            paddingBottom: insets.bottom + 8
-          }
-        ]}
-      >
         <View style={styles.top}>
           <NavRow
             icon="plus"
@@ -209,8 +189,7 @@ export function Sidebar({
             }}
           />
         </View>
-      </Animated.View>
-    </Modal>
+    </View>
   )
 }
 
@@ -302,14 +281,12 @@ function RecentRow({ session, onPress }: { session: SessionSummary; onPress: () 
 }
 
 const styles = StyleSheet.create({
-  scrim: { ...StyleSheet.absoluteFillObject },
-  panel: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: 0,
-    borderRightWidth: StyleSheet.hairlineWidth
-  },
+  // Weighted upward: the pill wants air between it and the status bar, and
+  // sits closer to the rows below because those are what it scopes.
+  agent: { alignItems: 'flex-start', paddingHorizontal: 16, paddingTop: 10, paddingBottom: 6 },
+  // No absolute positioning: the shell puts it behind the page and the page
+  // slides off it. It is a floor the page is lifted from, not a panel over it.
+  panel: { flex: 1, borderRightWidth: StyleSheet.hairlineWidth },
   top: { padding: 8, gap: 2 },
   bottom: { padding: 8 },
   navRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10 },

@@ -23,7 +23,7 @@ import {
 
 export const OPENAI_COMPAT_CAPABILITIES: Capabilities = {
   sessions: { search: false, rename: true, pin: true },
-  settings: { schemaDriven: false, model: true, providers: false },
+  settings: { schemaDriven: false, model: true, providers: false, sessionModel: false },
   extras: { cron: false, skills: false, mcp: false, boards: false },
   approvals: { requests: false, policy: false },
   logs: { events: true },
@@ -152,6 +152,13 @@ export class OpenAiCompatBackend implements AgentBackend {
     throw new NotImplemented('boards')
   }
 
+  async getModel(): Promise<string | null> {
+    // It can answer this one: on an OpenAI-compatible host the identity the
+    // user picked *is* the model (§4.3), so the config already holds it — even
+    // though there is no list to choose another from.
+    return this.config.model?.trim() || null
+  }
+
   async listModels(): Promise<never> {
     throw new NotImplemented('model listing')
   }
@@ -194,5 +201,12 @@ export class OpenAiCompatBackend implements AgentBackend {
 
   async speak(): Promise<never> {
     throw new NotImplemented('speech')
+  }
+
+  // An OpenAI-compatible host has no sessions of its own to pin a model to —
+  // the identity the user picked *is* the model (§4.3), so switching one is
+  // switching agents. `settings.sessionModel` is false, so nothing calls this.
+  async setSessionModel(): Promise<never> {
+    throw new NotImplemented('per-session model')
   }
 }

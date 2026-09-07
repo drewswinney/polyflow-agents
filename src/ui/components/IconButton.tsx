@@ -24,6 +24,8 @@ export function IconButton({
   color,
   slot = 44,
   edge = 'none',
+  outlined = false,
+  ring = 40,
   disabled,
   style
 }: {
@@ -36,6 +38,17 @@ export function IconButton({
   /** Touch-target size. Below 44 the shortfall is made up with hitSlop. */
   slot?: number
   edge?: 'left' | 'right' | 'none'
+  /**
+   * Draws a circle around the glyph.
+   *
+   * For a header that sits *over* the content rather than above it: a bare
+   * glyph on a transcript is a glyph competing with a paragraph. The ring is
+   * drawn inside the tap slot rather than becoming it, so the target stays 44
+   * whatever the circle measures.
+   */
+  outlined?: boolean
+  /** Diameter of the drawn circle. The tap slot is still `slot`. */
+  ring?: number
   disabled?: boolean
   style?: StyleProp<ViewStyle>
 }) {
@@ -44,6 +57,11 @@ export function IconButton({
   // A smaller visual slot (the 34px back chevron) still has to be reachable, so
   // whatever it gives up in size it takes back as hitSlop.
   const shortfall = Math.max(0, 44 - slot) / 2
+
+  // What the eye reads as the button's edge. With an outline that is the
+  // circle, not the glyph inside it, so the overhang has to measure the circle
+  // or the ring hangs off the screen margin by half the difference.
+  const visual = outlined ? ring : size
 
   return (
     <Pressable
@@ -59,13 +77,33 @@ export function IconButton({
           width: slot,
           height: slot,
           opacity: disabled ? 0.4 : pressed ? 0.55 : 1,
-          marginRight: edge === 'right' ? -(slot - size) / 2 : 0,
-          marginLeft: edge === 'left' ? -(slot - size) / 2 : 0
+          marginRight: edge === 'right' ? -(slot - visual) / 2 : 0,
+          marginLeft: edge === 'left' ? -(slot - visual) / 2 : 0
         },
         style
       ]}
     >
-      <Icon name={name} size={size} color={color ?? theme.color.gray600} />
+      {outlined ? (
+        // Filled as well as outlined: the wash is the same one the header used
+        // to carry, and it is what keeps the glyph readable over whatever has
+        // scrolled underneath it.
+        <View
+          style={[
+            styles.ring,
+            {
+              width: ring,
+              height: ring,
+              borderRadius: ring / 2,
+              borderColor: theme.color.border,
+              backgroundColor: theme.color.headerWash
+            }
+          ]}
+        >
+          <Icon name={name} size={size} color={color ?? theme.color.gray600} />
+        </View>
+      ) : (
+        <Icon name={name} size={size} color={color ?? theme.color.gray600} />
+      )}
     </Pressable>
   )
 }
@@ -76,5 +114,6 @@ export function IconButtonSpacer({ slot = 44 }: { slot?: number }) {
 }
 
 const styles = StyleSheet.create({
-  button: { alignItems: 'center', justifyContent: 'center' }
+  button: { alignItems: 'center', justifyContent: 'center' },
+  ring: { alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth }
 })

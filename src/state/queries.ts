@@ -125,10 +125,13 @@ export function useCreateSession(scope: string, backend: AgentBackend | null) {
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async () => {
+    // The model is the composer's pick on home, where there is no session yet
+    // to re-point: `session.create` takes one, so the choice is made before the
+    // session exists rather than switched after it does.
+    mutationFn: async (model?: string) => {
       if (!backend) throw new Error('Not connected')
 
-      return backend.createSession({ title: 'New session' })
+      return backend.createSession({ title: 'New session', ...(model ? { model } : {}) })
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: sessionsKey(scope) })
   })
