@@ -313,6 +313,8 @@ export interface PreviewNavigation {
  * The sheet always renders the device's cached copy of the file, so the
  * artifact and its same-document anchors are `file://` URLs. Anything the
  * system would fetch instead — `http(s)`, `data:`, and the like — is external.
+ * The match is case-insensitive because URL schemes are; the sheet's own file
+ * URI always comes back lowercase, but an artifact's markup may not.
  */
 export function isExternalPreviewUrl(url: string): boolean {
   return Boolean(url) && !/^file:/i.test(url)

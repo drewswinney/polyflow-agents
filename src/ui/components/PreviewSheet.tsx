@@ -118,7 +118,10 @@ export function PreviewSheet({
             // the artifact stays loaded behind it.
             onOpenWindow={event => {
               const target = event.nativeEvent.targetUrl
-              if (target) void Linking.openURL(target).catch(() => undefined)
+
+              // `Linking.openURL` can only take web URLs: a `javascript:` or
+              // `data:` link must be dropped, not handed to the OS.
+              if (target && /^https?:/i.test(target)) void Linking.openURL(target).catch(() => undefined)
             }}
             // A link with no `target` would otherwise navigate this webview
             // in place, replacing the artifact with the linked page and
@@ -129,7 +132,9 @@ export function PreviewSheet({
             onShouldStartLoadWithRequest={request => {
               const shouldStart = previewNavigationDecision(request)
 
-              if (!shouldStart && request.isTopFrame !== false) {
+              // Only a web URL can be handed to the system browser; a
+              // `javascript:` or `data:` jump is declined and dropped.
+              if (!shouldStart && request.isTopFrame !== false && /^https?:/i.test(request.url)) {
                 void Linking.openURL(request.url).catch(() => undefined)
               }
 

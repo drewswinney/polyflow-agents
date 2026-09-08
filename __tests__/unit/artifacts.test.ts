@@ -187,6 +187,10 @@ describe('isExternalPreviewUrl', () => {
     expect(isExternalPreviewUrl('https://recipe.example/bowl/')).toBe(true)
     expect(isExternalPreviewUrl('http://recipe.example/bowl/')).toBe(true)
     expect(isExternalPreviewUrl('data:text/html,<b>x</b>')).toBe(true)
+    // `javascript:` is a script, not a fetchable page — and protocol-relative
+    // links are fetched from the scheme of whatever page would host them.
+    expect(isExternalPreviewUrl('javascript:alert(1)')).toBe(true)
+    expect(isExternalPreviewUrl('//recipe.example/bowl/')).toBe(true)
   })
 
   it('is not a navigation for a blank URL', () => {
@@ -215,6 +219,9 @@ describe('previewNavigationDecision', () => {
     // this decision (it opens in the system browser via onOpenWindow).
     expect(previewNavigationDecision({ url: 'https://recipe.example/bowl/', isTopFrame: true })).toBe(false)
     expect(previewNavigationDecision({ url: 'http://recipe.example/bowl/', isTopFrame: true })).toBe(false)
+    // Protocol-relative links resolve against the page's own scheme, which
+    // here means "leave for a network host" — declined the same way.
+    expect(previewNavigationDecision({ url: '//recipe.example/bowl/', isTopFrame: true })).toBe(false)
   })
 })
 
