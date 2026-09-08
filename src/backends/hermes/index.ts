@@ -46,6 +46,7 @@ import {
   type NewSessionOptions,
   NO_IMAGES,
   type PromptResult,
+  type PromptStatus,
   type PushDeviceRegistration,
   type StoredImage,
   type ClarifyRequest,
@@ -147,14 +148,21 @@ const LIVENESS_PROBE_TIMEOUT_MS = 10_000
 /**
  * How long the *foreground* liveness probe waits.
  *
- * Shorter than the watchdog's, because the two are asked under different
- * circumstances. The watchdog runs unprompted and can afford to be generous;
- * this one runs because someone has just opened the app and is looking at a
- * chat that has to start working. Being wrong costs one redial onto a socket
- * that was merely slow, which reconnects; being slow costs the person the
- * whole wait.
+ * This was 4 seconds, on the reasoning that someone has just opened the app
+ * and is waiting. It was wrong more often than it was fast. The phone reaches
+ * the host over Tailscale, whose tunnel re-handshakes after a sleep, and the
+ * host reads each socket's requests in series behind whatever handler is
+ * already running — so the first round trip after waking routinely took
+ * longer than four seconds on a connection that was perfectly alive. And the
+ * cost of being wrong is not "one redial": it is a full teardown — in-flight
+ * tools marked unknown, a stream-cut row, a prompt still waiting on its
+ * acknowledgement rejected, the transcript refetched — which is the pause on
+ * coming back into the app that this probe was meant to remove.
+ *
+ * Same window as the watchdog now. A socket that is genuinely dead still
+ * surfaces in ten seconds rather than the watchdog's minute-plus.
  */
-const LIVENESS_FOREGROUND_TIMEOUT_MS = 4_000
+const LIVENESS_FOREGROUND_TIMEOUT_MS = LIVENESS_PROBE_TIMEOUT_MS
 
 /**
  * How long a password login is assumed good for.
@@ -746,7 +754,7 @@ export class HermesBackend implements AgentBackend {
       if (name) stored.push({ name, sourceUri: block.uri as string })
     }
 
-    await this.gateway.request(
+    const submitted = await this.gateway.request<{ status?: string }>(
       'prompt.submit',
       // An image with no caption is a real message — "what is this?" is implied
       // — but the host reads an empty `text` as nothing to do. Say the implied
@@ -755,7 +763,7 @@ export class HermesBackend implements AgentBackend {
       PROMPT_SUBMIT_TIMEOUT_MS
     )
 
-    return { images: stored }
+    return { images: stored, status: toPromptStatus(submitted?.status) }
   }
 
   /**
@@ -1237,6 +1245,21 @@ function emptyOn404(error: unknown): { messages: [] ; session_id: string } {
 const LOG_LINE = /^(?<time>[\d-]{10}[ T][\d:]{8})\S*\s+(?<level>[A-Z]+)\s+(?<rest>.*)$/
 
 /** Best-effort structure over a raw log line; unparseable lines still show. */
+/**
+ * What the host did with a submit, in the app's terms.
+ *
+ * Hermes answers `streaming` for a turn it started, `queued` for one it will
+ * run after the current turn, and `redirected` or `steered` for text it folded
+ * into the running turn as a correction. Unknown answers read as started —
+ * the safe default, since it is what every reply used to be assumed to be.
+ */
+function toPromptStatus(status: string | undefined): PromptStatus {
+  if (status === 'queued') return 'queued'
+  if (status === 'redirected' || status === 'steered') return 'redirected'
+
+  return 'started'
+}
+
 function parseLogLine(line: string, index: number): EventRecord {
   const match = LOG_LINE.exec(line)
   const at = match?.groups?.time ? Date.parse(match.groups.time.replace(' ', 'T')) : Number.NaN

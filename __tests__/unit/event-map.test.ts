@@ -47,6 +47,27 @@ describe('assistant text', () => {
   })
 })
 
+describe('the start of a turn', () => {
+  it('reports message.start to chat, and still logs it', () => {
+    // The bug this pins: message.start was log-only, so between a submit and
+    // the first token the chat had no signal at all and looked idle for the
+    // model's whole time-to-first-token.
+    const updates = mapGatewayEvent({ type: 'message.start', session_id: 's1', payload: {} } as never, context())
+
+    expect(updates.map(update => update.kind)).toEqual(['turn_started', 'event'])
+  })
+
+  it('passes the host’s slow-start notice through as a notice', () => {
+    expect(chatUpdates('notification.show', { text: 'Still starting the agent', kind: 'agent' })).toEqual([
+      { kind: 'notice', text: 'Still starting the agent' }
+    ])
+  })
+
+  it('says nothing about chat for an empty notice', () => {
+    expect(chatUpdates('notification.show', { text: '' })).toEqual([])
+  })
+})
+
 describe('a turn that streams and restates itself', () => {
   it('ends with the reply once, not twice', () => {
     // What the host sends with interim messages on: deltas, then the whole

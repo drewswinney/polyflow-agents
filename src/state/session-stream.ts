@@ -21,6 +21,7 @@ import type {
   MessageImage,
   PermissionOutcome,
   PermissionRequest,
+  PromptResult,
   SessionId,
   SessionTranscript,
   SessionUpdate,
@@ -33,6 +34,14 @@ import type { PickedImage } from '@/platform/image-attachments'
 import { ensureArtifactFile } from '@/platform/artifact-cache'
 
 import { cacheSentImage, cachedImageUri } from './attachment-cache'
+import {
+  alreadyLanded,
+  pendingAfterSubmit,
+  pendingAfterUpdate,
+  pendingLooksStale,
+  type PendingTurn,
+  shouldRequeue
+} from './pending-turn'
 import { useTranscript } from './queries'
 import { createStreamTail, type StreamTail } from './stream-tail'
 import { turnLooksSettled } from './turn-settled'
@@ -75,6 +84,14 @@ export interface SessionStream {
   clarify: ClarifyRequest | null
   /** Messages composed while disconnected; they send on reconnect. */
   outbox: Outgoing[]
+  /**
+   * A message sent and not yet answered with anything visible.
+   *
+   * The composer's Stop and the work section both wait on content; this is
+   * what fills the gap before it — the send itself, the host's acknowledgement,
+   * and whatever the host said it did with a message that landed mid-turn.
+   */
+  pending: PendingTurn | null
   /** True from the first token until the turn ends, tool runs included. */
   turnActive: boolean
   send: (text: string, images?: PickedImage[]) => void
@@ -104,6 +121,26 @@ export function useSessionStream(
    * long tool run is exactly when cancelling matters most.
    */
   const [turnActive, setTurnActive] = useState(false)
+  const [pending, setPendingState] = useState<PendingTurn | null>(null)
+  /**
+   * The pending state as of the last write, not the last render.
+   *
+   * The submit's acknowledgement lands in a promise callback, which has to
+   * know whether content already overtook it — a fast turn can stream and
+   * complete before `prompt.submit` returns — and a render may not have
+   * happened in between. Written inside the updater so the two never disagree.
+   */
+  const pendingRef = useRef<PendingTurn | null>(null)
+
+  const setPending = useCallback((next: PendingTurn | null | ((current: PendingTurn | null) => PendingTurn | null)) => {
+    setPendingState(current => {
+      const value = typeof next === 'function' ? next(current) : next
+
+      pendingRef.current = value
+
+      return value
+    })
+  }, [])
 
   const tail = useMemo(() => createStreamTail(), [sessionId])
   const wasStreaming = useRef(false)
@@ -200,7 +237,8 @@ export function useSessionStream(
 
   useEffect(() => {
     setLiveModel(null)
-  }, [sessionId])
+    setPending(null)
+  }, [sessionId, setPending])
 
   /**
    * Loading is "nothing to show", not "nothing in flight".
@@ -280,8 +318,16 @@ export function useSessionStream(
       })
     ) {
       setTurnActive(false)
+
+      // The pending row is held to a higher bar than Stop: nothing running is
+      // not the same as answered, and a message the host is still starting on
+      // must keep saying so. The reply being in the transcript is what ends
+      // it — or the row having been there too long to believe.
+      const waiting = pendingRef.current
+
+      if (waiting && pendingLooksStale(waiting, restored, Date.now())) setPending(null)
     }
-  }, [transcript, sessionId, connectionState, tail])
+  }, [transcript, sessionId, connectionState, tail, setPending])
 
   /**
    * A new socket means a gap to close, so the transcript is refetched.
@@ -295,6 +341,16 @@ export function useSessionStream(
    */
   const refetch = query.refetch
   const dialledWith = useRef<AgentBackend | null>(null)
+  /**
+   * The rows the reconnect's refetch came back with, once it has.
+   *
+   * The outbox drain waits on this before sending, because a message whose
+   * acknowledgement died with the socket may have reached the host all the
+   * same — and the refetched transcript is the only thing that can say so.
+   * Resolves to null when there was no reconnect to wait on, or the fetch
+   * failed, which the drain reads as "cannot know" and sends.
+   */
+  const gapClosed = useRef<Promise<TranscriptEntry[] | null>>(Promise.resolve(null))
 
   useEffect(() => {
     if (!backend) return
@@ -303,7 +359,12 @@ export function useSessionStream(
 
     dialledWith.current = backend
 
-    if (reconnected) void refetch()
+    if (reconnected) {
+      gapClosed.current = refetch().then(
+        result => result.data?.entries ?? null,
+        () => null
+      )
+    }
   }, [backend, refetch])
 
 
@@ -353,7 +414,23 @@ export function useSessionStream(
     if (!backend) return
 
     return backend.subscribe(sessionId, (update: SessionUpdate) => {
+      // Every update is news for a message waiting on one. Returns the same
+      // object when it is not, so this is free per token.
+      setPending(current => pendingAfterUpdate(current, update))
+
       switch (update.kind) {
+        // The host has taken the turn up. Stop is offered from here, not from
+        // the first token: a rebuilt runtime or a slow model can keep the first
+        // token away for a long time, and that is exactly when cancelling is
+        // wanted.
+        case 'turn_started':
+          setTurnActive(true)
+          break
+
+        // Consumed above, into the pending row. Not a transcript entry.
+        case 'notice':
+          break
+
         case 'agent_message_chunk':
           wasStreaming.current = true
           setTurnActive(true)
@@ -433,7 +510,7 @@ export function useSessionStream(
           break
       }
     })
-  }, [backend, sessionId, tail, sealTail])
+  }, [backend, sessionId, tail, sealTail, setPending])
 
   // --- Disconnect mid-turn (§7.16) ---------------------------------------
   useEffect(() => {
@@ -478,6 +555,80 @@ export function useSessionStream(
    * grows by what the user actually typed while offline.
    */
   const sent = useRef(new Set<string>())
+  /**
+   * How many times each message has been handed to the backend.
+   *
+   * A send that fails on the socket goes back to the outbox, and the outbox
+   * drains on `open` — so without a ceiling, a socket that reports open and
+   * refuses every send would bounce one message between the two forever.
+   */
+  const attempts = useRef(new Map<string, number>())
+
+  /**
+   * Send one message, and own what happens to it.
+   *
+   * This used to be a bare `void dispatch(...)`, which meant a `prompt.submit`
+   * rejected by a closing socket was marked sent, never retried, never
+   * reported — and the reconnect's transcript refetch then wiped the bubble.
+   * The message was gone and nothing had said so. Now:
+   *
+   * - the row shows *Sending…* from the tap, through the resume and any
+   *   image upload, until the host answers;
+   * - the answer becomes the pending row — *Working…*, or what the host did
+   *   with a message that landed mid-turn — and offers Stop once the host has
+   *   actually started;
+   * - a failure that is the socket puts the message back in the outbox, where
+   *   the next reconnect sends it, deduplicated against the refetched
+   *   transcript by the drain below;
+   * - any other failure is said, in the transcript, where the bubble is.
+   */
+  const deliver = useCallback(
+    (backend: AgentBackend, message: Outgoing) => {
+      sent.current.add(message.id)
+      attempts.current.set(message.id, (attempts.current.get(message.id) ?? 0) + 1)
+      setPending({ phase: 'sending', since: Date.now() })
+
+      dispatch(backend, sessionId, message, setEntries).then(
+        result => {
+          const status = result.status ?? 'started'
+
+          // A message the host folded into a running turn, or queued behind
+          // it, is news whatever has streamed since: that content was the
+          // other turn's. A plain start only speaks if nothing has overtaken
+          // it — a fast turn can stream and complete before the ack lands,
+          // and re-raising Stop for it would strand the button.
+          if (status !== 'started') {
+            setPending(pendingAfterSubmit(status, Date.now()))
+          } else if (pendingRef.current?.phase === 'sending') {
+            setPending(pendingAfterSubmit(status, Date.now()))
+            setTurnActive(true)
+          }
+        },
+        cause => {
+          setPending(current => (current?.phase === 'sending' ? null : current))
+
+          if (shouldRequeue(cause) && (attempts.current.get(message.id) ?? 1) < MAX_SEND_ATTEMPTS) {
+            sent.current.delete(message.id)
+            setOutbox(current => [...current, message])
+
+            return
+          }
+
+          setEntries(current => [
+            ...current,
+            {
+              kind: 'message',
+              id: `err-${Date.now()}`,
+              role: 'system',
+              text: `Could not send: ${cause instanceof Error ? cause.message : String(cause)}`,
+              at: Date.now()
+            }
+          ])
+        }
+      )
+    },
+    [sessionId, setPending]
+  )
 
   // --- Outbox drain -------------------------------------------------------
   useEffect(() => {
@@ -491,21 +642,32 @@ export function useSessionStream(
 
     for (const message of queued) sent.current.add(message.id)
 
-    // Put back any bubble the reconnect's transcript refetch took with it, so
-    // the message is on screen while it goes out rather than reappearing a
-    // reload later. Appended at the end, which is where it belongs: it is the
-    // newest thing said.
-    setEntries(current => {
-      const known = new Set(current.map(entry => entry.id))
-      const missing = queued.filter(message => !known.has(message.id))
+    // After the reconnect's refetch, when there is one: a message whose ack
+    // died with the socket may already be the host's, and the refetched rows
+    // are how it says so. Sending it again would run the turn twice — or, on
+    // this host's default, interrupt the very turn it started.
+    //
+    // Not cancelled on cleanup. Clearing the outbox above re-runs this effect
+    // at once, and a cleanup that abandoned the wait would abandon the send.
+    // The `sent` set is what keeps a re-run from claiming these twice.
+    void gapClosed.current.then(landed => {
+      const unsent = queued.filter(message => !alreadyLanded(landed, message.text))
 
-      return missing.length === 0 ? current : [...current, ...missing.map(bubbleFor)]
+      // Put back any bubble the reconnect's transcript refetch took with it,
+      // so the message is on screen while it goes out rather than
+      // reappearing a reload later. Appended at the end, which is where it
+      // belongs: it is the newest thing said. A message the host already has
+      // is in the refetched rows under the host's own id, so it needs none.
+      setEntries(current => {
+        const known = new Set(current.map(entry => entry.id))
+        const missing = unsent.filter(message => !known.has(message.id))
+
+        return missing.length === 0 ? current : [...current, ...missing.map(bubbleFor)]
+      })
+
+      for (const message of unsent) deliver(backend, message)
     })
-
-    for (const message of queued) {
-      void dispatch(backend, sessionId, message, setEntries)
-    }
-  }, [connectionState, backend, sessionId, outbox])
+  }, [connectionState, backend, outbox, deliver])
 
   const send = useCallback(
     (text: string, images: PickedImage[] = []) => {
@@ -525,17 +687,17 @@ export function useSessionStream(
         return
       }
 
-      sent.current.add(message.id)
-      void dispatch(backend, sessionId, message, setEntries)
+      deliver(backend, message)
     },
-    [backend, connectionState, sessionId]
+    [backend, connectionState, deliver]
   )
 
   const cancel = useCallback(() => {
     void backend?.cancel(sessionId)
     setTurnActive(false)
+    setPending(null)
     sealTail()
-  }, [backend, sessionId, sealTail])
+  }, [backend, sessionId, sealTail, setPending])
 
   const respondToApproval = useCallback(
     (outcome: PermissionOutcome) => {
@@ -570,6 +732,7 @@ export function useSessionStream(
     usage,
     approval,
     turnActive,
+    pending,
     clarify,
     outbox,
     send,
@@ -594,6 +757,9 @@ export function useSessionStream(
  * starts being a message silently never sent.
  */
 let nextEntrySeq = 0
+
+/** Sends per message before a socket failure is reported instead of retried. */
+const MAX_SEND_ATTEMPTS = 3
 
 function entryIdFor(images: PickedImage[], at: number): string {
   return `user-${at}-${images.length}-${(nextEntrySeq += 1)}`
@@ -630,7 +796,7 @@ async function dispatch(
   sessionId: SessionId,
   message: Outgoing,
   setEntries: (update: (current: TranscriptEntry[]) => TranscriptEntry[]) => void
-): Promise<void> {
+): Promise<PromptResult> {
   const content: ContentBlock[] = [
     ...(message.text ? [{ kind: 'text' as const, text: message.text }] : []),
     ...message.images.map(image => ({
@@ -643,7 +809,7 @@ async function dispatch(
 
   const result = await backend.prompt(sessionId, content)
 
-  if (!result.images.length) return
+  if (!result.images.length) return result
 
   // Keyed by where the image came from, because that is the one field both
   // sides of the round trip agree on.
@@ -677,6 +843,8 @@ async function dispatch(
         : entry
     )
   )
+
+  return result
 }
 
 /**

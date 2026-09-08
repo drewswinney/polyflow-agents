@@ -68,6 +68,24 @@ export type SessionUpdate =
    */
   | { kind: 'agent_message_snapshot'; text: string }
   | { kind: 'agent_thought_chunk'; text: string }
+  /**
+   * The host has started working on a turn — nothing has arrived yet.
+   *
+   * The gap between a submit and the first token is the model's whole
+   * time-to-first-token, and on a session whose runtime was rebuilt it is the
+   * agent build as well. Without this the chat had no way to tell that gap
+   * from an idle session, and looked dead for exactly as long as the model
+   * thought.
+   */
+  | { kind: 'turn_started' }
+  /**
+   * A line from the host about the turn, for the pending row.
+   *
+   * Hermes emits one when an agent build outlives thirty seconds ("still
+   * starting the agent … your message will be sent as soon as it's ready").
+   * Rendered only while a turn is pending; never a transcript entry.
+   */
+  | { kind: 'notice'; text: string }
   | { kind: 'tool_call'; call: ToolCall }
   | { kind: 'tool_call_update'; id: string; status: ToolStatus; output?: string }
   | { kind: 'permission_request'; req: PermissionRequest }
@@ -280,7 +298,24 @@ export interface AgentBackend {
 export interface PromptResult {
   /** One entry per image the agent accepted. Empty for a text-only turn. */
   images: StoredImage[]
+  /**
+   * What the host did with the message. Absent when it did not say, which the
+   * caller reads as `started`.
+   */
+  status?: PromptStatus
 }
+
+/**
+ * How a submitted message was taken.
+ *
+ * A message sent while a turn is already running is not rejected by Hermes: by
+ * default it is folded into the live turn as a correction (`redirected`), and
+ * a host configured to queue instead runs it as the next turn (`queued`).
+ * Either way nothing visible happens until the current step ends, and the app
+ * has to say so rather than draw the bubble as though a reply were seconds
+ * away.
+ */
+export type PromptStatus = 'started' | 'queued' | 'redirected'
 
 export interface StoredImage {
   /** The name the agent filed it under. */
