@@ -9,12 +9,25 @@
  *
  * That is also why the host echoes an `agentId` back: it is ours, sent at
  * registration and stored per device, because the host has no idea what we call
- * its agents. A push without one can only be opened in the current scope, which
- * is a guess, so it opens nothing.
+ * its agents. A push from an older host — one that has not learned to stamp the
+ * firing profile — can only be opened in the agent `agentId` names, and a push
+ * with neither opens nothing rather than guessing.
  *
  * Two entry points, and both are needed. A tap while the app runs arrives on the
  * response listener; a tap that *launches* the app has already happened by the
  * time React mounts, and is only visible through the last-response call.
+ *
+ * On a current host the `agentId` is not the routing signal, though — the
+ * registry is shared across every profile on a host (each profile's
+ * `polyflow_agents_push` dir is a symlink onto the machine-level store), so one
+ * phone's token holds only the `agentId` of whichever profile was selected
+ * when it last registered, and Expo rotates tokens, so that drifts. A push from
+ * profile A used to carry B's `agentId`, and the app opened A's session
+ * against B's scope: a blank chat. The host knows the one thing the app cannot
+ * — which profile is actually talking — so a current host stamps the *firing*
+ * profile on every payload, and that is what a tap routes on. `agentId` is the
+ * tiebreaker (same profile name on several servers) and the fallback for
+ * payloads from an older host.
  */
 
 import * as Notifications from 'expo-notifications'
@@ -24,6 +37,8 @@ import { AppState } from 'react-native'
 
 import { ensureNotificationHandler } from '@/platform/notifications'
 
+import type { Agent, AgentId } from '@/domain'
+
 import { useAgents } from './agents'
 import { forgetAnnouncement, markAnnounced, notificationKey } from './notification-ledger'
 
@@ -32,6 +47,18 @@ interface NotificationPayload {
   sessionId?: string
   requestId?: string
   kind?: string
+  /**
+   * The name of the profile that *fired* this push, as the host derived it
+   * (`polyflow_agents_push/devices.py::current_profile_name`). `default` for
+   * the deployment's root profile, the profile name otherwise.
+   *
+   * This is the source of truth for re-scoping, not `agentId`: the device
+   * registry is shared across profiles and `agentId` is whichever profile was
+   * selected when the device last registered, so it can lag behind the profile
+   * actually talking. Present on payloads from a current host; absent on older
+   * ones, in which case `agentId` is the only signal and we keep the old path.
+   */
+  profile?: string
   /** Set on an artifact push, so a tap opens the file rather than the chat. */
   artifactId?: string
   /** Set on the data-only push that says an approval was answered elsewhere. */
@@ -55,16 +82,13 @@ export function useNotificationRouting(): void {
       // into. It can still be delivered as a tap if the OS showed it.
       if (payload.resolved) return
 
-      const target = payload.agentId
+      // Re-scope before the session opens: session ids are only unique within
+      // a profile, and the whole app follows the selected agent.
+      const target = resolveTapTarget(agents, selectedId, payload)
 
-      if (target && target !== selectedId) {
-        // Only switch to an agent we still have. A notification can outlive the
-        // agent it belonged to, and selecting an unknown id would leave the app
-        // scoped to nothing.
-        if (!agents.some(agent => agent.id === target)) return
+      if (target === null) return
 
-        select(target)
-      }
+      if (target !== selectedId) select(target)
 
       // An artifact is the thing worth opening — the chat it came from is one
       // tap away from there, and the reverse is a scroll through a transcript
@@ -144,6 +168,65 @@ export function useNotificationRouting(): void {
 
     return () => subscription.remove()
   }, [])
+}
+
+/**
+ * The agent a tapped notification should re-scope the app to, or `null` to
+ * open nothing.
+ *
+ * Pure and exported so the decision — the part that used to silently route a
+ * tap to the wrong profile — is unit-testable without mounting the hook.
+ *
+ * The primary signal is `payload.profile`, the *firing* profile the host
+ * stamps on each push: the only one that cannot be stale. `payload.agentId`
+ * is registration-time state (whichever profile was selected when the device
+ * last registered), so on a multi-profile host it names the wrong profile —
+ * the old blank-chat bug. It serves two secondary roles:
+ *   - the sole signal on payloads from an older host that predates `profile`;
+ *   - a tiebreaker when the same profile name exists on more than one server
+ *     (the host that pushed is the one the device registered against).
+ */
+export function resolveTapTarget(
+  agents: readonly Agent[],
+  selectedId: AgentId,
+  payload: NotificationPayload
+): AgentId | null {
+  if (payload.profile) {
+    // The default profile is addressed by a null scope, not its name — mirror
+    // the discovery mapping (backends/discovery.ts).
+    const scope = payload.profile === 'default' ? null : payload.profile
+    const candidates = agents.filter(agent => agent.scope === scope)
+
+    if (candidates.length === 0) {
+      // The firing profile no longer exists on any known host. Its session
+      // resolves under no agent, so opening it is a guaranteed blank chat —
+      // the same answer an unknown `agentId` has always got.
+      return null
+    }
+
+    // Same profile name on several servers: the host that pushed is the one
+    // the device registered against, which `agentId` still points at. Prefer
+    // a known `agentId`, else the currently selected agent, as the server hint.
+    const knownAgentId = payload.agentId && agents.some(agent => agent.id === payload.agentId)
+      ? payload.agentId
+      : selectedId
+    const hintedServer = agents.find(agent => agent.id === knownAgentId)?.serverId
+
+    return candidates.find(agent => agent.serverId === hintedServer)?.id ?? candidates[0].id
+  }
+
+  // Older host: no `profile` stamp. Fall back to `agentId`, and only switch to
+  // an agent we still have — a notification can outlive its agent, and
+  // selecting an unknown id would leave the app scoped to nothing.
+  if (payload.agentId) {
+    if (!agents.some(agent => agent.id === payload.agentId)) return null
+
+    return payload.agentId
+  }
+
+  // Neither signal. A push with no addressable agent opens in the current
+  // scope, which is a guess, so it opens nothing.
+  return null
 }
 
 /**

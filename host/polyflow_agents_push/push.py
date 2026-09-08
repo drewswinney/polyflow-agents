@@ -103,6 +103,12 @@ def _send_now(*, kind: str, title: str, body: str, data: Dict[str, Any]) -> None
 
             return
 
+        # The profile *this* turn is running under, resolved once per send.
+        # Every device gets the same value — the device's own `agentId` (its
+        # registration-time scope) is the app-side fallback, not the source of
+        # truth: see `devices.current_profile_name`.
+        profile = devices.current_profile_name()
+
         messages = [
             {
                 "to": device["token"],
@@ -110,8 +116,12 @@ def _send_now(*, kind: str, title: str, body: str, data: Dict[str, Any]) -> None
                 "body": body,
                 # Per device, not per message: `agentId` is the receiving app's
                 # own id for this agent, so two phones registered against
-                # different agent records get different payloads.
-                "data": {**data, "kind": kind, "agentId": device.get("agentId", "")},
+                # different agent records get different payloads. `profile` is
+                # the firing profile's name — the app prefers it over `agentId`
+                # when re-scoping on tap, because the registry is shared across
+                # profiles and a device's stored id can lag behind the profile
+                # that is actually talking.
+                "data": {**data, "kind": kind, "agentId": device.get("agentId", ""), "profile": profile},
                 # Approvals are the only thing here that halts the agent, so
                 # they are the only thing that may bypass a quiet phone.
                 "priority": "high" if kind == "approvals" else "default",

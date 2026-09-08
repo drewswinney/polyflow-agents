@@ -89,7 +89,10 @@ export async function registerDevice(
       token,
       // Ours, not the host's. It comes back on every push so a tap can re-scope
       // the app before opening the session (§5.2) — the host has no idea what
-      // we call its agents, so if we do not tell it, no notification can route.
+      // we call its agents. It is the *fallback* routing signal: a current host
+      // stamps the firing profile on each push instead, because this value is
+      // whichever agent was selected when this device last registered, and on
+      // a multi-profile host that can be the wrong one.
       agentId: options.agentId,
       platform: options.platform,
       label: options.label,

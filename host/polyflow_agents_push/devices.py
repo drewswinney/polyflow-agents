@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 from pathlib import Path
@@ -74,6 +75,75 @@ def _hermes_home() -> Path:
 
 def store_path() -> Path:
     return _hermes_home() / STORE_DIRNAME / STORE_FILENAME
+
+
+# Mirrors hermes_agent/gateway/status.py::_PROFILE_LABEL_RE — the label the
+# `/api/profiles` endpoint reports as a profile's `name`. Keeping it identical
+# here (duplicated, not imported: gateway code must stay import-light) means
+# the `profile` a push stamps is byte-for-byte the `scope` the app lists.
+_PROFILE_LABEL_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+
+
+def profile_label_for_home(home: Path | str) -> str | None:
+    """The profile label for a canonical Hermes home path.
+
+    The pure derivation, separated from `current_profile_name` so it is
+    testable without a Hermes importable — and so the rule stays in one place.
+
+    Mirrors `gateway/status.py::_profile_label_for_home`: a home whose parent
+    directory is `profiles` and whose leaf matches a valid profile label is a
+    named profile, the leaf *is* the name, and it is returned as such. Every
+    other home — the deployment's root home, a custom `HERMES_HOME`, a path
+    that cannot be canonicalised — is where the default profile lives, and
+    `None` is returned for it.
+
+    Being deliberately looser than the canonical function (which answers
+    `None` for an unrecognized layout) is safe here: the app maps anything it
+    cannot find under its named scopes to the default profile, and the default
+    profile exists on every Hermes host, so `default` is always an openable
+    answer.
+    """
+    try:
+        canonical = Path(home).expanduser().resolve()
+    except Exception:
+        return None
+
+    if canonical.parent.name == "profiles" and _PROFILE_LABEL_RE.match(canonical.name):
+        return canonical.name
+
+    return None
+
+
+def current_profile_name() -> str:
+    """The name of the profile *this hook is firing under*.
+
+    Why a push needs it: one phone can be connected to several profiles on
+    one host, and they all write into this single machine-level registry
+    (`profiles/<name>/polyflow_agents_push` is a symlink onto it). The
+    `agentId` a device registered with is whichever profile was selected when
+    it last opened its settings screen, and Expo token rotation drifts it.
+    A push from profile A used to carry B's `agentId`, and the app then
+    opened A's session against B's scope — a blank chat. The host knows the
+    one thing the app cannot: which profile is actually talking. Stamping it
+    lets a tap re-scope to the right agent before the session opens.
+
+    Never raises — an undecipherable home is logged and reported as
+    `default`, which is the safe (openable) answer.
+    """
+    try:
+        from hermes_constants import get_hermes_home
+
+        label = profile_label_for_home(get_hermes_home())
+    except Exception:
+        # No Hermes importable (the CLI's `status` runs outside it) or an
+        # unresolvable path.
+        logger.warning("[polyflow_agents_push] could not resolve firing profile", exc_info=True)
+        label = None
+
+    if label is None:
+        return "default"
+
+    return label
 
 
 def load() -> List[Dict[str, Any]]:
@@ -139,8 +209,10 @@ def register(
         {
             "token": token,
             # The *app's* id for this agent, not anything this host knows. It is
-            # echoed back on every push so a tap can re-scope the app before
-            # opening the session; without it a notification cannot route.
+            # echoed back on every push as the *fallback* routing signal: a
+            # current host also stamps the firing profile (see
+            # `current_profile_name`), because this value is whichever profile
+            # was selected at registration time and can name the wrong one.
             "agentId": agent_id or "",
             "platform": platform or "",
             "label": label or "",
