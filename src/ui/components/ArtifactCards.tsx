@@ -3,9 +3,12 @@ import { memo, useState } from 'react'
 import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
 import type { Artifact } from '@/domain'
+import { useBackend } from '@/state/ConnectionProvider'
+import { isHtmlArtifact } from '@/ui/artifacts'
 
 import { useTheme } from '../ThemeProvider'
 import { ArtifactPreview } from './ArtifactPreview'
+import { HtmlPreviewSheet } from './HtmlPreviewSheet'
 import { Icon } from './Icon'
 import { Text } from './Text'
 
@@ -24,20 +27,38 @@ const PREVIEW_MAX_WIDTH = 260
  * carry stays on the detail screen it opens. Several artifacts from one
  * stretch of work sit side by side in a strip you scroll sideways.
  *
+ * HTML artifacts open as a rendered page in a sheet that starts at half the
+ * screen and takes it all when dragged up; everything else keeps the detail
+ * screen. The sheet is held here, the way the entry holds its image viewer,
+ * so the chat screen never hears about it.
+ *
  * Memoised like every other transcript row: nothing here changes while text
  * streams below it.
  */
 export const ArtifactCards = memo(function ArtifactCards({ artifacts }: { artifacts: Artifact[] }) {
+  const backend = useBackend()
+  const [preview, setPreview] = useState<Artifact | null>(null)
+
+  const open = (artifact: Artifact) => {
+    if (isHtmlArtifact(artifact)) setPreview(artifact)
+    // Cast like the Artifacts screen: the generated route table lags a new screen.
+    else router.push(`/artifacts/${artifact.id}` as never)
+  }
+
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
-      {artifacts.map(artifact => (
-        <Tile key={artifact.id} artifact={artifact} />
-      ))}
-    </ScrollView>
+    <>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
+        {artifacts.map(artifact => (
+          <Tile key={artifact.id} artifact={artifact} onOpen={() => open(artifact)} />
+        ))}
+      </ScrollView>
+
+      <HtmlPreviewSheet visible={preview !== null} backend={backend} artifact={preview} onClose={() => setPreview(null)} />
+    </>
   )
 })
 
-function Tile({ artifact }: { artifact: Artifact }) {
+function Tile({ artifact, onOpen }: { artifact: Artifact; onOpen: () => void }) {
   const theme = useTheme()
   // The caption is as wide as the picture and no wider, so a narrow portrait
   // page does not trail a filename twice its width.
@@ -47,8 +68,7 @@ function Tile({ artifact }: { artifact: Artifact }) {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={`Open ${artifact.name}`}
-      // Cast like the Artifacts screen: the generated route table lags a new screen.
-      onPress={() => router.push(`/artifacts/${artifact.id}` as never)}
+      onPress={onOpen}
       style={({ pressed }) => [styles.tile, { opacity: pressed ? 0.8 : 1 }]}
     >
       <ArtifactPreview

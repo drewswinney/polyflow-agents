@@ -13,6 +13,7 @@ import { useSidebar } from '@/state/sidebar'
 import { withAgent } from '@/ui/components/AgentGate'
 import { ArtifactPreview } from '@/ui/components/ArtifactPreview'
 import { Card, Divider } from '@/ui/components/Card'
+import { HtmlPreviewSheet } from '@/ui/components/HtmlPreviewSheet'
 import { Icon } from '@/ui/components/Icon'
 import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
@@ -22,6 +23,7 @@ import {
   describeOrigin,
   formatBytes,
   groupArtifactsByDay,
+  isHtmlArtifact,
   matchesArtifactFilter
 } from '@/ui/artifacts'
 import { relativeTime } from '@/ui/format'
@@ -58,6 +60,8 @@ function ArtifactsScreen() {
   const stale = useAgentScopedRoute()
 
   const [filter, setFilter] = useState<ArtifactFilter>('all')
+  /** The HTML artifact being previewed as a page, if any. */
+  const [preview, setPreview] = useState<Artifact | null>(null)
 
   const artifacts = useArtifacts(scope, stale ? null : backend, session ? { sessionId: session } : {})
   const sessions = useSessions(scope, session ? backend : null)
@@ -76,7 +80,11 @@ function ArtifactsScreen() {
       : null
 
   // Cast like `/theme` in Settings: the generated route table lags a new screen.
-  const open = (artifact: Artifact) => router.push(`/artifacts/${artifact.id}` as never)
+  // HTML opens as a rendered page in a sheet; everything else keeps the detail screen.
+  const open = (artifact: Artifact) => {
+    if (isHtmlArtifact(artifact)) setPreview(artifact)
+    else router.push(`/artifacts/${artifact.id}` as never)
+  }
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
@@ -154,6 +162,8 @@ function ArtifactsScreen() {
           <ActivityIndicator color={theme.color.secondary} style={styles.loading} />
         )}
       </ScrollView>
+
+      <HtmlPreviewSheet visible={preview !== null} backend={backend} artifact={preview} onClose={() => setPreview(null)} />
     </View>
   )
 }

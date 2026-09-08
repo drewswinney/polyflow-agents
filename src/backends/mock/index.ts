@@ -995,6 +995,39 @@ function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] 
       )
     },
     {
+      id: 'mock-art-timeline',
+      name: 'recovery-timeline.html',
+      kind: 'document',
+      mimeType: 'text/html',
+      size: 0,
+      sessionId: 'ses-zfs',
+      origin: 'agent',
+      tool: 'write_file',
+      sourcePath: '/home/agent/reports/recovery-timeline.html',
+      // One row after the report it illustrates, so the strip reads in order.
+      createdAt: now - 2 * MINUTE - 30_000,
+      updatedAt: now - 2 * MINUTE - 20_000,
+      version: 1,
+      share: null,
+      bytes: bytesFromText(
+        '<!doctype html>\n' +
+          '<html>\n' +
+          '<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Recovery timeline</title>\n' +
+          '<style>\n' +
+          '  body { font-family: system-ui, sans-serif; margin: 24px; color: #111827; background: #fafafa; }\n' +
+          '  h1 { font-size: 20px; } h2 { font-size: 15px; margin-top: 28px; }\n' +
+          '  ol { line-height: 1.7; } li { margin-bottom: 6px; }\n' +
+          '  .note { background: #eef2ff; border-left: 3px solid #4f46e5; padding: 10px 14px; margin-top: 24px; font-size: 14px; }\n' +
+          '</style></head>\n' +
+          '<body>\n' +
+          '<h1>Recovery timeline — tank</h1>\n' +
+          '<ol><li>Scrub finished clean in 3h 41m</li><li>110 stale snapshots queued</li><li>412G reclaimable after destroy</li></ol>\n' +
+          '<h2>Next</h2>\n' +
+          '<div class="note">Waiting on approval before touching anything. The destroy step is the point of no return.</div>\n' +
+          '</body></html>\n'
+      )
+    },
+    {
       id: 'mock-art-pool',
       name: 'pool-layout.png',
       kind: 'image',
