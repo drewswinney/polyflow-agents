@@ -34,6 +34,20 @@ describe('splitMentions', () => {
     ])
   })
 
+  it('takes a bare ticket id as a mention of itself', () => {
+    expect(splitMentions('Filed as t_4584630a, see the board.')).toEqual([
+      { kind: 'text', text: 'Filed as ' },
+      { kind: 'mention', mention: { slug: 't_4584630a', label: 't_4584630a' } },
+      { kind: 'text', text: ', see the board.' }
+    ])
+  })
+
+  it('does not read an id out of a longer identifier', () => {
+    expect(splitMentions('set_t_deadbeef and t_deadbeef_v2 and t_xyz are not tickets')).toEqual([
+      { kind: 'text', text: 'set_t_deadbeef and t_deadbeef_v2 and t_xyz are not tickets' }
+    ])
+  })
+
   it('does not span a line break', () => {
     // An unclosed `[[` must not swallow the rest of the message.
     const segments = splitMentions('opened [[fix-lint\ngate]] today')
@@ -52,6 +66,10 @@ describe('collectMentions', () => {
 
     expect(collectMentions(text).map(mention => mention.slug)).toEqual(['b-ticket', 'a-ticket'])
   })
+
+  it('treats a wiki-link and a bare id for the same ticket as one mention', () => {
+    expect(collectMentions('[[t_4584630a]] is t_4584630a').map(mention => mention.slug)).toEqual(['t_4584630a'])
+  })
 })
 
 describe('hasMention', () => {
@@ -61,5 +79,6 @@ describe('hasMention', () => {
 
   it('is true as soon as one could be there', () => {
     expect(hasMention('see [[a-ticket]]')).toBe(true)
+    expect(hasMention('see t_4584630a')).toBe(true)
   })
 })
