@@ -94,6 +94,11 @@ export function PreviewSheet({
             {`Could not load ${shown?.name ?? 'the file'}: ${file.error ? String((file.error as Error).message) : 'the file is missing.'}`}
           </Text>
         ) : mode === 'page' || mode === 'pdf' ? (
+          // The page is a cached file on this device — nothing is fetched, so
+          // the webview's network access is irrelevant, and the whitelist and
+          // incognito flags keep it that way: no cookies in, no session out.
+          // JavaScript stays on because the artifact is agent-generated HTML
+          // that may well be a small interactive report.
           <WebView
             source={{ uri: file.data }}
             originWhitelist={['*']}
@@ -105,7 +110,7 @@ export function PreviewSheet({
             scrollEnabled
             contentInsetAdjustmentBehavior="automatic"
             style={styles.webview}
-            sharedCookiesEnabled
+            sharedCookiesEnabled={false}
             incognito
           />
         ) : (

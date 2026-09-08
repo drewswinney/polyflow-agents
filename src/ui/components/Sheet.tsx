@@ -239,7 +239,12 @@ export function Sheet({
         // when it can be renamed — which claimed it first. Once that child
         // holds the responder the header is its ancestor, so it *is* asked on
         // move, and a vertical drag takes over from a long press in progress.
-        onMoveShouldSetPanResponder: (_event, gesture) => Math.abs(gesture.dy) > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        onMoveShouldSetPanResponder: (_event, gesture) => {
+          // Upward drags are only the sheet's business when it can go up.
+          if (!latest.current.expandable && gesture.dy <= 0) return false
+
+          return Math.abs(gesture.dy) > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx)
+        },
         onPanResponderMove: (_event, gesture) => {
           const { expandable, expanded, height, restFraction } = latest.current
           const rest = restFraction * height
