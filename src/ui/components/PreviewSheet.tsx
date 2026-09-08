@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, View } from 'react-native'
+import { ActivityIndicator, Linking, Platform, ScrollView, StyleSheet, View } from 'react-native'
 import { File } from 'expo-file-system'
 import WebView from 'react-native-webview'
 
 import type { AgentBackend, Artifact } from '@/domain'
 import { useArtifactFile } from '@/platform/artifact-cache'
-import { parseDelimited, type PreviewMode, previewMode } from '../artifacts'
+import { parseDelimited, previewNavigationDecision, type PreviewMode, previewMode } from '../artifacts'
 import { Markdown } from '../markdown/Markdown'
 import { useTheme } from '../ThemeProvider'
 import { Text } from './Text'
@@ -112,6 +112,34 @@ export function PreviewSheet({
             style={styles.webview}
             sharedCookiesEnabled={false}
             incognito
+            // `target="_blank"` (and any popup) asks the webview for a new
+            // window. There is none, so the URL goes to the system browser —
+            // the same `Linking.openURL` path the chat markdown uses — and
+            // the artifact stays loaded behind it.
+            onOpenWindow={event => {
+              const target = event.nativeEvent.targetUrl
+
+              // `Linking.openURL` can only take web URLs: a `javascript:` or
+              // `data:` link must be dropped, not handed to the OS.
+              if (target && /^https?:/i.test(target)) void Linking.openURL(target).catch(() => undefined)
+            }}
+            // A link with no `target` would otherwise navigate this webview
+            // in place, replacing the artifact with the linked page and
+            // leaving no way back. Decline top-frame jumps to external
+            // content and open them in the browser, so every external link
+            // in the artifact behaves the same; the page itself, its
+            // subresources and its #anchors keep loading.
+            onShouldStartLoadWithRequest={request => {
+              const shouldStart = previewNavigationDecision(request)
+
+              // Only a web URL can be handed to the system browser; a
+              // `javascript:` or `data:` jump is declined and dropped.
+              if (!shouldStart && request.isTopFrame !== false && /^https?:/i.test(request.url)) {
+                void Linking.openURL(request.url).catch(() => undefined)
+              }
+
+              return shouldStart
+            }}
           />
         ) : (
           <TextBody uri={file.data} mode={mode} name={shown?.name ?? ''} />

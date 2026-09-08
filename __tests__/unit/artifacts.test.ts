@@ -12,11 +12,13 @@ import {
   describeOrigin,
   formatBytes,
   groupArtifactsByDay,
+  isExternalPreviewUrl,
   isHtmlArtifact,
   isTextLike,
   matchesArtifactFilter,
   parseDelimited,
   previewMode,
+  previewNavigationDecision,
   shareCaption
 } from '@/ui/artifacts'
 
@@ -171,6 +173,55 @@ describe('previewMode', () => {
     expect(previewMode({ name: 'huge.html', mimeType: 'text/html', size: 5 * 1024 * 1024 }, false)).toBe('page')
     expect(previewMode({ name: 'notes.txt', mimeType: 'text/plain', size: 10 }, false)).toBeNull()
     expect(previewMode({ name: 'photo.png', mimeType: 'image/png', size: 10 }, false)).toBeNull()
+  })
+})
+
+describe('isExternalPreviewUrl', () => {
+  it('treats the local cached file and its anchors as the artifact', () => {
+    expect(isExternalPreviewUrl('file:///cache/a/report.html')).toBe(false)
+    expect(isExternalPreviewUrl('file:///cache/a/report.html#recipe-1')).toBe(false)
+    expect(isExternalPreviewUrl('file:/Users/drew/cache/report.html')).toBe(false)
+  })
+
+  it('treats anything the system would fetch as external', () => {
+    expect(isExternalPreviewUrl('https://recipe.example/bowl/')).toBe(true)
+    expect(isExternalPreviewUrl('http://recipe.example/bowl/')).toBe(true)
+    expect(isExternalPreviewUrl('data:text/html,<b>x</b>')).toBe(true)
+    // `javascript:` is a script, not a fetchable page — and protocol-relative
+    // links are fetched from the scheme of whatever page would host them.
+    expect(isExternalPreviewUrl('javascript:alert(1)')).toBe(true)
+    expect(isExternalPreviewUrl('//recipe.example/bowl/')).toBe(true)
+  })
+
+  it('is not a navigation for a blank URL', () => {
+    expect(isExternalPreviewUrl('')).toBe(false)
+  })
+})
+
+describe('previewNavigationDecision', () => {
+  it('lets the artifact load itself and stay where it is', () => {
+    // The sheet always renders the device's cached copy, a file:// URL — the
+    // initial load and any same-document #anchor jump.
+    expect(previewNavigationDecision({ url: 'file:///cache/a/report.html', isTopFrame: true })).toBe(true)
+    expect(previewNavigationDecision({ url: 'file:///cache/a/report.html#recipe-1', isTopFrame: true })).toBe(true)
+    // `isTopFrame` may be absent; only an explicit `false` is a subresource.
+    expect(previewNavigationDecision({ url: 'file:///cache/a/report.html' })).toBe(true)
+  })
+
+  it('lets subresources load even when external', () => {
+    // An image or script the page needs; the top frame never moves.
+    expect(previewNavigationDecision({ url: 'https://cdn.example/icon.svg', isTopFrame: false })).toBe(true)
+  })
+
+  it('declines a top-frame jump to external content so the page survives', () => {
+    // A no-target in-page link would otherwise replace the artifact, with no
+    // way back. The sheet keeps the page; a target=_blank link never reaches
+    // this decision (it opens in the system browser via onOpenWindow).
+    expect(previewNavigationDecision({ url: 'https://recipe.example/bowl/', isTopFrame: true })).toBe(false)
+    expect(previewNavigationDecision({ url: 'http://recipe.example/bowl/', isTopFrame: true })).toBe(false)
+    // Protocol-relative links resolve against the page's own scheme, which
+    // here means "leave for a network host" — declined the same way.
+    expect(previewNavigationDecision({ url: '//recipe.example/bowl/', isTopFrame: true })).toBe(false)
   })
 })
 

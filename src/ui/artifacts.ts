@@ -297,6 +297,50 @@ export function parseDelimited(text: string, delimiter: string): string[][] {
 }
 
 /**
+ * A navigation the preview sheet's WebView reports it should start, reduced
+ * to the fields the decision needs. `isTopFrame` is the native events' own
+ * word; it is optional only because a platform could omit it, and only an
+ * explicit `false` marks a subresource.
+ */
+export interface PreviewNavigation {
+  url: string
+  isTopFrame?: boolean
+}
+
+/**
+ * Whether a URL leaves the local artifact for external content.
+ *
+ * The sheet always renders the device's cached copy of the file, so the
+ * artifact and its same-document anchors are `file://` URLs. Anything the
+ * system would fetch instead — `http(s)`, `data:`, and the like — is external.
+ * The match is case-insensitive because URL schemes are; the sheet's own file
+ * URI always comes back lowercase, but an artifact's markup may not.
+ */
+export function isExternalPreviewUrl(url: string): boolean {
+  return Boolean(url) && !/^file:/i.test(url)
+}
+
+/**
+ * Whether the preview sheet should let the WebView start this load.
+ *
+ * The sheet renders one cached file, and the one thing it must not do is let
+ * a link replace that file, since there is then no way back. The call is made
+ * on the URL, not the navigation type, so it holds on both platforms without
+ * depending on how each labels the page's own first load:
+ *
+ * - Subresources (images, scripts) keep loading even when external — the
+ *   page needs them.
+ * - A top-frame jump to external content would replace the artifact, so it is
+ *   declined; the sheet opens it in the system browser instead.
+ * - The artifact itself and its `#anchor` jumps stay in the webview.
+ */
+export function previewNavigationDecision(navigation: PreviewNavigation): boolean {
+  if (navigation.isTopFrame === false) return true
+  if (isExternalPreviewUrl(navigation.url)) return false
+  return true
+}
+
+/**
  * What a share link is good for, said under the button.
  *
  * The plain truth from `docs/artifacts.md` §5: the link opens for anyone who
