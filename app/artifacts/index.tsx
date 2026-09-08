@@ -13,7 +13,7 @@ import { useSidebar } from '@/state/sidebar'
 import { withAgent } from '@/ui/components/AgentGate'
 import { ArtifactPreview } from '@/ui/components/ArtifactPreview'
 import { Card, Divider } from '@/ui/components/Card'
-import { HtmlPreviewSheet } from '@/ui/components/HtmlPreviewSheet'
+import { opensInSheet, PreviewSheet } from '@/ui/components/PreviewSheet'
 import { Icon } from '@/ui/components/Icon'
 import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
@@ -23,7 +23,6 @@ import {
   describeOrigin,
   formatBytes,
   groupArtifactsByDay,
-  isHtmlArtifact,
   matchesArtifactFilter
 } from '@/ui/artifacts'
 import { relativeTime } from '@/ui/format'
@@ -82,7 +81,7 @@ function ArtifactsScreen() {
   // Cast like `/theme` in Settings: the generated route table lags a new screen.
   // HTML opens as a rendered page in a sheet; everything else keeps the detail screen.
   const open = (artifact: Artifact) => {
-    if (isHtmlArtifact(artifact)) setPreview(artifact)
+    if (opensInSheet(artifact)) setPreview(artifact)
     else router.push(`/artifacts/${artifact.id}` as never)
   }
 
@@ -163,7 +162,7 @@ function ArtifactsScreen() {
         )}
       </ScrollView>
 
-      <HtmlPreviewSheet visible={preview !== null} backend={backend} artifact={preview} onClose={() => setPreview(null)} />
+      <PreviewSheet visible={preview !== null} backend={backend} artifact={preview} onClose={() => setPreview(null)} />
     </View>
   )
 }

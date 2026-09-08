@@ -214,13 +214,26 @@ def check_artifacts(module, client, base: str, home: Path) -> None:
     if len(image) != 1 or image[0]["kind"] != "image" or image[0]["mimeType"] != "image/png":
         fail(f"image_generate should capture one image, got {image}")
 
-    # The stdlib calls `.ts` a video. It is not.
+    # The stdlib calls `.ts` a video. It is not — and being code, it is not
+    # an artifact either: a written source file is skipped, not stored.
+    if arts.kind_for(arts.mime_for("index.ts"), "index.ts") != "code":
+        fail(f"a .ts file should be code, got {arts.kind_for(arts.mime_for('index.ts'), 'index.ts')}")
+
     code = home / "index.ts"
     code.write_text("export const x = 1\n")
-    typed = arts.capture_tool_result(tool_name="write_file", args={"path": str(code)}, result=json.dumps({"success": True}), session_id="other")
 
-    if typed[0]["kind"] != "code":
-        fail(f"a .ts file should be code, got {typed[0]['kind']} ({typed[0]['mimeType']})")
+    if arts.capture_tool_result(tool_name="write_file", args={"path": str(code)}, result=json.dumps({"success": True}), session_id="other"):
+        fail("a written source file must not become an artifact")
+    if not arts.is_source_code("Dockerfile"):
+        fail("code that goes by name rather than extension should still count as code")
+
+    # A data file is kept: a CSV is as often the deliverable as the plumbing.
+    table = home / "export.csv"
+    table.write_text("a,b\n1,2\n")
+    typed = arts.capture_tool_result(tool_name="write_file", args={"path": str(table)}, result=json.dumps({"success": True}), session_id="other")
+
+    if len(typed) != 1 or typed[0]["kind"] != "data":
+        fail(f"a .csv file should be captured as data, got {typed}")
 
     # Over the cap is refused, loudly enough to be a ValueError and not a row.
     try:

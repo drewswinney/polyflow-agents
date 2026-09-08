@@ -15,6 +15,8 @@ import {
   isHtmlArtifact,
   isTextLike,
   matchesArtifactFilter,
+  parseDelimited,
+  previewMode,
   shareCaption
 } from '@/ui/artifacts'
 
@@ -68,14 +70,16 @@ describe('matchesArtifactFilter', () => {
     const image = artifact({ kind: 'image' })
     const video = artifact({ kind: 'video' })
     const csv = artifact({ kind: 'data' })
+    // A row from before the host stopped filing source: only ever under All.
     const script = artifact({ kind: 'code' })
     const sent = artifact({ kind: 'image', origin: 'upload', tool: null })
 
     expect(matchesArtifactFilter(image, 'images')).toBe(true)
     expect(matchesArtifactFilter(video, 'images')).toBe(true)
     expect(matchesArtifactFilter(csv, 'documents')).toBe(true)
-    expect(matchesArtifactFilter(script, 'code')).toBe(true)
+    expect(matchesArtifactFilter(script, 'all')).toBe(true)
     expect(matchesArtifactFilter(script, 'documents')).toBe(false)
+    expect(ARTIFACT_FILTERS.map(option => option.key)).not.toContain('code')
     expect(matchesArtifactFilter(sent, 'sent')).toBe(true)
     expect(matchesArtifactFilter(image, 'sent')).toBe(false)
   })
@@ -149,6 +153,45 @@ describe('isHtmlArtifact', () => {
     expect(isHtmlArtifact({ name: 'html-cheatsheet.md', mimeType: 'text/markdown' })).toBe(false)
     expect(isHtmlArtifact({ name: 'notes.txt', mimeType: 'text/plain' })).toBe(false)
     expect(isHtmlArtifact({ name: 'notes.txt', mimeType: 'text/html' })).toBe(true)
+  })
+})
+
+describe('previewMode', () => {
+  it('opens pages, prose, tables and — where the WebView can draw one — PDFs in the sheet', () => {
+    expect(previewMode({ name: 'report.html', mimeType: 'text/html', size: 10 }, false)).toBe('page')
+    expect(previewMode({ name: 'notes.md', mimeType: 'text/markdown', size: 10 }, false)).toBe('markdown')
+    expect(previewMode({ name: 'notes.md', mimeType: 'application/octet-stream', size: 10 }, false)).toBe('markdown')
+    expect(previewMode({ name: 'sales.csv', mimeType: 'text/csv', size: 10 }, false)).toBe('csv')
+    expect(previewMode({ name: 'sales.tsv', mimeType: 'application/octet-stream', size: 10 }, false)).toBe('tsv')
+    expect(previewMode({ name: 'paper.pdf', mimeType: 'application/pdf', size: 10 }, true)).toBe('pdf')
+    // Android's WebView has no PDF viewer: the detail screen keeps those.
+    expect(previewMode({ name: 'paper.pdf', mimeType: 'application/pdf', size: 10 }, false)).toBeNull()
+    // Text laid out natively stops at the same cap as the detail screen.
+    expect(previewMode({ name: 'huge.csv', mimeType: 'text/csv', size: 5 * 1024 * 1024 }, false)).toBeNull()
+    expect(previewMode({ name: 'huge.html', mimeType: 'text/html', size: 5 * 1024 * 1024 }, false)).toBe('page')
+    expect(previewMode({ name: 'notes.txt', mimeType: 'text/plain', size: 10 }, false)).toBeNull()
+    expect(previewMode({ name: 'photo.png', mimeType: 'image/png', size: 10 }, false)).toBeNull()
+  })
+})
+
+describe('parseDelimited', () => {
+  it('reads quoted cells, doubled quotes, both line endings and a trailing newline', () => {
+    const csv = 'name,note,amount\r\n"Smith, Jo","said ""hi""",12\nplain,"two\nlines",3\n'
+
+    expect(parseDelimited(csv, ',')).toEqual([
+      ['name', 'note', 'amount'],
+      ['Smith, Jo', 'said "hi"', '12'],
+      ['plain', 'two\nlines', '3']
+    ])
+  })
+
+  it('keeps empty cells and empty rows in their places', () => {
+    expect(parseDelimited('a,,c\n\nd,e,', ',')).toEqual([['a', '', 'c'], [''], ['d', 'e', '']])
+    expect(parseDelimited('a\tb\n1\t2', '\t')).toEqual([
+      ['a', 'b'],
+      ['1', '2']
+    ])
+    expect(parseDelimited('', ',')).toEqual([])
   })
 })
 

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { StyleSheet, Text as RNText, View } from 'react-native'
+import { ScrollView, StyleSheet, Text as RNText } from 'react-native'
 
 import type { KanbanCardSummary } from '@/domain'
 import { useSelectedAgent } from '@/state/agents'
@@ -11,13 +11,14 @@ import { MentionProvider } from '../markdown/MentionContext'
 import { collectMentions, type Mention } from '../markdown/mentions'
 import { useTheme } from '../ThemeProvider'
 import { KanbanCardDetail } from './KanbanCardDetail'
-import { KanbanCardTile } from './KanbanCardTile'
+import { KanbanCardPreview } from './KanbanCardTile'
 
 /**
- * More than three cards under one message stops being context and starts being
- * the Boards screen, badly. The chips in the prose still name every ticket.
+ * The strip scrolls, so it can hold more than the old stack of full-width
+ * cards could — but a message that names a dozen tickets is a list, and the
+ * chips in the prose still name every one of them.
  */
-const MAX_UNFURLS = 3
+const MAX_UNFURLS = 6
 
 interface KanbanMentions {
   cards: Map<string, KanbanCardSummary>
@@ -105,12 +106,15 @@ function KanbanMentionChip({ mention }: { mention: Mention }) {
 }
 
 /**
- * The cards a message named, unfurled beneath it.
+ * The cards a message named, as a strip of tiles beneath it.
  *
  * A link preview, in effect: the chip keeps the sentence readable and this
- * answers the question the sentence raises — what state is it in, which branch,
- * which PR — without a tap. Renders nothing at all when the message names no
- * card, when the board has not arrived, or outside a `KanbanMentionProvider`.
+ * answers the question the sentence raises — what state is it in, what is it
+ * about — without a tap, and a tap opens the ticket's sheet right here in the
+ * chat. The same strip as the artifacts a message produced, at the same tile
+ * size, so the two read as one kind of attachment. Renders nothing at all when
+ * the message names no card, when the board has not arrived, or outside a
+ * `KanbanMentionProvider`.
  */
 export function KanbanUnfurls({ text }: { text: string }) {
   const context = useContext(KanbanMentionContext)
@@ -133,14 +137,15 @@ export function KanbanUnfurls({ text }: { text: string }) {
   if (!context || cards.length === 0) return null
 
   return (
-    <View style={styles.unfurls}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
       {cards.map(card => (
-        <KanbanCardTile key={card.id} card={card} onPress={() => context.open(card)} showStatus />
+        <KanbanCardPreview key={card.id} card={card} onPress={() => context.open(card)} />
       ))}
-    </View>
+    </ScrollView>
   )
 }
 
 const styles = StyleSheet.create({
-  unfurls: { gap: 8, marginTop: 8 }
+  // The artifact strip's measurements, so the two line up under a message.
+  strip: { flexDirection: 'row', alignItems: 'flex-start', gap: 14, paddingVertical: 6, paddingRight: 8 }
 })

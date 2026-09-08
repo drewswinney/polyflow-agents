@@ -4,6 +4,7 @@ import type { KanbanCardSummary } from '@/domain'
 
 import { statusTone } from '../kanban'
 import { useTheme } from '../ThemeProvider'
+import { PREVIEW_HEIGHT } from './ArtifactCards'
 import { Icon } from './Icon'
 import { Text } from './Text'
 
@@ -87,7 +88,87 @@ export function KanbanCardTile({
   )
 }
 
+/** A compact card's width: room for three lines of a title at the tile's type size. */
+const PREVIEW_WIDTH = 200
+
+/**
+ * A card at the size of an artifact tile, for the strip under a message.
+ *
+ * The same footprint as `ArtifactCards`' tiles — a block `PREVIEW_HEIGHT`
+ * tall with a caption and *Open* beneath — so a message that produced a file
+ * and named a ticket shows two strips of the same kind of thing. The block
+ * holds what a glance wants: the state, the title, the first lines of the
+ * description. Everything else is the sheet's, one tap away.
+ */
+export function KanbanCardPreview({ card, onPress }: { card: KanbanCardSummary; onPress: () => void }) {
+  const theme = useTheme()
+  const tone = statusTone(theme, card.status)
+
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${card.title}, ${card.statusLabel}`}
+      onPress={onPress}
+      style={({ pressed }) => [styles.preview, { opacity: pressed ? 0.8 : 1 }]}
+    >
+      <View
+        style={[
+          styles.previewBlock,
+          theme.shadow.card,
+          { borderRadius: theme.radius.control, borderColor: theme.color.border, backgroundColor: theme.color.surface }
+        ]}
+      >
+        <View style={styles.statusRow}>
+          <View style={[styles.statusDot, { backgroundColor: tone.text }]} />
+          <Text variant="sectionHeader" color={tone.text} numberOfLines={1} style={styles.title}>
+            {card.statusLabel}
+          </Text>
+          {card.priority != null ? (
+            <Text variant="monoSmall" color={theme.color.gray500}>
+              {`P${card.priority}`}
+            </Text>
+          ) : null}
+        </View>
+
+        <Text variant="rowLabelStrong" numberOfLines={3}>
+          {card.title}
+        </Text>
+
+        {card.description ? (
+          <Text variant="secondary" numberOfLines={3} style={styles.previewBody}>
+            {card.description}
+          </Text>
+        ) : null}
+      </View>
+
+      <Text variant="rowLabel" numberOfLines={1} style={styles.previewName}>
+        {card.id}
+      </Text>
+
+      <View style={styles.open}>
+        <Text variant="pill" color={theme.color.secondaryDeep}>
+          Open
+        </Text>
+        <Icon name="chevron-right" size={9} color={theme.color.secondaryDeep} />
+      </View>
+    </Pressable>
+  )
+}
+
 const styles = StyleSheet.create({
+  preview: { width: PREVIEW_WIDTH, gap: 4, alignItems: 'flex-start' },
+  previewBlock: {
+    alignSelf: 'stretch',
+    height: PREVIEW_HEIGHT,
+    borderWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6,
+    overflow: 'hidden'
+  },
+  previewBody: { flexShrink: 1 },
+  previewName: { paddingTop: 2 },
+  open: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   card: { borderWidth: StyleSheet.hairlineWidth, paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   statusDot: { width: 7, height: 7, borderRadius: 4 },

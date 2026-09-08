@@ -4,16 +4,15 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
 import type { Artifact } from '@/domain'
 import { useBackend } from '@/state/ConnectionProvider'
-import { isHtmlArtifact } from '@/ui/artifacts'
+import { opensInSheet, PreviewSheet } from './PreviewSheet'
 
 import { useTheme } from '../ThemeProvider'
 import { ArtifactPreview } from './ArtifactPreview'
-import { HtmlPreviewSheet } from './HtmlPreviewSheet'
 import { Icon } from './Icon'
 import { Text } from './Text'
 
 /** How tall a tile's picture is; its width follows the picture's own shape. */
-const PREVIEW_HEIGHT = 168
+export const PREVIEW_HEIGHT = 168
 /** The widest a picture may go before it gives up height instead. */
 const PREVIEW_MAX_WIDTH = 260
 
@@ -40,7 +39,7 @@ export const ArtifactCards = memo(function ArtifactCards({ artifacts }: { artifa
   const [preview, setPreview] = useState<Artifact | null>(null)
 
   const open = (artifact: Artifact) => {
-    if (isHtmlArtifact(artifact)) setPreview(artifact)
+    if (opensInSheet(artifact)) setPreview(artifact)
     // Cast like the Artifacts screen: the generated route table lags a new screen.
     else router.push(`/artifacts/${artifact.id}` as never)
   }
@@ -53,7 +52,7 @@ export const ArtifactCards = memo(function ArtifactCards({ artifacts }: { artifa
         ))}
       </ScrollView>
 
-      <HtmlPreviewSheet visible={preview !== null} backend={backend} artifact={preview} onClose={() => setPreview(null)} />
+      <PreviewSheet visible={preview !== null} backend={backend} artifact={preview} onClose={() => setPreview(null)} />
     </>
   )
 })

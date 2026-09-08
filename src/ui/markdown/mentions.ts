@@ -9,14 +9,30 @@
  * board writes the same thing in chat because it is reading and writing the
  * same files.
  *
- * So this is the trigger for showing a card in the transcript, and it is
- * deliberately the *only* one. Matching bare titles would turn an ordinary
+ * So this is one trigger for showing a card in the transcript. The other is
+ * the ticket's id itself — `t_4584630a` — which is how the agent most often
+ * refers to a card when it is not writing board files: it is what the board
+ * shows, what `hermes kanban` takes, and what the card's own sheet copies. An
+ * id is as unambiguous as a wiki-link, so it earns the same card. Those two
+ * are deliberately *all*. Matching bare titles would turn an ordinary
  * sentence into a mention as soon as someone names a ticket "Testing", and
  * would unfurl a card from the agent quoting the user's own words back.
  */
 
-/** `[[slug]]` or `[[slug|label]]`. Deliberately single-line: an unclosed `[[` must not swallow a paragraph. */
-const WIKI_LINK = /\[\[([^\]|\n]+?)(?:\|([^\]\n]+?))?\]\]/g
+/**
+ * `[[slug]]` or `[[slug|label]]`, or a bare ticket id. The wiki-link is
+ * deliberately single-line: an unclosed `[[` must not swallow a paragraph.
+ * The id is `t_` and hex, bounded on both sides, so `t_deadbeef` in the middle
+ * of a longer identifier is not one.
+ */
+const MENTION = /\[\[([^\]|\n]+?)(?:\|([^\]\n]+?))?\]\]|(?<![\w-])(t_[0-9a-f]{6,12})(?![\w-])/g
+
+/** Reads one match of `MENTION` as a mention: a link with its label, or an id standing for itself. */
+function toMention(match: RegExpMatchArray): Mention {
+  if (match[3]) return { slug: match[3], label: match[3] }
+
+  return { slug: match[1].trim(), label: match[2]?.trim() ?? null }
+}
 
 export interface Mention {
   /** The vault's id for the ticket, and the board card's `id`. */
@@ -29,7 +45,7 @@ export type MentionSegment = { kind: 'text'; text: string } | { kind: 'mention';
 
 /** Cheap pre-check, so the common mention-free message never allocates. */
 export function hasMention(source: string): boolean {
-  return source.includes('[[')
+  return source.includes('[[') || source.includes('t_')
 }
 
 /**
@@ -46,12 +62,12 @@ export function splitMentions(source: string): MentionSegment[] {
 
   // `matchAll` needs the regex's own `lastIndex` untouched between calls, so
   // this iterates a fresh copy rather than the shared literal.
-  for (const match of source.matchAll(new RegExp(WIKI_LINK))) {
+  for (const match of source.matchAll(new RegExp(MENTION))) {
     const at = match.index ?? 0
 
     if (at > last) out.push({ kind: 'text', text: source.slice(last, at) })
 
-    out.push({ kind: 'mention', mention: { slug: match[1].trim(), label: match[2]?.trim() ?? null } })
+    out.push({ kind: 'mention', mention: toMention(match) })
     last = at + match[0].length
   }
 
@@ -72,13 +88,13 @@ export function collectMentions(source: string): Mention[] {
   const seen = new Set<string>()
   const out: Mention[] = []
 
-  for (const match of source.matchAll(new RegExp(WIKI_LINK))) {
-    const slug = match[1].trim()
+  for (const match of source.matchAll(new RegExp(MENTION))) {
+    const mention = toMention(match)
 
-    if (seen.has(slug)) continue
+    if (seen.has(mention.slug)) continue
 
-    seen.add(slug)
-    out.push({ slug, label: match[2]?.trim() ?? null })
+    seen.add(mention.slug)
+    out.push(mention)
   }
 
   return out

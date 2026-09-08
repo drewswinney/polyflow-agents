@@ -5,7 +5,7 @@ import { useTheme } from '../ThemeProvider'
 import type { Theme } from '../theme'
 
 import { type MentionRenderer, useMentionRenderer } from './MentionContext'
-import { splitMentions } from './mentions'
+import { hasMention, splitMentions } from './mentions'
 import { looksLikeMarkdown, type MarkdownToken, parseMarkdown } from './parse'
 
 /**
@@ -378,7 +378,7 @@ function MarkdownTable({ tokens }: { tokens: MarkdownToken[] }) {
  * is not on the board.
  */
 function renderText(text: string, mention: MentionRenderer | null): ReactNode {
-  if (!mention || !text.includes('[[')) return text
+  if (!mention || !hasMention(text)) return text
 
   return splitMentions(text).map((segment, index) =>
     segment.kind === 'text' ? (
