@@ -152,6 +152,8 @@ def main() -> int:
         if client.post(f"{base}/test").status_code != 404:
             fail("a test push with no devices should 404")
 
+        check_profile_stamping(module, Path(tmp))
+
         check_artifacts(module, client, base, Path(tmp))
 
     print(
@@ -160,6 +162,72 @@ def main() -> int:
     )
 
     return 0
+
+
+def check_profile_stamping(module, home: Path) -> None:
+    """Every push carries the *firing* profile, not just the registered `agentId`.
+
+    The device registry is shared across every profile on a host, so a push's
+    `agentId` (set at registration time) can name the wrong profile. The host
+    must stamp the profile that is actually talking, so a tap re-scopes to the
+    right agent. This drives `_send_now` against a stubbed Expo to prove the
+    `profile` key lands on the wire, and checks the pure label derivation.
+    """
+    devices = module.devices
+    push = module.push
+
+    # --- The pure derivation, no Hermes needed ----------------------------
+    root = home  # temporary HERMES_HOME set at the top of main()
+    greg = root / "profiles" / "greg"
+    greg.mkdir(parents=True, exist_ok=True)
+
+    if devices.profile_label_for_home(greg) != "greg":
+        fail(f"a home under profiles/greg should derive to 'greg', got {devices.profile_label_for_home(greg)!r}")
+    if devices.profile_label_for_home(root) is not None:
+        fail(f"the deployment root home should not name a profile, got {devices.profile_label_for_home(root)!r}")
+
+    # --- The stamped payload ---------------------------------------------
+    # A device registered against the *default* profile's agent id, while the
+    # turn is actually firing under `greg`. The old bug: the payload carried
+    # only agentId, so a tap opened greg's session against default's scope.
+    captured: list = []
+
+    def fake_post(messages):
+        captured.extend(messages)
+
+    # Stub the two things `_send_now` reaches outside: the registry read and
+    # the Expo POST. `current_profile_name` reads `hermes_constants`, which is
+    # not importable in this standalone check, so point it at `greg` directly —
+    # the point is that the *stamped value* flows through, whatever its source.
+    orig_post, orig_load, orig_profile = push._post, devices.load, devices.current_profile_name
+    push._post = fake_post
+    devices.load = lambda: [
+        {
+            "token": TOKEN,
+            "agentId": "agent-default",  # stale: registered under default
+            "platform": "ios",
+            "label": "a phone",
+            "prefs": dict(devices.DEFAULT_PREFS),
+        }
+    ]
+    devices.current_profile_name = lambda: "greg"
+    try:
+        # `turnComplete` is a real, enabled-by-default kind — `wants()` will
+        # accept the stub device, so the send proceeds to the (faked) Expo POST.
+        push._send_now(kind="turnComplete", title="t", body="b", data={"sessionId": "s1"})
+    finally:
+        push._post, devices.load, devices.current_profile_name = orig_post, orig_load, orig_profile
+
+    if len(captured) != 1:
+        fail(f"expected exactly one pushed message, got {len(captured)}")
+
+    data = captured[0].get("data", {})
+    if data.get("profile") != "greg":
+        fail(f"push must stamp the firing profile 'greg', got data={data!r}")
+    if data.get("agentId") != "agent-default":
+        fail(f"push must still echo the registered agentId, got data={data!r}")
+    if data.get("sessionId") != "s1":
+        fail(f"push must preserve caller data, got data={data!r}")
 
 
 def check_artifacts(module, client, base: str, home: Path) -> None:

@@ -147,8 +147,9 @@ async def register_device(body: dict) -> Dict[str, Any]:
 
     registered = devices.register(
         token,
-        # The *app's* id for this agent, not anything this host knows. It rides
-        # every push so a tap can re-scope the app before opening the session.
+        # The *app's* id for this agent, not anything this host knows. Echoed
+        # back on every push as the fallback routing signal — the firing
+        # profile stamped by `push._send_now` is the primary one.
         agent_id=str(body.get("agentId") or ""),
         platform=str(body.get("platform") or ""),
         label=str(body.get("label") or ""),
