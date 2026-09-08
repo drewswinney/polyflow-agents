@@ -176,7 +176,12 @@ export function Sheet({
       PanResponder.create({
         // Claimed on movement, not on touch: a tap belongs to whatever is
         // under it, and only a deliberate vertical drag is the sheet's.
-        onMoveShouldSetPanResponder: (_event, gesture) => Math.abs(gesture.dy) > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+        // Upward drags are only the sheet's business when it can go up.
+        onMoveShouldSetPanResponder: (_event, gesture) => {
+          if (!expandable && gesture.dy <= 0) return false
+
+          return Math.abs(gesture.dy) > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx)
+        },
         onPanResponderMove: (_event, gesture) => {
           // A resting sheet only goes down — dragging up would lift the card
           // off its own bottom edge. An expandable one takes both directions
@@ -261,11 +266,21 @@ export function Sheet({
         {/* The whole header is the drag handle, not just the grabber: a 4px
             bar is a hard thing to catch, and there is nothing else up here
             that a vertical drag could mean. */}
-        <View {...pan.panHandlers} style={[styles.header, expandable && expanded && { paddingTop: insets.top + 8 }]}>
-          <View style={[styles.grabber, { backgroundColor: theme.color.border }]} />
-          <Text variant="sheetTitle" numberOfLines={1} style={styles.title}>
-            {title}
-          </Text>
+        <View
+          {...pan.panHandlers}
+          style={[
+            expandable ? styles.headerRow : styles.header,
+            expandable && expanded && { paddingTop: insets.top + 8 }
+          ]}
+        >
+          {!expanded ? <View style={[styles.grabber, { backgroundColor: theme.color.border }]} /> : null}
+          {expandable ? (
+            <Text variant="sheetTitle" numberOfLines={1} style={styles.title}>
+              {title}
+            </Text>
+          ) : (
+            <Text variant="sheetTitle">{title}</Text>
+          )}
           {expandable ? <IconButton name="xmark" accessibilityLabel={`Close ${title}`} outlined onPress={close} /> : null}
         </View>
 
@@ -287,7 +302,8 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     overflow: 'hidden'
   },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 8, paddingBottom: 12, paddingHorizontal: 16 },
+  header: { alignItems: 'center', gap: 10, paddingTop: 8, paddingBottom: 12, paddingHorizontal: 16 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingTop: 8, paddingBottom: 12, paddingHorizontal: 16 },
   grabber: { width: 36, height: 4, borderRadius: 2 },
   title: { flex: 1, minWidth: 0 }
 })
