@@ -51,13 +51,12 @@ export function formatBytes(size: number): string {
   return `${rounded} ${units[unit]}`
 }
 
-export type ArtifactFilter = 'all' | 'images' | 'documents' | 'code' | 'sent'
+export type ArtifactFilter = 'all' | 'images' | 'documents' | 'sent'
 
 export const ARTIFACT_FILTERS: { key: ArtifactFilter; label: string }[] = [
   { key: 'all', label: 'All' },
   { key: 'images', label: 'Images' },
   { key: 'documents', label: 'Documents' },
-  { key: 'code', label: 'Code' },
   { key: 'sent', label: 'Sent' }
 ]
 
@@ -66,6 +65,11 @@ export const ARTIFACT_FILTERS: { key: ArtifactFilter; label: string }[] = [
  * "documents" takes data files along with prose, since a CSV the agent wrote
  * is looked for in the same mood as the report beside it. "Sent" cuts across
  * kinds — it is every picture that came *from* this app.
+ *
+ * No "Code" filter: the host no longer files source the agent writes (it is
+ * for the toolchain, not for a person), so the chip would be empty. The kind
+ * itself stays in the taxonomy for rows stored before that rule, which show
+ * under "All" with their own glyph.
  */
 export function matchesArtifactFilter(artifact: Artifact, filter: ArtifactFilter): boolean {
   switch (filter) {
@@ -75,8 +79,6 @@ export function matchesArtifactFilter(artifact: Artifact, filter: ArtifactFilter
       return artifact.kind === 'image' || artifact.kind === 'video'
     case 'documents':
       return artifact.kind === 'document' || artifact.kind === 'data' || artifact.kind === 'other'
-    case 'code':
-      return artifact.kind === 'code'
     case 'sent':
       return artifact.origin === 'upload'
   }
@@ -182,6 +184,116 @@ export function isHtmlArtifact(artifact: Pick<Artifact, 'name' | 'mimeType'>): b
   if (artifact.mimeType === 'text/html') return true
 
   return /\.(html?|xhtml)$/i.test(artifact.name)
+}
+
+/**
+ * How the preview sheet draws an artifact: as a web page, a PDF, rendered
+ * markdown, or a table read from delimited text.
+ */
+export type PreviewMode = 'page' | 'pdf' | 'markdown' | 'csv' | 'tsv'
+
+/**
+ * Whether — and as what — an artifact opens in the preview sheet rather than
+ * on the detail screen. `null` is the detail screen.
+ *
+ * The same judgement as {@link isHtmlArtifact} for every type: MIME first,
+ * name second, since a host that says `application/octet-stream` for
+ * `notes.md` still owes rendered prose. Text that is read and laid out here
+ * (markdown, tables) stops at `TEXT_PREVIEW_LIMIT`, like the detail screen's
+ * inline text does; a page or a PDF has no such cap, since a WebView streams
+ * those itself. PDFs only where the caller says the platform's WebView can
+ * draw one — iOS can, Android's cannot — so `pdfInSheet` is the caller's
+ * platform, not a preference.
+ */
+export function previewMode(artifact: Pick<Artifact, 'name' | 'mimeType' | 'size'>, pdfInSheet: boolean): PreviewMode | null {
+  if (isHtmlArtifact(artifact)) return 'page'
+
+  const name = artifact.name.toLowerCase()
+
+  if (artifact.mimeType === 'application/pdf' || name.endsWith('.pdf')) return pdfInSheet ? 'pdf' : null
+  if (artifact.size > TEXT_PREVIEW_LIMIT) return null
+  if (artifact.mimeType === 'text/markdown' || /\.(md|markdown)$/.test(name)) return 'markdown'
+  if (artifact.mimeType === 'text/csv' || name.endsWith('.csv')) return 'csv'
+  if (artifact.mimeType === 'text/tab-separated-values' || name.endsWith('.tsv')) return 'tsv'
+
+  return null
+}
+
+/**
+ * Delimited text as rows of cells, the way a spreadsheet would read it.
+ *
+ * RFC 4180 without ceremony: a cell in double quotes may hold the delimiter,
+ * line breaks and doubled quotes; a bare cell ends at the delimiter or the
+ * line. Both line endings are taken. A trailing newline does not make an
+ * empty last row, but an empty line in the middle does keep its place, since
+ * a spreadsheet would show it too.
+ */
+export function parseDelimited(text: string, delimiter: string): string[][] {
+  const rows: string[][] = []
+  let row: string[] = []
+  let cell = ''
+  let quoted = false
+  let i = 0
+
+  while (i < text.length) {
+    const char = text[i]
+
+    if (quoted) {
+      if (char === '"') {
+        if (text[i + 1] === '"') {
+          cell += '"'
+          i += 2
+
+          continue
+        }
+
+        quoted = false
+        i += 1
+
+        continue
+      }
+
+      cell += char
+      i += 1
+
+      continue
+    }
+
+    if (char === '"' && cell === '') {
+      quoted = true
+      i += 1
+
+      continue
+    }
+
+    if (char === delimiter) {
+      row.push(cell)
+      cell = ''
+      i += 1
+
+      continue
+    }
+
+    if (char === '\r' || char === '\n') {
+      row.push(cell)
+      rows.push(row)
+      row = []
+      cell = ''
+      i += char === '\r' && text[i + 1] === '\n' ? 2 : 1
+
+      continue
+    }
+
+    cell += char
+    i += 1
+  }
+
+  if (cell !== '' || row.length > 0) {
+    row.push(cell)
+    rows.push(row)
+  }
+
+  return rows
 }
 
 /**

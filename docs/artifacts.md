@@ -66,9 +66,19 @@ its `version`, so the list does not fill with twelve revisions of one file.
 
 | Source | Trigger | What is stored |
 |---|---|---|
-| `write_file` | `post_tool_call` hook, in the process that ran the turn | the file at `args.path` (or `result.resolved_path`), if it exists and is under the size cap |
+| `write_file` | `post_tool_call` hook, in the process that ran the turn | the file at `args.path` (or `result.resolved_path`), if it exists, is under the size cap, and is not source code |
 | `image_generate` / `image_gen` / `video_gen` and kin | same hook | every `url` / `image` / `video` in the result: a local absolute path is copied, an `http(s)` URL is fetched (10s, size-capped) |
 | A picture the phone sent | the app, after `prompt()` returns the host's filename | the downscaled bytes the phone actually uploaded, under the host's name |
+
+**Code is not an artifact.** An artifact is something the agent produced for a
+person to look at — a report, a page, a picture, a spreadsheet. A coding task
+writes dozens of source files on the way to its result, and none of them is
+that; a store that filed each one would bury the report under the `.tsx` files
+that built it. So a `write_file` whose kind would be `code` (`is_source_code`,
+the same judgement `record` uses for `kind`) is logged and skipped. Data files
+— a CSV, a JSON export — are kept, since those are as often the deliverable as
+the plumbing. The `code` kind stays in the taxonomy for rows stored before this
+rule.
 
 Nothing is captured from `terminal`, `patch` or `execute_code`. The bundled
 `disk-cleanup` plugin shows the terminal-output path-grep pattern is workable,
@@ -189,6 +199,14 @@ reverse proxy that satisfies the gate for that one prefix — is the whole gap.
   header links to the same screen scoped to that session.
 - **Detail:** `/artifacts/[id]`. Preview, provenance, *Open session*, *Share
   file*, *Copy link* / *Stop sharing*, *Delete*.
+- **Preview sheet:** what can be shown as the thing it is opens in a sheet
+  instead — half the screen, dragged up to all of it (`PreviewSheet`,
+  `previewMode` in `ui/artifacts.ts`). HTML renders in a WebView from the
+  cached file; markdown as prose through the chat's renderer; CSV and TSV as a
+  table sized to its columns, the first 500 rows. A PDF takes the same sheet
+  on iOS, whose WebView draws one; Android's has no viewer, so a PDF there
+  keeps the detail screen and its share button. Everything else — plain text,
+  code, images, Office files — is the detail screen.
 - **In the chat itself:** each file the agent produced appears as a tile in the
   transcript, slotted by time under the work section that made it and above
   the reply that mentions it (`withArtifactRows` in `transcript-rows.ts`). The
