@@ -700,7 +700,7 @@ async function resolveHostImages(backend: AgentBackend, sessionId: SessionId, na
       if (artifact.origin !== 'upload' || !names.has(artifact.name) || resolved.has(artifact.name)) continue
 
       try {
-        const uri = await ensureArtifactFile(artifact, () => backend.readArtifact(artifact.id))
+        const uri = await ensureArtifactFile(artifact, () => backend.readArtifact(artifact.id, artifact.version))
 
         resolved.set(artifact.name, cacheSentImage(sessionId, artifact.name, uri) ?? uri)
       } catch {

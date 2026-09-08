@@ -1110,12 +1110,12 @@ export class HermesBackend implements AgentBackend {
     return toArtifact(await this.rest.artifact(id))
   }
 
-  readArtifact(id: string): Promise<ArtifactBytes> {
-    return this.rest.artifactBytes(id)
+  readArtifact(id: string, version: number): Promise<ArtifactBytes> {
+    return this.rest.artifactBytes(id, version)
   }
 
-  readArtifactThumbnail(id: string): Promise<ArtifactBytes> {
-    return this.rest.artifactThumbnail(id)
+  readArtifactThumbnail(id: string, version: number): Promise<ArtifactBytes> {
+    return this.rest.artifactThumbnail(id, version)
   }
 
   /**

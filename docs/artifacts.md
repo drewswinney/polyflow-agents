@@ -110,6 +110,14 @@ the same auth the app already clears.
 | `DELETE /artifacts/{id}/share` | revoke |
 | `GET /share/{token}` | the bytes, by token alone |
 
+Both bytes routes answer with `Cache-Control: private, max-age=86400` and the
+file's sha256 as the ETag, on the promise that the bytes for one id and
+version never change. The routes ignore the query, but the app requests them
+as `…/content?v={version}` and `…/thumbnail?v={version}`: the HTTP cache under
+`fetch` (OkHttp on Android, NSURLCache on iOS) keys on the whole URL, and
+without the version it answers a rewritten artifact with the previous file
+for the rest of the day.
+
 One row:
 
 ```json
