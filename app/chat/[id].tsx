@@ -19,6 +19,7 @@ import { ArtifactCards } from '@/ui/components/ArtifactCards'
 import { ClarifyCard } from '@/ui/components/ClarifyCard'
 import { Composer } from '@/ui/components/Composer'
 import { IconButton } from '@/ui/components/IconButton'
+import { PendingTurnRow } from '@/ui/components/PendingTurnRow'
 import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { ScrollToBottomButton } from '@/ui/components/ScrollToBottomButton'
 import { StreamingTail } from '@/ui/components/StreamingTail'
@@ -292,6 +293,23 @@ function ChatScreen() {
     if (producedMore || turnEnded) void refetchArtifacts()
   }, [producedSettled, stream.turnActive, refetchArtifacts])
 
+  /**
+   * Whether anything else is already reporting the turn.
+   *
+   * The pending row fills the gap before content; once the tail streams, or a
+   * tool card is running under the work header, it would be a second live
+   * indicator for one turn. A message the host queued or folded into the
+   * running turn is different — that is news about *this* message, and the
+   * other turn's activity says nothing about it.
+   */
+  const lastEntry = stream.entries[stream.entries.length - 1]
+  const workReporting =
+    streaming || (lastEntry?.kind === 'tool' && (lastEntry.call.status === 'running' || lastEntry.call.status === 'pending'))
+  const pendingRow =
+    stream.pending && (stream.pending.phase === 'queued' || stream.pending.phase === 'redirected' || !workReporting)
+      ? stream.pending
+      : null
+
   const baseRows = useMemo(() => groupTranscript(stream.entries), [stream.entries])
   const rows = useMemo(() => withArtifactRows(baseRows, artifacts.data?.artifacts ?? []), [baseRows, artifacts.data])
   const artifactCount = artifacts.data?.total ?? 0
@@ -434,6 +452,10 @@ function ChatScreen() {
                 ListFooterComponent={
                   <View style={styles.entry}>
                     <StreamingTail tail={stream.tail} />
+
+                    {/* Between sending and the first token — the gap that used
+                        to look like nothing happening. */}
+                    <PendingTurnRow pending={pendingRow} />
 
                     {/* In the transcript, not over it: the turn is halted, but only
                         this session's, so nothing else needs to be blocked (§7.6). */}

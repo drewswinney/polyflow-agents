@@ -543,6 +543,25 @@ client that replays from the last event it saw:
 - In-flight tool calls become `unknown` — the app does not guess the outcome
 - The agent keeps working on the VM regardless; the banner says so
 
+Two refinements, added once the first version had been used over a phone that
+sleeps (2026-09):
+
+- **A send that fails on the socket goes back to the outbox**, and the drain
+  waits for the reconnect's transcript refetch before sending. A
+  `prompt.submit` whose acknowledgement died with the socket may have reached
+  the host all the same — Hermes persists the user row at submit — and the
+  refetched transcript is how the app finds out. Resending blind would run the
+  turn twice or, on the host's default busy policy, interrupt the one it had
+  started. Any other failure is reported in the transcript, beside the bubble.
+- **Send is not silent.** `message.start` and the submit's own acknowledgement
+  drive a pending row (`state/pending-turn.ts`) from the tap until the first
+  content, and Stop is offered from the acknowledgement rather than the first
+  token. The host answers a mid-turn submit with `queued` or `redirected`
+  rather than rejecting it — a correction folded into the running turn takes
+  effect at the model's next call, which can be minutes away behind a tool —
+  and the row says which, instead of drawing the bubble as though a reply
+  were seconds away.
+
 ---
 
 ## 6. Project structure

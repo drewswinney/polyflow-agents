@@ -333,7 +333,8 @@ export class MockBackend implements AgentBackend {
     return {
       images: content
         .filter(block => block.kind === 'image' && block.uri)
-        .map(block => ({ name: block.name ?? 'image.jpg', sourceUri: block.uri as string }))
+        .map(block => ({ name: block.name ?? 'image.jpg', sourceUri: block.uri as string })),
+      status: 'started'
     }
   }
 
@@ -844,6 +845,8 @@ export class MockBackend implements AgentBackend {
 
   /** The scripted turn: think → stream → tool → approval → settle. */
   private async runTurn(id: SessionId): Promise<void> {
+    // What a real host does first, and what the pending row waits on.
+    this.emit(id, { kind: 'turn_started' })
     await tick(300)
     if (this.stopped(id)) return
 

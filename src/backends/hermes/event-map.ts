@@ -174,6 +174,27 @@ export function mapGatewayEvent(event: GatewayEvent, ctx: MapContext): SessionUp
       break
     }
 
+    // The host has taken the turn up. Log-only before, so the chat had no
+    // signal between a submit and the first token, and a slow model or a
+    // rebuilt runtime looked exactly like nothing happening. Still logged —
+    // `LOG_ONLY` adds the record below.
+    case 'message.start': {
+      updates.push({ kind: 'turn_started' })
+      break
+    }
+
+    // A keyed notice for the person, not a transcript entry: the one that
+    // matters here is "still starting the agent … your message will be sent
+    // as soon as it's ready", which the host raises when a deferred build
+    // outlives thirty seconds. `notification.clear` needs no mapping — the
+    // pending row it would clear goes away with the first content anyway.
+    case 'notification.show': {
+      const text = str(payload?.text).trim()
+
+      if (text) updates.push({ kind: 'notice', text })
+      break
+    }
+
     case 'tool.start':
     case 'tool.progress': {
       const id = toolIdOf(payload)
