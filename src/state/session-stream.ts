@@ -121,6 +121,9 @@ export function useSessionStream(
    * long tool run is exactly when cancelling matters most.
    */
   const [turnActive, setTurnActive] = useState(false)
+  /** `turnActive` as the stream callback sees it, which must not close over a render. */
+  const turnActiveRef = useRef(false)
+  turnActiveRef.current = turnActive
   const [pending, setPendingState] = useState<PendingTurn | null>(null)
   /**
    * The pending state as of the last write, not the last render.
@@ -427,8 +430,16 @@ export function useSessionStream(
           setTurnActive(true)
           break
 
-        // Consumed above, into the pending row. Not a transcript entry.
+        // Consumed above, into the pending row, when there is one. With no
+        // row and a turn running it is the host compacting between steps —
+        // the same silent wait, only mid-turn — so it starts one. The next
+        // content clears it, as for any other start.
         case 'notice':
+          if (turnActiveRef.current) {
+            const text = update.text
+
+            setPending(current => current ?? { phase: 'starting', since: Date.now(), notice: text })
+          }
           break
 
         case 'agent_message_chunk':
@@ -600,7 +611,7 @@ export function useSessionStream(
           if (status !== 'started') {
             setPending(pendingAfterSubmit(status, Date.now()))
           } else if (pendingRef.current?.phase === 'sending') {
-            setPending(pendingAfterSubmit(status, Date.now()))
+            setPending(current => pendingAfterSubmit(status, Date.now(), current?.phase === 'sending' ? current.notice : undefined))
             setTurnActive(true)
           }
         },

@@ -48,6 +48,29 @@ describe('pendingAfterSubmit', () => {
     expect(pendingAfterSubmit('queued', 5).phase).toBe('queued')
     expect(pendingAfterSubmit('redirected', 5).phase).toBe('redirected')
   })
+
+  it('carries a notice that beat the acknowledgement into the start', () => {
+    expect(pendingAfterSubmit('started', 5, 'Compacting context')).toEqual({
+      phase: 'starting',
+      since: 5,
+      notice: 'Compacting context'
+    })
+    expect(pendingAfterSubmit('queued', 5, 'Compacting context')).toEqual({ phase: 'queued', since: 5 })
+  })
+})
+
+describe('a message still being sent', () => {
+  const sending: PendingTurn = { phase: 'sending', since: 0 }
+
+  it('shows a notice the host raised before answering the submit', () => {
+    // The host takes the turn up — and may start compacting for it — as soon
+    // as it accepts the prompt, before the submit's answer is back.
+    const noticed = pendingAfterUpdate(sending, { kind: 'notice', text: 'Compacting context' })
+
+    expect(noticed).toEqual({ phase: 'sending', since: 0, notice: 'Compacting context' })
+    expect(describePending(noticed as PendingTurn)).toBe('Compacting context')
+    expect(describePending(sending)).toBe('Sending…')
+  })
 })
 
 describe('a message the host is starting', () => {

@@ -1,0 +1,293 @@
+From 4cb312c32ddddf55c711e1cbda1b7b10067363cd Mon Sep 17 00:00:00 2001
+From: Drew Swinney <drewswinney@gmail.com>
+Date: Tue, 8 Sep 2026 16:25:27 -0400
+Subject: [PATCH] fix(compression): stop the preflight estimate charging
+ reasoning the provider never sees
+
+The preflight token estimate counted every assistant message's stored
+reasoning and reasoning_content (identical text, stored twice) even though
+the request build pops reasoning and strips reasoning_content for every
+provider except the DeepSeek/Kimi/MiMo thinking-mode echo-back. On a long
+tool-heavy session with a reasoning model the estimate ran at 3-4x the real
+prompt (264k rough vs 70k real on a 131k window), so preflight compaction
+fired at a third of the window on every rebuilt runtime and stalled the turn
+for 5 to 15 minutes each time.
+
+Thread a replay_reasoning_content flag through the estimators, keyed into
+the per-message memo, and pass the wire policy from the preflight, idle,
+post-compression and no-usage-fallback sites. Callers without provider
+context keep the conservative full charge.
+
+Measured on the affected session: 346 active messages, 180,674 rough
+before, 69,615 after; provider-reported prompt 87,090 including system
+prompt and tool schemas.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+---
+ agent/conversation_compression.py |  3 +
+ agent/conversation_loop.py        |  6 +-
+ agent/model_metadata.py           | 92 +++++++++++++++++++++++++++----
+ agent/turn_context.py             |  4 ++
+ 4 files changed, 92 insertions(+), 13 deletions(-)
+
+diff --git a/agent/conversation_compression.py b/agent/conversation_compression.py
+index 97a9e3dbf2..cf4965a321 100644
+--- a/agent/conversation_compression.py
++++ b/agent/conversation_compression.py
+@@ -3855,10 +3855,13 @@ def compress_context(
+         # Keep the post-compression rough estimate for diagnostics, but do not
+         # treat it as provider-reported prompt usage. Schema-heavy rough estimates
+         # can remain above threshold even after the next real API request fits.
++        from agent.model_metadata import provider_replays_reasoning
++
+         _compressed_est = estimate_request_tokens_rough(
+             compressed,
+             system_prompt=new_system_prompt or "",
+             tools=agent.tools or None,
++            replay_reasoning_content=provider_replays_reasoning(agent),
+         )
+         agent.context_compressor.last_compression_rough_tokens = _compressed_est
+         agent.context_compressor.last_prompt_tokens = -1
+diff --git a/agent/conversation_loop.py b/agent/conversation_loop.py
+index ea9e1ce264..563658d850 100644
+--- a/agent/conversation_loop.py
++++ b/agent/conversation_loop.py
+@@ -7287,8 +7287,12 @@ def run_conversation(
+                     # these add 20-30K tokens the messages-only
+                     # estimate misses, which can skip compression
+                     # past the configured threshold (#14695).
++                    from agent.model_metadata import provider_replays_reasoning
++
+                     _real_tokens = estimate_request_tokens_rough(
+-                        messages, tools=agent.tools or None
++                        messages,
++                        tools=agent.tools or None,
++                        replay_reasoning_content=provider_replays_reasoning(agent),
+                     )
+ 
+                 if (
+diff --git a/agent/model_metadata.py b/agent/model_metadata.py
+index 57168fc960..eec8771d91 100644
+--- a/agent/model_metadata.py
++++ b/agent/model_metadata.py
+@@ -3268,9 +3268,23 @@ def estimate_tokens_rough(text: str) -> int:
+     return dense + ((sparse + 3) // 4)
+ 
+ 
+-def estimate_messages_tokens_rough(messages: List[Dict[str, Any]]) -> int:
++def estimate_messages_tokens_rough(
++    messages: List[Dict[str, Any]],
++    *,
++    replay_reasoning_content: bool = True,
++) -> int:
+     """Rough token estimate for a message list (pre-flight only).
+ 
++    ``replay_reasoning_content`` says whether the active provider echoes
++    stored assistant ``reasoning_content`` back on replayed turns (DeepSeek /
++    Kimi / MiMo thinking mode). Everywhere else the request build strips it
++    and ``reasoning`` never ships, so pass ``False`` there — see
++    ``provider_replays_reasoning`` — or a long tool-heavy session with a
++    reasoning model estimates at 2-4x its wire size and preflight compaction
++    fires at a third of the real window, stalling the turn for minutes each
++    time. Default ``True`` keeps the conservative full charge for callers
++    without provider context.
++
+     Image parts (base64 PNG/JPEG) are counted as a flat ~1500 tokens per
+     image — the Anthropic pricing model — instead of counting raw base64
+     character length. Without this, a single ~1MB screenshot would be
+@@ -3285,10 +3299,29 @@ def estimate_messages_tokens_rough(messages: List[Dict[str, Any]]) -> int:
+     _IMAGE_TOKEN_COST = 1500
+     total = 0
+     for msg in messages:
+-        total += _estimate_message_tokens_cached(msg, _IMAGE_TOKEN_COST)
++        total += _estimate_message_tokens_cached(
++            msg, _IMAGE_TOKEN_COST, replay_reasoning_content=replay_reasoning_content
++        )
+     return total
+ 
+ 
++def provider_replays_reasoning(agent: Any) -> bool:
++    """Whether ``agent``'s active provider echoes ``reasoning_content`` back.
++
++    Mirrors the wire policy (``apply_reasoning_content_policy`` keyed on
++    ``AIAgent._needs_thinking_reasoning_pad``) for the estimators above.
++    Agents without the method (test doubles, minimal runtimes) get ``True``,
++    the conservative full charge.
++    """
++    fn = getattr(agent, "_needs_thinking_reasoning_pad", None)
++    if not callable(fn):
++        return True
++    try:
++        return bool(fn())
++    except Exception:
++        return True
++
++
+ # --- Per-message token-estimate memo -------------------------------------
+ #
+ # ``estimate_messages_tokens_rough`` is called on the full history every
+@@ -3337,21 +3370,28 @@ def _msg_fingerprint(value: Any, pins: list) -> Any:
+     raise ValueError("unfingerprintable message value")
+ 
+ 
+-def _estimate_message_tokens_cached(msg: Any, image_cost: int) -> int:
++def _estimate_message_tokens_cached(
++    msg: Any, image_cost: int, *, replay_reasoning_content: bool = True
++) -> int:
+     try:
+         pins: list = []
+-        key = _msg_fingerprint(msg, pins)
++        # The replay flag changes the shadow, so it is part of the key.
++        key = (_msg_fingerprint(msg, pins), bool(replay_reasoning_content))
+         hash(key)
+     except Exception:
+         return (
+-            _estimate_message_tokens_without_images(msg)
++            _estimate_message_tokens_without_images(
++                msg, replay_reasoning_content=replay_reasoning_content
++            )
+             + _count_image_tokens(msg, image_cost)
+         )
+     cached = _MSG_TOKENS_CACHE.get(key)
+     if cached is not None:
+         return cached[1]
+     tokens = (
+-        _estimate_message_tokens_without_images(msg)
++        _estimate_message_tokens_without_images(
++            msg, replay_reasoning_content=replay_reasoning_content
++        )
+         + _count_image_tokens(msg, image_cost)
+     )
+     _MSG_TOKENS_CACHE[key] = (pins, tokens)
+@@ -3389,9 +3429,20 @@ def _count_image_tokens(msg: Dict[str, Any], cost_per_image: int) -> int:
+     return count * cost_per_image
+ 
+ 
+-def _wire_message_shadow(msg: Dict[str, Any]) -> Dict[str, Any]:
++def _wire_message_shadow(
++    msg: Dict[str, Any], *, replay_reasoning_content: bool = True
++) -> Dict[str, Any]:
+     """Shadow of a message holding only what the provider actually receives.
+ 
++    Reasoning fields follow the request build (``conversation_loop`` +
++    ``apply_reasoning_content_policy``): ``reasoning`` never ships as-is — it
++    is at most promoted into ``reasoning_content`` and then popped — so it is
++    counted only when it is the sole copy and the provider replays it; and
++    ``reasoning_content`` is stripped from every assistant turn unless the
++    provider enforces the thinking-mode echo-back (``replay_reasoning_content``).
++    Counting both on every turn charged stored thinking twice, and charged it
++    at all for providers that never see it.
++
+     Two adjustments to the raw persisted dict:
+ 
+     * ``api_content`` is a SUBSTITUTE for ``content``, not an addition to it.
+@@ -3416,10 +3467,16 @@ def _wire_message_shadow(msg: Dict[str, Any]) -> Dict[str, Any]:
+         and bool(sidecar)
+         and msg.get("role") in ("user", "assistant")
+     )
++    _rc = msg.get("reasoning_content")
++    _has_reasoning_content = isinstance(_rc, str) and bool(_rc.strip())
+     shadow: Dict[str, Any] = {}
+     for k, v in msg.items():
+         if k in ("_anthropic_content_blocks", "reasoning_details") or k in PERSISTENCE_ONLY_MESSAGE_FIELDS:
+             continue
++        if k == "reasoning" and (_has_reasoning_content or not replay_reasoning_content):
++            continue
++        if k == "reasoning_content" and not replay_reasoning_content:
++            continue
+         if k == "api_content":
+             # Always popped before the request is built; only counted when it
+             # actually replaces ``content``.
+@@ -3451,7 +3508,9 @@ def _wire_message_shadow(msg: Dict[str, Any]) -> Dict[str, Any]:
+     return shadow
+ 
+ 
+-def _estimate_message_chars(msg: Dict[str, Any]) -> int:
++def _estimate_message_chars(
++    msg: Dict[str, Any], *, replay_reasoning_content: bool = True
++) -> int:
+     """Char count for token estimation, excluding base64 image data.
+ 
+     Base64 images are counted via `_count_image_tokens` instead; including
+@@ -3459,14 +3518,20 @@ def _estimate_message_chars(msg: Dict[str, Any]) -> int:
+     """
+     if not isinstance(msg, dict):
+         return len(str(msg))
+-    return len(str(_wire_message_shadow(msg)))
++    return len(
++        str(_wire_message_shadow(msg, replay_reasoning_content=replay_reasoning_content))
++    )
+ 
+ 
+-def _estimate_message_tokens_without_images(msg: Dict[str, Any]) -> int:
++def _estimate_message_tokens_without_images(
++    msg: Dict[str, Any], *, replay_reasoning_content: bool = True
++) -> int:
+     """Token estimate for a message shadow with image payloads stripped."""
+     if not isinstance(msg, dict):
+         return estimate_tokens_rough(str(msg))
+-    return estimate_tokens_rough(str(_wire_message_shadow(msg)))
++    return estimate_tokens_rough(
++        str(_wire_message_shadow(msg, replay_reasoning_content=replay_reasoning_content))
++    )
+ 
+ 
+ def estimate_request_tokens_rough(
+@@ -3474,6 +3539,7 @@ def estimate_request_tokens_rough(
+     *,
+     system_prompt: str = "",
+     tools: Optional[List[Dict[str, Any]]] = None,
++    replay_reasoning_content: bool = True,
+ ) -> int:
+     """Rough token estimate for a full chat-completions request.
+ 
+@@ -3487,7 +3553,9 @@ def estimate_request_tokens_rough(
+     if system_prompt:
+         total += estimate_tokens_rough(system_prompt)
+     if messages:
+-        total += estimate_messages_tokens_rough(messages)
++        total += estimate_messages_tokens_rough(
++            messages, replay_reasoning_content=replay_reasoning_content
++        )
+     if tools:
+         total += _estimate_tools_tokens_rough(tools)
+     return total
+diff --git a/agent/turn_context.py b/agent/turn_context.py
+index a90bee9a1a..54bffed361 100644
+--- a/agent/turn_context.py
++++ b/agent/turn_context.py
+@@ -46,6 +46,7 @@ from agent.message_metadata import append_message, stamp_message_timestamp
+ from agent.model_metadata import (
+     estimate_messages_tokens_rough,
+     estimate_request_tokens_rough,
++    provider_replays_reasoning,
+ )
+ 
+ logger = logging.getLogger(__name__)
+@@ -788,6 +789,7 @@ def build_turn_context(
+                 messages,
+                 system_prompt=active_system_prompt or "",
+                 tools=agent.tools or None,
++                replay_reasoning_content=provider_replays_reasoning(agent),
+             )
+             # Post-compression target size: don't summarise a thread already
+             # below what compaction would reduce it to.
+@@ -867,6 +869,7 @@ def build_turn_context(
+             messages,
+             system_prompt=active_system_prompt or "",
+             tools=agent.tools or None,
++            replay_reasoning_content=provider_replays_reasoning(agent),
+         )
+         _compressor = agent.context_compressor
+         # getattr guard: minimal compressor doubles (SimpleNamespace in the
+@@ -1031,6 +1034,7 @@ def build_turn_context(
+                     messages,
+                     system_prompt=active_system_prompt or "",
+                     tools=agent.tools or None,
++                    replay_reasoning_content=provider_replays_reasoning(agent),
+                 )
+                 if not _compression_made_progress(
+                     _orig_len, len(messages), _orig_tokens, _preflight_tokens
+-- 
+2.47.3
+
