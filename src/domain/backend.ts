@@ -82,7 +82,9 @@ export type SessionUpdate =
    * A line from the host about the turn, for the pending row.
    *
    * Hermes emits one when an agent build outlives thirty seconds ("still
-   * starting the agent … your message will be sent as soon as it's ready").
+   * starting the agent … your message will be sent as soon as it's ready"),
+   * and when it compacts context before or between model calls ("Compacting
+   * context — summarizing earlier conversation…"), which can take minutes.
    * Rendered only while a turn is pending; never a transcript entry.
    */
   | { kind: 'notice'; text: string }

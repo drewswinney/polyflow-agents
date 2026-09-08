@@ -66,6 +66,28 @@ describe('the start of a turn', () => {
   it('says nothing about chat for an empty notice', () => {
     expect(chatUpdates('notification.show', { text: '' })).toEqual([])
   })
+
+  it('passes the host’s compaction status through as a notice', () => {
+    // The bug this pins: preflight compaction held a turn for fifteen
+    // minutes, and status.update was the only event on the socket the whole
+    // time — unmapped, so the row said "Working…" and the session looked
+    // paused.
+    expect(chatUpdates('status.update', { kind: 'compacting', text: '🗜️ Compacting context — summarizing…' })).toEqual([
+      { kind: 'notice', text: '🗜️ Compacting context — summarizing…' }
+    ])
+    expect(chatUpdates('status.update', { kind: 'compacted', text: '✓ Context compaction complete' })).toEqual([
+      { kind: 'notice', text: '✓ Context compaction complete' }
+    ])
+    expect(chatUpdates('status.update', { kind: 'lifecycle', text: '📦 Preflight compression: ~263,732 tokens' })).toEqual([
+      { kind: 'notice', text: '📦 Preflight compression: ~263,732 tokens' }
+    ])
+  })
+
+  it('keeps the TUI’s own status chatter out of the chat', () => {
+    expect(chatUpdates('status.update', { kind: 'status', text: 'ready' })).toEqual([])
+    expect(chatUpdates('status.update', { kind: 'compacting', text: '  ' })).toEqual([])
+    expect(chatUpdates('status.update', {})).toEqual([])
+  })
 })
 
 describe('a turn that streams and restates itself', () => {

@@ -16,8 +16,14 @@
 import type { PromptStatus, SessionUpdate, TranscriptEntry } from '@/domain'
 
 export type PendingTurn =
-  /** Handed to the backend; no acknowledgement yet. Includes the resume. */
-  | { phase: 'sending'; since: number }
+  /**
+   * Handed to the backend; no acknowledgement yet. Includes the resume.
+   *
+   * A notice can land here too: the host starts the turn — and may start
+   * compacting for it — the moment it accepts the prompt, before the answer
+   * to the submit is back on a serially read socket.
+   */
+  | { phase: 'sending'; since: number; notice?: string }
   /** The host accepted it and is working; nothing has arrived. */
   | { phase: 'starting'; since: number; notice?: string }
   /** Runs after the current turn ends. */
@@ -32,12 +38,17 @@ export type PendingTurn =
  */
 export const PENDING_STALE_AFTER_MS = 15 * 60 * 1000
 
-/** What the host's answer to the submit makes of a message in flight. */
-export function pendingAfterSubmit(status: PromptStatus | undefined, at: number): PendingTurn {
+/**
+ * What the host's answer to the submit makes of a message in flight.
+ *
+ * `notice` is whatever the host already said while the answer was on its
+ * way; a plain start keeps it, because the wait it describes is still on.
+ */
+export function pendingAfterSubmit(status: PromptStatus | undefined, at: number, notice?: string): PendingTurn {
   if (status === 'queued') return { phase: 'queued', since: at }
   if (status === 'redirected') return { phase: 'redirected', since: at }
 
-  return { phase: 'starting', since: at }
+  return notice ? { phase: 'starting', since: at, notice } : { phase: 'starting', since: at }
 }
 
 /**
@@ -68,7 +79,7 @@ export function pendingAfterUpdate(current: PendingTurn | null, update: SessionU
       return null
 
     case 'notice':
-      return current.phase === 'starting' ? { ...current, notice: update.text } : current
+      return current.phase === 'starting' || current.phase === 'sending' ? { ...current, notice: update.text } : current
 
     case 'turn_complete':
       return current.phase === 'queued' ? { phase: 'starting', since: Date.now() } : null
@@ -116,7 +127,7 @@ export function pendingLooksStale(current: PendingTurn, entries: readonly Transc
 export function describePending(current: PendingTurn): string {
   switch (current.phase) {
     case 'sending':
-      return 'Sending…'
+      return current.notice ?? 'Sending…'
     case 'starting':
       return current.notice ?? 'Working…'
     case 'queued':

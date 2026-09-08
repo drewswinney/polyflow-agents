@@ -12,6 +12,7 @@
  * - `approval.request` → `payload.{command, description, request_id,
  *                        allow_permanent, choices, smart_denied}`
  * - `session.usage` → `payload.usage.{input, output, total, calls}`
+ * - `status.update` → `payload.{kind, text}` — the agent's status callback
  */
 
 import type { GatewayEvent } from '@hermes/shared'
@@ -27,6 +28,16 @@ function str(value: unknown): string {
 function num(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
+
+/**
+ * The `status.update` kinds that are about the turn, for the pending row.
+ *
+ * The gateway re-tags the agent's compaction line as `compacting` and its
+ * end as `compacted`; everything else the agent says about a turn — the
+ * preflight notice, a fallback, a retry — arrives as `lifecycle`, and a
+ * warning as `warn`. A bare `status` is the TUI's own chatter and stays out.
+ */
+const TURN_STATUS_KINDS = new Set(['lifecycle', 'compacting', 'compacted', 'warn'])
 
 /**
  * Hermes ships assistant text as a string, but a provider can hand back the
@@ -192,6 +203,18 @@ export function mapGatewayEvent(event: GatewayEvent, ctx: MapContext): SessionUp
       const text = str(payload?.text).trim()
 
       if (text) updates.push({ kind: 'notice', text })
+      break
+    }
+
+    // The agent narrating its own turn. Compaction is the one that matters:
+    // summarising a long transcript before the first token can hold a turn
+    // for minutes, and this is the only event on the socket meanwhile — it
+    // went unmapped, so the row said "Working…" for the whole stall and the
+    // session looked paused.
+    case 'status.update': {
+      const text = str(payload?.text).trim()
+
+      if (text && TURN_STATUS_KINDS.has(str(payload?.kind))) updates.push({ kind: 'notice', text })
       break
     }
 
