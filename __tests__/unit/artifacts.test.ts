@@ -12,6 +12,7 @@ import {
   describeOrigin,
   formatBytes,
   groupArtifactsByDay,
+  isHtmlArtifact,
   isTextLike,
   matchesArtifactFilter,
   shareCaption
@@ -132,6 +133,22 @@ describe('isTextLike', () => {
     expect(isTextLike({ kind: 'image', mimeType: 'image/svg+xml', size: 100 })).toBe(false)
     expect(isTextLike({ kind: 'document', mimeType: 'application/pdf', size: 100 })).toBe(false)
     expect(isTextLike({ kind: 'document', mimeType: 'text/plain', size: 5 * 1024 * 1024 })).toBe(false)
+  })
+})
+
+describe('isHtmlArtifact', () => {
+  it('opens pages as pages', () => {
+    expect(isHtmlArtifact({ name: 'report.html', mimeType: 'text/html' })).toBe(true)
+    expect(isHtmlArtifact({ name: 'report.htm', mimeType: 'text/html' })).toBe(true)
+    // A host that hands the file over as bare octet-stream still owes a page.
+    expect(isHtmlArtifact({ name: 'report.html', mimeType: 'application/octet-stream' })).toBe(true)
+    expect(isHtmlArtifact({ name: 'Report.HTML', mimeType: 'application/octet-stream' })).toBe(true)
+    expect(isHtmlArtifact({ name: 'index.xhtml', mimeType: 'application/octet-stream' })).toBe(true)
+    // The name only widens the set: an html that is not a page does not get
+    // the sheet, and neither does a page that is not html.
+    expect(isHtmlArtifact({ name: 'html-cheatsheet.md', mimeType: 'text/markdown' })).toBe(false)
+    expect(isHtmlArtifact({ name: 'notes.txt', mimeType: 'text/plain' })).toBe(false)
+    expect(isHtmlArtifact({ name: 'notes.txt', mimeType: 'text/html' })).toBe(true)
   })
 })
 

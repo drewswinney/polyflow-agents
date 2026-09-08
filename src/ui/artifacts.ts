@@ -170,6 +170,21 @@ export function isTextLike(artifact: Pick<Artifact, 'kind' | 'mimeType' | 'size'
 }
 
 /**
+ * Whether the artifact opens as a rendered page: a sheet with the page in a
+ * WebView, instead of the detail screen.
+ *
+ * MIME first, then the name — a host that hands over a bare `application/
+ * octet-stream` for a file called `report.html` still has a page worth
+ * rendering, and a `text/plain` that is really HTML is a rarer mistake than
+ * the reverse, so the name only widens the set.
+ */
+export function isHtmlArtifact(artifact: Pick<Artifact, 'name' | 'mimeType'>): boolean {
+  if (artifact.mimeType === 'text/html') return true
+
+  return /\.(html?|xhtml)$/i.test(artifact.name)
+}
+
+/**
  * What a share link is good for, said under the button.
  *
  * The plain truth from `docs/artifacts.md` §5: the link opens for anyone who
