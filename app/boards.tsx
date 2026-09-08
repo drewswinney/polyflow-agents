@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import type { KanbanCardSummary, KanbanColumn } from '@/domain'
 import { useSelectedAgent } from '@/state/agents'
 import { useBackend, useConnectionFault, useConnectionState } from '@/state/ConnectionProvider'
-import { useKanbanBoard, useKanbanCardCreate } from '@/state/boards'
+import { useKanbanBoard, useKanbanCardCreate, useKanbanCardIndex } from '@/state/boards'
 import { useSidebar } from '@/state/sidebar'
 import { withAgent } from '@/ui/components/AgentGate'
 import { Card } from '@/ui/components/Card'
@@ -41,13 +41,19 @@ function BoardsScreen() {
   const connection = useConnectionState()
   const fault = useConnectionFault()
   const openSidebar = useSidebar(store => store.show)
-  const [selectedCard, setSelectedCard] = useState<KanbanCardSummary | null>(null)
+  const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
 
   const supportsBoards = backend?.capabilities.extras.boards === true
   const board = useKanbanBoard(agent.scope ?? '', backend)
   const scope = agent.scope ?? ''
   const createCard = useKanbanCardCreate(scope, backend)
+  // The sheet renders this live card, not the snapshot tapped off a tile: the
+  // tile's copy is frozen at tap time, so after a status move — which the
+  // mutation's invalidation already shows in the lanes — the sheet would keep
+  // showing the old status until it was reopened.
+  const cards = useKanbanCardIndex(scope, backend)
+  const selectedCard = selectedCardId ? (cards.get(selectedCardId) ?? null) : null
   // Every column, empty ones included: a board with a hole where "Testing"
   // should be reads as a parse failure, and the empty state is information.
   const columns = useMemo(() => board.data?.columns ?? [], [board.data])
@@ -110,7 +116,7 @@ function BoardsScreen() {
                 bottomInset={insets.bottom + 24}
                 refreshing={board.isFetching}
                 onRefresh={() => void board.refetch()}
-                onOpenCard={setSelectedCard}
+                onOpenCard={card => setSelectedCardId(card.id)}
               />
             ))}
           </ScrollView>
@@ -125,7 +131,7 @@ function BoardsScreen() {
 
       <KanbanCardDetail
         card={selectedCard}
-        onDismiss={() => setSelectedCard(null)}
+        onDismiss={() => setSelectedCardId(null)}
         scope={scope}
         backend={backend}
         editable={supportsBoards}
