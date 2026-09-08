@@ -243,6 +243,30 @@ def kind_for(mime_type: str, name: str = "") -> str:
     return "other"
 
 
+def is_source_code(name: str, mime_type: Optional[str] = None) -> bool:
+    """Whether a file the agent wrote is code — made for a toolchain, not a person.
+
+    An artifact is something produced for someone to look at: a report, a
+    page, a picture, a spreadsheet. The `.py` the agent edited on the way is
+    not that, and a store that fills with every source file a coding session
+    touches buries the things a person opened the screen for. Judged the same
+    way `record` judges kind, so what would have been filed as `code` is what
+    is refused.
+    """
+    display = safe_name(name)
+
+    if display.lower() in _CODE_FILENAMES:
+        return True
+
+    return kind_for(mime_for(display, mime_type), display) == "code"
+
+
+# Code that goes by a name rather than an extension, so `kind_for` cannot see it.
+_CODE_FILENAMES = frozenset(
+    {"dockerfile", "makefile", "cmakelists.txt", "gemfile", "rakefile", "procfile", "justfile", "vagrantfile", "brewfile"}
+)
+
+
 def safe_name(name: str) -> str:
     """One path segment, printable, bounded. The name is shown; the id is the key."""
     base = str(name or "").replace("\\", "/").rsplit("/", 1)[-1].strip().lstrip(".")
@@ -660,10 +684,12 @@ def capture_tool_result(
     """Store whatever a finished tool call produced. Never raises.
 
     `write_file` is a fact: the path is in its arguments and the absolute one
-    the tool actually wrote is in its result. Everything else — the image and
-    video generators — is read leniently off the result, since each provider
-    plugin spells its answer a little differently and a miss should cost one
-    artifact rather than the hook.
+    the tool actually wrote is in its result. Source code it wrote is left
+    alone, though (`is_source_code`): the store is for what the agent made
+    for a person, not for the files a coding task passes through. Everything
+    else — the image and video generators — is read leniently off the result,
+    since each provider plugin spells its answer a little differently and a
+    miss should cost one artifact rather than the hook.
     """
     stored: List[Dict[str, Any]] = []
 
@@ -703,6 +729,12 @@ def capture_tool_result(
                 continue
 
             data, name, mime = loaded
+
+            if tool_name == "write_file" and is_source_code(name, mime):
+                logger.info("[polyflow_agents_push] not storing %s: source code is not an artifact", name)
+
+                continue
+
             source = None if ref.startswith("data:") else ref
 
             try:

@@ -130,8 +130,11 @@ but now it can fail at registration too.
 The plugin also keeps what the agent produces. On every `post_tool_call` for a
 tool in `ARTIFACT_TOOLS` — `write_file` and the image and video generators —
 the file is copied into a store under the process Hermes home, and the push
-carries its id so a tap opens it. The app files the pictures it sends through
-the same store, which is how a sent picture comes back on a different phone.
+carries its id so a tap opens it. Source code the agent writes is skipped
+(`artifacts.is_source_code`): artifacts are what it made for a person to read,
+and the `.py` it edited on the way is not that. The app files the pictures it
+sends through the same store, which is how a sent picture comes back on a
+different phone.
 
 ```
 ~/.hermes/polyflow_agents_push/artifacts/
