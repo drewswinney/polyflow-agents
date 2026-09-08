@@ -123,7 +123,7 @@ export function useArtifactFile(backend: AgentBackend | null, artifact: Artifact
     // draw as a broken image until the next launch.
     queryKey: ['artifact-file', artifact?.id ?? '', artifact?.version ?? 0],
     enabled: Boolean(backend && artifact),
-    queryFn: () => ensureArtifactFile(artifact!, () => backend!.readArtifact(artifact!.id)),
+    queryFn: () => ensureArtifactFile(artifact!, () => backend!.readArtifact(artifact!.id, artifact!.version)),
     staleTime: Infinity,
     gcTime: 60 * 60 * 1000,
     retry: 1
@@ -142,7 +142,7 @@ export function useArtifactThumbnail(backend: AgentBackend | null, artifact: Art
   return useQuery<string>({
     queryKey: ['artifact-thumbnail', artifact?.id ?? '', artifact?.version ?? 0],
     enabled: Boolean(backend && artifact),
-    queryFn: () => ensureArtifactFile(artifact!, () => backend!.readArtifactThumbnail(artifact!.id), 'thumbnail'),
+    queryFn: () => ensureArtifactFile(artifact!, () => backend!.readArtifactThumbnail(artifact!.id, artifact!.version), 'thumbnail'),
     staleTime: Infinity,
     gcTime: 60 * 60 * 1000,
     retry: false

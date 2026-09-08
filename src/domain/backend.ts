@@ -238,8 +238,13 @@ export interface AgentBackend {
    * A method rather than a URL on purpose: an `<Image>` handed a bare URL
    * carries neither the bearer token nor the session cookie on Android, so
    * the bytes come through `fetch` and are cached on disk by the caller.
+   *
+   * The version goes with the id because the platform's HTTP cache sits
+   * under `fetch` and keys on the URL: the host says the bytes for one
+   * version may be kept for a day, so a rewrite has to be a different URL
+   * or the cache answers with the old file.
    */
-  readArtifact(id: string): Promise<ArtifactBytes>
+  readArtifact(id: string, version: number): Promise<ArtifactBytes>
   /**
    * A first-page PNG the host rendered, for a card or a tile.
    *
@@ -247,7 +252,7 @@ export interface AgentBackend {
    * pictures, no `pdftoppm` for a PDF, nothing at all for a video — and the
    * caller draws a glyph instead. Never a substitute for `readArtifact`.
    */
-  readArtifactThumbnail(id: string): Promise<ArtifactBytes>
+  readArtifactThumbnail(id: string, version: number): Promise<ArtifactBytes>
   /**
    * File a picture this app sent, under the name the host gave it.
    *

@@ -441,13 +441,22 @@ export class HermesRest {
     return this.request<ArtifactRow>(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}`, { timeoutMs: 15_000 })
   }
 
-  artifactBytes(id: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
-    return this.requestBytes(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}/content`)
+  /**
+   * The bytes, at a URL that names the version.
+   *
+   * The host serves both bytes routes with `Cache-Control: max-age=86400`
+   * on the promise that the bytes for one id and version never change. The
+   * route ignores the query, but the HTTP cache under `fetch` (OkHttp on
+   * Android, NSURLCache on iOS) keys on the whole URL, so `v=` is what turns
+   * a rewrite into a fresh download rather than a day of the old file.
+   */
+  artifactBytes(id: string, version: number): Promise<{ bytes: Uint8Array; mimeType: string }> {
+    return this.requestBytes(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}/content?v=${encodeURIComponent(version)}`)
   }
 
   /** Rendered on first request; a cold LibreOffice can take most of a minute. */
-  artifactThumbnail(id: string): Promise<{ bytes: Uint8Array; mimeType: string }> {
-    return this.requestBytes(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}/thumbnail`, 90_000)
+  artifactThumbnail(id: string, version: number): Promise<{ bytes: Uint8Array; mimeType: string }> {
+    return this.requestBytes(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}/thumbnail?v=${encodeURIComponent(version)}`, 90_000)
   }
 
   uploadArtifact(body: { name: string; mimeType: string; sessionId: string; dataUrl: string }): Promise<{ ok: boolean; artifact: ArtifactRow }> {

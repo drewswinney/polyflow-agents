@@ -89,7 +89,7 @@ function ArtifactScreen() {
     setNotice(null)
 
     try {
-      const uri = await ensureArtifactFile(artifact, () => backend.readArtifact(artifact.id))
+      const uri = await ensureArtifactFile(artifact, () => backend.readArtifact(artifact.id, artifact.version))
       const Sharing = await loadSharing()
 
       if (!Sharing) {
