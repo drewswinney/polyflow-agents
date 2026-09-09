@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ActivityIndicator, RefreshControl, ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import type { ScheduledJob } from '@/domain'
+import type { DeliveryTarget, ScheduledJob } from '@/domain'
 import { useSelectedAgent } from '@/state/agents'
 import { useBackend, useConnectionFault, useConnectionState } from '@/state/ConnectionProvider'
 import {
@@ -24,6 +24,9 @@ import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
 import { kanbanErrorText as hostErrorText } from '@/ui/kanban'
 import { useTheme } from '@/ui/ThemeProvider'
+
+/** One empty list, so the form's props hold still while the targets load. */
+const NO_TARGETS: DeliveryTarget[] = []
 
 /**
  * Scheduled (§7.20): the agent's jobs, what they do, and how they went.
@@ -178,7 +181,7 @@ function ScheduledScreen() {
       <ScheduledJobForm
         visible={formOpen}
         job={editing}
-        targets={targets.data ?? []}
+        targets={targets.data ?? NO_TARGETS}
         busy={create.isPending || update.isPending}
         error={formError}
         onSubmit={submit}

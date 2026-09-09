@@ -2,7 +2,7 @@ import { Pressable, StyleSheet, View } from 'react-native'
 
 import type { ScheduledJob } from '@/domain'
 
-import { relativeTime, untilTime } from '../format'
+import { agoTime, untilTime } from '../format'
 import { deliverLabel, describeJob, outcomeLabel, outcomeTone } from '../scheduled'
 import { useTheme } from '../ThemeProvider'
 import { PREVIEW_HEIGHT } from './ArtifactCards'
@@ -71,7 +71,7 @@ export function ScheduledJobTile({ job, onPress }: { job: ScheduledJob; onPress:
 
 /** `every day at 06:00 · next in 3h`, or the last run when it will not fire again. */
 export function scheduleLine(job: ScheduledJob): string {
-  if (!job.enabled) return job.lastRunAt ? `${job.schedule} · last ran ${relativeTime(job.lastRunAt)} ago` : job.schedule
+  if (!job.enabled) return job.lastRunAt ? `${job.schedule} · last ran ${agoTime(job.lastRunAt)}` : job.schedule
   if (job.outcome === 'running') return `${job.schedule} · running now`
   if (job.nextRunAt) return `${job.schedule} · next ${untilTime(job.nextRunAt)}`
 

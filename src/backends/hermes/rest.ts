@@ -345,8 +345,16 @@ export class HermesRest {
     return this.request<{ servers: McpServerSummary[] }>('/api/mcp/servers')
   }
 
+  /**
+   * The agent's jobs — and only the agent's. Unlike every other profile-aware
+   * route, this one lists *every* profile's store when no profile is named,
+   * so the primary agent's list carried the other profiles' jobs too. The
+   * host's own name for the primary profile is `default`.
+   */
   cronJobs(): Promise<HermesCronJob[]> {
-    return this.request<HermesCronJob[]>('/api/cron/jobs', { timeoutMs: 60_000 })
+    const path = this.config.profile ? '/api/cron/jobs' : '/api/cron/jobs?profile=default'
+
+    return this.request<HermesCronJob[]>(path, { timeoutMs: 60_000 })
   }
 
   /**

@@ -50,16 +50,28 @@ export function ScheduledJobForm({
   const [prompt, setPrompt] = useState('')
   const [deliver, setDeliver] = useState('local')
 
+  const [deliverChosen, setDeliverChosen] = useState(false)
+
   // Fresh fields every time the sheet opens: for an edit, the job's own; for
-  // a new job, empty with the phone as the target when the host offers it.
+  // a new job, empty. Not keyed on `targets`: they arrive while the sheet is
+  // already open, and a reset on their arrival wiped what had been typed.
   useEffect(() => {
     if (!visible) return
 
     setName(job?.name ?? '')
     setSchedule(job?.scheduleExpr ?? '')
     setPrompt(job?.prompt ?? '')
-    setDeliver(job?.deliver ?? defaultTarget(targets))
-  }, [visible, job, targets])
+    setDeliver(job?.deliver ?? 'local')
+    setDeliverChosen(false)
+  }, [visible, job])
+
+  // The phone is the default target for a new job when the host offers it —
+  // applied when the targets land, unless a target has been picked by hand.
+  useEffect(() => {
+    if (!visible || job || deliverChosen) return
+
+    setDeliver(defaultTarget(targets))
+  }, [visible, job, deliverChosen, targets])
 
   const isScript = job?.kind === 'script'
   const valid = schedule.trim().length > 0 && (isScript || prompt.trim().length > 0)
@@ -84,7 +96,7 @@ export function ScheduledJobForm({
           />
         </Field>
 
-        <Field label="When" hint="A cron expression (0 6 * * 0), an interval (every 2h), or once (in 30m, 2026-10-01T09:00).">
+        <Field label="When" hint="A cron expression (0 6 * * 0), an interval (every 2h), or once (30m, 1d, 2026-10-01T09:00).">
           <TextInput
             value={schedule}
             onChangeText={setSchedule}
@@ -131,7 +143,10 @@ export function ScheduledJobForm({
                   accessibilityState={{ selected, disabled: !target.ready }}
                   accessibilityLabel={target.ready ? target.name : `${target.name}, needs ${target.hint ?? 'a home channel'}`}
                   disabled={!target.ready}
-                  onPress={() => setDeliver(target.id)}
+                  onPress={() => {
+                    setDeliverChosen(true)
+                    setDeliver(target.id)
+                  }}
                   style={[
                     styles.target,
                     {

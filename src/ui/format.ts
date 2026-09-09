@@ -16,6 +16,20 @@ export function relativeTime(at: number, now = Date.now()): string {
   return new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
+/**
+ * How long since a past moment, as a phrase: `4m ago`, `3d ago`, then
+ * `on Aug 22`. `relativeTime` alone switches to a date past a week, and
+ * "Aug 22 ago" is what a caller that appends its own "ago" gets.
+ */
+export function agoTime(at: number, now = Date.now()): string {
+  const relative = relativeTime(at, now)
+
+  if (relative === 'now') return 'just now'
+  if (now - at < 7 * DAY) return `${relative} ago`
+
+  return `on ${relative}`
+}
+
 /** How long until a future moment: `in 6m`, `in 3h`, `in 2d`. */
 export function untilTime(at: number, now = Date.now()): string {
   const delta = at - now

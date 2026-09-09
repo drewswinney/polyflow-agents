@@ -12,7 +12,7 @@ import {
   useScheduledJobUpdate
 } from '@/state/scheduled'
 
-import { duration, relativeTime, untilTime } from '../format'
+import { agoTime, duration, untilTime } from '../format'
 import { kanbanErrorText as hostErrorText } from '../kanban'
 import { Markdown } from '../markdown/Markdown'
 import { deliverLabel, outcomeLabel, outcomeTone } from '../scheduled'
@@ -113,7 +113,7 @@ export function ScheduledJobDetail({
 
   const facts: [string, string][] = [
     ['Next run', job.enabled ? (job.nextRunAt ? untilTime(job.nextRunAt) : '—') : 'paused'],
-    ['Last run', job.lastRunAt ? `${relativeTime(job.lastRunAt)} ago` : 'never'],
+    ['Last run', job.lastRunAt ? agoTime(job.lastRunAt) : 'never'],
     ['Delivers', deliverLabel(job.deliver)],
     ...(job.model ? [['Model', job.model] as [string, string]] : []),
     ...(job.skills.length ? [['Skills', job.skills.join(', ')] as [string, string]] : []),
@@ -302,7 +302,7 @@ function RunRow({ run, first, onPress }: { run: ScheduledJobRun; first: boolean;
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Open run from ${relativeTime(run.startedAt)} ago`}
+      accessibilityLabel={`Open run from ${agoTime(run.startedAt)}`}
       onPress={onPress}
       style={({ pressed }) => [
         styles.run,
@@ -312,7 +312,7 @@ function RunRow({ run, first, onPress }: { run: ScheduledJobRun; first: boolean;
     >
       <View style={styles.runBody}>
         <Text variant="rowLabel" numberOfLines={1}>
-          {`${relativeTime(run.startedAt)} ago`}
+          {agoTime(run.startedAt)}
           {took ? (
             <Text variant="monoSmall" color={theme.color.gray500}>
               {`  ${took}`}

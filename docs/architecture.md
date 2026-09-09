@@ -941,8 +941,9 @@ With `editable`, the sheet also runs, pauses, edits and deletes; the transcript
 opens it read-only.
 
 **Create and edit.** One form: name, when, prompt, deliver-to. The schedule is a
-free string in the forms the host parses — a cron expression, `every 2h`, `in
-30m`, a timestamp — and the edit form seeds it with `scheduleExpr`, the one
+free string in the forms the host parses — a cron expression, `every 2h`, a
+bare `30m` for a one-shot, a timestamp — and the edit form seeds it with
+`scheduleExpr`, the one
 string per stored kind that round-trips. Delivery targets come from
 `/api/cron/delivery-targets`; a platform without a home channel is offered
 greyed with the env var it needs, as the host lists it. A new job defaults to
