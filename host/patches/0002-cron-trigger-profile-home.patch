@@ -1,0 +1,147 @@
+From a55b2ff6feb0f0cc4668872a4a1d60eea77b2227 Mon Sep 17 00:00:00 2001
+From: Drew Swinney <drewswinney@gmail.com>
+Date: Wed, 9 Sep 2026 18:39:39 -0400
+Subject: [PATCH] fix(cron): build a run's session store under the firing
+ profile's home
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+run_job warms SessionDB() on a worker thread, and SessionDB resolves its
+path through get_hermes_home() at construction. The profile home is a
+ContextVar (set_hermes_home_override), which a bare
+ThreadPoolExecutor.submit does not inherit — so a job fired for a profile
+from a process whose own HERMES_HOME is the deployment root built the
+store against the root and wrote the run's cron_<job>_<ts> session into
+the wrong profile's state.db. The turn itself was already submitted with
+copy_context and ran under the right home, so only the store diverged.
+
+That is the dashboard's trigger route (_fire_cron_job_for_profile): it
+sets the override on the request thread, reads the profile's cron store
+and dispatches through the profile's plugin manager, and the run's
+transcript still landed in the root. The profile's session list and
+/api/cron/jobs/{id}/runs cannot see such a run, and a delivery
+notification carrying the session id addresses a session that does not
+exist under the profile it names.
+
+Submit with copy_context(), the same pattern the agent pool already uses
+a few hundred lines down. Pinned in tests/cron/test_cron_profile_isolation.py,
+whose #4707 intent — a profile's jobs execute under that profile's home —
+covers the store a run writes.
+---
+ cron/scheduler.py                         | 13 +++-
+ tests/cron/test_cron_profile_isolation.py | 77 +++++++++++++++++++++++
+ 2 files changed, 89 insertions(+), 1 deletion(-)
+
+diff --git a/cron/scheduler.py b/cron/scheduler.py
+index c625ba6f7b..c53b6f3cd4 100644
+--- a/cron/scheduler.py
++++ b/cron/scheduler.py
+@@ -4720,7 +4720,18 @@ def run_job(
+ 
+         if _session_db_timeout > 0:
+             _session_db_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+-            _session_db_future = _session_db_pool.submit(SessionDB)
++            # Carry the caller's context into the worker. SessionDB()
++            # resolves its path through get_hermes_home() at construction,
++            # and the profile home is a ContextVar
++            # (set_hermes_home_override) that a bare submit does not
++            # inherit — so a job fired for a non-default profile from a process
++            # whose own HERMES_HOME is the deployment root (the dashboard's
++            # trigger route, _fire_cron_job_for_profile) built its store
++            # against the WRONG home and wrote the run's session there, while
++            # the turn itself — submitted with copy_context below — ran
++            # under the right one. Same pattern as the agent pool.
++            _session_db_ctx = contextvars.copy_context()
++            _session_db_future = _session_db_pool.submit(_session_db_ctx.run, SessionDB)
+             try:
+                 _session_db = _session_db_future.result(timeout=_session_db_timeout)
+             except concurrent.futures.TimeoutError:
+diff --git a/tests/cron/test_cron_profile_isolation.py b/tests/cron/test_cron_profile_isolation.py
+index e984e6ef0c..b6091f5a8e 100644
+--- a/tests/cron/test_cron_profile_isolation.py
++++ b/tests/cron/test_cron_profile_isolation.py
+@@ -67,3 +67,80 @@ def test_cron_storage_anchors_at_profile_home(tmp_path, monkeypatch):
+         importlib.reload(jobs)
+ 
+ 
++
++
++def test_run_job_builds_the_session_store_under_the_firing_profile(
++    tmp_path, monkeypatch
++):
++    """A run's session belongs to the profile whose store the job came from.
++
++    run_job warms SessionDB() on a worker thread, and SessionDB
++    resolves its path through get_hermes_home() at construction. The
++    profile home is a ContextVar (set_hermes_home_override), which a bare
++    ThreadPoolExecutor.submit does not inherit — so a job fired for a
++    profile from a process whose OWN HERMES_HOME is the deployment root (the
++    dashboard's trigger route, _fire_cron_job_for_profile) built the store
++    against the root and wrote the run's cron_<job>_<ts> session into the
++    wrong profile's state.db, while the turn itself — submitted with
++    copy_context — ran under the right one.
++
++    That splits a run from its own transcript: the profile's session list and
++    /api/cron/jobs/{id}/runs cannot see it, and anything that hands out the
++    session id (a delivery notification that opens the run) addresses a session
++    that does not exist under the profile it names. Execution under the
++    profile home is the #4707 intent this file pins, and the store the run
++    writes is part of executing under it.
++    """
++    from unittest.mock import MagicMock, patch
++
++    import hermes_constants
++    from cron.scheduler import run_job
++
++    root = tmp_path / "hermes_home"
++    profile_home = root / "profiles" / "coder"
++    profile_home.mkdir(parents=True)
++
++    # The firing process's own home is the deployment root — the dashboard's.
++    monkeypatch.setenv("HERMES_HOME", str(root))
++
++    homes: list = []
++
++    def _spy_session_db(*_args, **_kwargs):
++        homes.append(hermes_constants.get_hermes_home().resolve())
++        return MagicMock()
++
++    runtime = {
++        "api_key": "test-key",
++        "base_url": "https://example.invalid/v1",
++        "provider": "openrouter",
++        "api_mode": "chat_completions",
++    }
++    job = {"id": "profile-session-store", "name": "test", "prompt": "hello"}
++
++    # Scoped the way the trigger route scopes it: a context-local override on
++    # the calling thread, never an os.environ mutation.
++    token = hermes_constants.set_hermes_home_override(str(profile_home))
++    try:
++        with patch("cron.scheduler._hermes_home", profile_home), \
++             patch("cron.scheduler._resolve_origin", return_value=None), \
++             patch("hermes_cli.env_loader.load_hermes_dotenv"), \
++             patch("hermes_cli.env_loader.reset_secret_source_cache"), \
++             patch("hermes_state.SessionDB", side_effect=_spy_session_db), \
++             patch(
++                 "hermes_cli.runtime_provider.resolve_runtime_provider",
++                 return_value=runtime,
++             ), \
++             patch("run_agent.AIAgent") as mock_agent_cls:
++            mock_agent = MagicMock()
++            mock_agent.run_conversation.return_value = {"final_response": "ok"}
++            mock_agent_cls.return_value = mock_agent
++
++            success, _output, final_response, _error = run_job(job)
++    finally:
++        hermes_constants.reset_hermes_home_override(token)
++
++    assert success is True
++    assert final_response == "ok"
++    # Built at all, and built under the profile — not the shared root.
++    assert homes == [profile_home.resolve()]
++    assert root.resolve() not in homes
+-- 
+2.47.3
+
