@@ -740,6 +740,19 @@ What makes leaving safe rather than negligent:
   read the command from is the habit an approval prompt exists to prevent.
 - **The blocked marker on every list that leads back**: the session row's
   "Waiting on your answer" strip (§7.1), and the chat header's `blocked on you`.
+- **The answer is checked.** `approval.respond` goes out under the session's
+  *runtime* id like every other RPC (§5.4) — the gateway answers `4001` for a
+  stored one — and the host's `resolved` count is read: zero, or a refused
+  reply, is said in the transcript rather than swallowed with the card. A reply
+  the socket could not carry puts the card back; the tool card stays `held`
+  until the host has actually taken the answer.
+- **The resume snapshot reaches the open chat.** `session.resume` returns
+  `pending_approval` / `pending_clarify` for a prompt raised while the app was
+  away. It is handed to the chat's live subscription as well as to the next
+  transcript load, because the load routinely runs *before* the resume that
+  carries it (a socket the OS cut without a close frame, or a backend published
+  before it dialled) and the snapshot otherwise sat unread until the chat was
+  reopened.
 
 Out-of-app delivery is the notification path's job ([`push-relay.md`](push-relay.md)),
 and it is what makes walking away a real option rather than a way to lose the
