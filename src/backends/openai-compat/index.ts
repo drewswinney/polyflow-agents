@@ -185,16 +185,36 @@ export class OpenAiCompatBackend implements AgentBackend {
     throw new NotImplemented('config writes')
   }
 
-  async listCronJobs(): Promise<never> {
-    throw new NotImplemented('cron')
+  async listScheduledJobs(): Promise<never> {
+    throw new NotImplemented('scheduled jobs')
   }
 
-  async setCronJobEnabled(): Promise<never> {
-    throw new NotImplemented('cron')
+  async listScheduledJobRuns(): Promise<never> {
+    throw new NotImplemented('scheduled jobs')
   }
 
-  async triggerCronJob(): Promise<never> {
-    throw new NotImplemented('cron')
+  async createScheduledJob(): Promise<never> {
+    throw new NotImplemented('scheduled jobs')
+  }
+
+  async updateScheduledJob(): Promise<never> {
+    throw new NotImplemented('scheduled jobs')
+  }
+
+  async deleteScheduledJob(): Promise<never> {
+    throw new NotImplemented('scheduled jobs')
+  }
+
+  async setScheduledJobEnabled(): Promise<never> {
+    throw new NotImplemented('scheduled jobs')
+  }
+
+  async triggerScheduledJob(): Promise<never> {
+    throw new NotImplemented('scheduled jobs')
+  }
+
+  async listDeliveryTargets(): Promise<never> {
+    throw new NotImplemented('scheduled jobs')
   }
 
   async listArtifacts(): Promise<never> {

@@ -12,11 +12,12 @@
  * can diff endpoint shapes against it.
  */
 
+import type { HermesCronCreate, HermesCronJob, HermesCronRun, HermesCronUpdate } from './scheduled'
 import type {
   AudioSpeakResponse,
   AudioTranscriptionResponse,
   ConfigSchemaResponse,
-  CronJob,
+  CronDeliveryTarget,
   HermesConfig,
   HermesConfigRecord,
   LogsResponse,
@@ -344,8 +345,48 @@ export class HermesRest {
     return this.request<{ servers: McpServerSummary[] }>('/api/mcp/servers')
   }
 
-  cronJobs(): Promise<CronJob[]> {
-    return this.request<CronJob[]>('/api/cron/jobs', { timeoutMs: 60_000 })
+  /**
+   * The agent's jobs — and only the agent's. Unlike every other profile-aware
+   * route, this one lists *every* profile's store when no profile is named,
+   * so the primary agent's list carried the other profiles' jobs too. The
+   * host's own name for the primary profile is `default`.
+   */
+  cronJobs(): Promise<HermesCronJob[]> {
+    const path = this.config.profile ? '/api/cron/jobs' : '/api/cron/jobs?profile=default'
+
+    return this.request<HermesCronJob[]>(path, { timeoutMs: 60_000 })
+  }
+
+  /**
+   * The sessions a job's runs wrote, newest first. The host caps `limit` at
+   * 100 and answers in the sessions list's row shape.
+   */
+  cronJobRuns(id: string, limit = 20): Promise<{ runs: HermesCronRun[] }> {
+    return this.request<{ runs: HermesCronRun[] }>(
+      `/api/cron/jobs/${encodeURIComponent(id)}/runs?limit=${Math.max(1, Math.min(100, limit))}`,
+      { timeoutMs: 30_000 }
+    )
+  }
+
+  cronCreate(body: HermesCronCreate): Promise<HermesCronJob> {
+    return this.request<HermesCronJob>('/api/cron/jobs', { method: 'POST', body, timeoutMs: 30_000 })
+  }
+
+  cronUpdate(id: string, body: HermesCronUpdate): Promise<HermesCronJob> {
+    return this.request<HermesCronJob>(`/api/cron/jobs/${encodeURIComponent(id)}`, {
+      method: 'PUT',
+      body,
+      timeoutMs: 30_000
+    })
+  }
+
+  cronDelete(id: string): Promise<void> {
+    return this.request<void>(`/api/cron/jobs/${encodeURIComponent(id)}`, { method: 'DELETE' })
+  }
+
+  /** Always includes `local`; the rest are the configured messaging platforms. */
+  cronDeliveryTargets(): Promise<{ targets: CronDeliveryTarget[] }> {
+    return this.request<{ targets: CronDeliveryTarget[] }>('/api/cron/delivery-targets')
   }
 
   kanbanBoard(): Promise<KanbanBoard> {

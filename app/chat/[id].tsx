@@ -25,10 +25,11 @@ import { ScrollToBottomButton } from '@/ui/components/ScrollToBottomButton'
 import { StreamingTail } from '@/ui/components/StreamingTail'
 import { Text } from '@/ui/components/Text'
 import { KanbanMentionProvider } from '@/ui/components/KanbanMentions'
+import { ScheduledJobCards, ScheduledJobProvider } from '@/ui/components/ScheduledJobCards'
 import { TranscriptEntryView } from '@/ui/components/TranscriptEntryView'
 import { WorkSection } from '@/ui/components/WorkSection'
 import { ARTIFACT_TOOLS } from '@/ui/artifacts'
-import { groupTranscript, type TranscriptRow, withArtifactRows } from '@/ui/transcript-rows'
+import { groupTranscript, type TranscriptRow, withArtifactRows, withScheduledJobRows } from '@/ui/transcript-rows'
 import { KeyboardInset } from '@/ui/keyboard'
 import { useTheme } from '@/ui/ThemeProvider'
 
@@ -311,7 +312,10 @@ function ChatScreen() {
       : null
 
   const baseRows = useMemo(() => groupTranscript(stream.entries), [stream.entries])
-  const rows = useMemo(() => withArtifactRows(baseRows, artifacts.data?.artifacts ?? []), [baseRows, artifacts.data])
+  const rows = useMemo(
+    () => withScheduledJobRows(withArtifactRows(baseRows, artifacts.data?.artifacts ?? [])),
+    [baseRows, artifacts.data]
+  )
   const artifactCount = artifacts.data?.total ?? 0
 
   /**
@@ -350,6 +354,8 @@ function ChatScreen() {
           />
         ) : item.kind === 'artifacts' ? (
           <ArtifactCards artifacts={item.artifacts} />
+        ) : item.kind === 'scheduled' ? (
+          <ScheduledJobCards refs={item.refs} />
         ) : (
           <TranscriptEntryView entry={item.entry} />
         )}
@@ -360,6 +366,7 @@ function ChatScreen() {
 
   return (
     <KanbanMentionProvider>
+    <ScheduledJobProvider>
       <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
         <ScreenHeader
           // No title: the session's name is what you tapped to get here, and
@@ -562,6 +569,7 @@ function ChatScreen() {
           )}
         </KeyboardInset>
       </View>
+    </ScheduledJobProvider>
     </KanbanMentionProvider>
   )
 }

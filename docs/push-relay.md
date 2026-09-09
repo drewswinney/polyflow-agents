@@ -135,6 +135,10 @@ The platform face registers with:
 - `standalone_sender_fn` — **required**, not optional. Cron jobs can run in a
   process separate from the gateway; without this, a `deliver=` job fires
   correctly and then fails the send with `No live adapter for platform '<name>'`.
+  The host calls it positionally — `(platform_config, chat_id, chunk,
+  thread_id=…, media_files=…, force_document=…)` — and accepts only a dict
+  with a `success` or `error` key; anything else is logged as a delivery error
+  even though the send happened. The first version got both wrong.
 
 ## 4. Event coverage
 

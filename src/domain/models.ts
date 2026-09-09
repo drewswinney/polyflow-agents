@@ -418,16 +418,107 @@ export interface ConfigField {
   value: string
 }
 
-export interface CronJobSummary {
+/** What a scheduled job runs: an agent turn on a prompt, or a script with no agent. */
+export type ScheduledJobKind = 'prompt' | 'script'
+
+/**
+ * How the job's most recent run went, as the host reports it.
+ *
+ * `delivery_failed` is its own state because the host tracks it separately: the
+ * agent finished and the output exists, only the hand-off to its delivery
+ * target failed — a different thing to fix than a run that died. `never` is a
+ * job that has not fired yet, which is not a failure either.
+ */
+export type ScheduledJobOutcome = 'ok' | 'failed' | 'delivery_failed' | 'running' | 'never'
+
+/**
+ * A scheduled job (§7.20) — what Hermes calls a cron job.
+ *
+ * Carries what the job *does*, not just when: the prompt or script, where the
+ * output goes, which skills load first. A row that says only "every day at
+ * 6" cannot be told from the next one, and the whole point of a list of these
+ * on a phone is knowing which one to pause.
+ */
+export interface ScheduledJob {
   id: string
   name: string
-  /** Human-readable schedule, e.g. `every day at 03:15`. */
+  kind: ScheduledJobKind
+  /** Human-readable schedule, e.g. `every day at 03:15` or `0 6 * * 0`. */
   schedule: string
+  /** The schedule as the host accepts it back — a cron expression, `every 2h`, or a timestamp. */
+  scheduleExpr: string
   enabled: boolean
+  /** The prompt the agent runs; empty for a script job. */
+  prompt: string
+  /** The script a `script` job runs, relative to the host's scripts directory. */
+  script: string | null
+  /** Skills loaded before the prompt runs. */
+  skills: string[]
+  /** Where the output goes: `local`, `origin`, or a platform name. */
+  deliver: string
+  model: string | null
   nextRunAt: number | null
   lastRunAt: number | null
+  outcome: ScheduledJobOutcome
   lastError: string | null
-  model: string | null
+  lastDeliveryError: string | null
+  /** Consecutive failed runs; resets on a success. */
+  failureStreak: number
+  /**
+   * Jobs whose latest output is injected above this one's prompt. The host's
+   * only chaining primitive today, and the seed of a workflow view: a job that
+   * reads another's output is downstream of it.
+   */
+  contextFrom: string[]
+}
+
+/**
+ * One firing of a job that ran the agent. A run is stored as an ordinary
+ * session, so `sessionId` opens in chat like any other transcript. Script
+ * jobs leave no session, and so no runs here — their output is the delivery.
+ */
+export interface ScheduledJobRun {
+  sessionId: SessionId
+  startedAt: number
+  endedAt: number | null
+  /** Still going, as far as the host can tell. */
+  active: boolean
+  /** The last thing said in the run, for the row. */
+  preview: string
+  messageCount: number
+}
+
+/** What the phone needs to create a job; the host fills in the rest. */
+export interface ScheduledJobDraft {
+  name: string
+  schedule: string
+  prompt: string
+  deliver: string
+  skills?: string[]
+}
+
+/** A partial edit; only the fields present change. */
+export interface ScheduledJobUpdate {
+  name?: string
+  schedule?: string
+  prompt?: string
+  deliver?: string
+  skills?: string[]
+  contextFrom?: string[]
+}
+
+/**
+ * Somewhere a job's output can go, as the host offers them: `local` always,
+ * then each configured messaging platform. `ready` is false for a platform
+ * that is set up but has no home channel yet, which the host lists anyway so
+ * the form can say what is missing rather than hide the option.
+ */
+export interface DeliveryTarget {
+  id: string
+  name: string
+  ready: boolean
+  /** The env var that would make it ready, when it is not. */
+  hint: string | null
 }
 
 export type KanbanStatus = 'backlog' | 'in_progress' | 'testing' | 'done' | 'blocked' | 'other'

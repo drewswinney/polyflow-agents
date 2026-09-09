@@ -24,7 +24,11 @@ import {
   createObservable,
   type ContentBlock,
   type PromptResult,
-  type CronJobSummary,
+  type DeliveryTarget,
+  type ScheduledJob,
+  type ScheduledJobDraft,
+  type ScheduledJobRun,
+  type ScheduledJobUpdate,
   type EventRecord,
   type KanbanBoard,
   type KanbanCardCreate,
@@ -613,38 +617,101 @@ export class MockBackend implements AgentBackend {
     }
   ]
 
-  private cronJobs: CronJobSummary[] = [
+  private scheduledJobs: ScheduledJob[] = [
     {
       id: 'nightly-backup',
       name: 'nightly backup',
+      kind: 'prompt',
       schedule: 'every day at 03:15',
+      scheduleExpr: '15 3 * * *',
       enabled: true,
+      prompt:
+        'Run the nightly backup: snapshot the tank pool, replicate to the offsite box, and report what changed. If replication lags more than a day behind, say so first.',
+      script: null,
+      skills: ['zfs-ops'],
+      deliver: 'polyflow_agents_push',
+      model: 'haiku-4.5',
       nextRunAt: Date.now() + 6 * 60 * MINUTE,
       lastRunAt: Date.now() - 18 * 60 * MINUTE,
+      outcome: 'ok',
       lastError: null,
-      model: 'haiku-4.5'
+      lastDeliveryError: null,
+      failureStreak: 0,
+      contextFrom: []
     },
     {
       id: 'zfs-scrub',
       name: 'zfs scrub',
+      kind: 'script',
       schedule: 'first Sunday of the month',
+      scheduleExpr: '0 2 1-7 * 0',
       enabled: true,
+      prompt: '',
+      script: 'zfs-scrub.sh',
+      skills: [],
+      deliver: 'local',
+      model: null,
       nextRunAt: Date.now() + 9 * 24 * 60 * MINUTE,
       lastRunAt: Date.now() - 3 * 24 * 60 * MINUTE,
+      outcome: 'ok',
       lastError: null,
-      model: null
+      lastDeliveryError: null,
+      failureStreak: 0,
+      contextFrom: []
     },
     {
       id: 'digest',
       name: 'morning digest',
+      kind: 'prompt',
       schedule: 'weekdays at 07:00',
+      scheduleExpr: '0 7 * * 1-5',
       enabled: false,
+      prompt: 'Summarise overnight Home Assistant events and the backup report into five lines.',
+      script: null,
+      skills: [],
+      deliver: 'polyflow_agents_push',
+      model: 'haiku-4.5',
       nextRunAt: null,
       lastRunAt: Date.now() - 5 * 24 * 60 * MINUTE,
+      outcome: 'failed',
       lastError: 'home-assistant MCP unreachable',
-      model: 'haiku-4.5'
+      lastDeliveryError: null,
+      failureStreak: 3,
+      contextFrom: ['nightly-backup']
     }
   ]
+
+  /** Runs point at sessions the demo already has, so a tap opens a real transcript. */
+  private scheduledRuns: Record<string, ScheduledJobRun[]> = {
+    'nightly-backup': [
+      {
+        sessionId: 'ses-zfs',
+        startedAt: Date.now() - 18 * 60 * MINUTE,
+        endedAt: Date.now() - 17 * 60 * MINUTE,
+        active: false,
+        preview: 'Snapshot taken and replicated; 14 GB changed since yesterday.',
+        messageCount: 6
+      },
+      {
+        sessionId: 'ses-proxmox',
+        startedAt: Date.now() - 42 * 60 * MINUTE,
+        endedAt: Date.now() - 41 * 60 * MINUTE,
+        active: false,
+        preview: 'Snapshot taken; replication was already current.',
+        messageCount: 4
+      }
+    ],
+    digest: [
+      {
+        sessionId: 'ses-homeassistant',
+        startedAt: Date.now() - 5 * 24 * 60 * MINUTE,
+        endedAt: Date.now() - 5 * 24 * 60 * MINUTE + 20_000,
+        active: false,
+        preview: 'Could not reach the home-assistant MCP server.',
+        messageCount: 3
+      }
+    ]
+  }
 
   async getApprovalPolicy(): Promise<ApprovalPolicy> {
     await tick(60)
@@ -666,18 +733,82 @@ export class MockBackend implements AgentBackend {
     this.config = this.config.map(field => (field.key === key ? { ...field, value } : field))
   }
 
-  async listCronJobs(): Promise<CronJobSummary[]> {
+  async listScheduledJobs(): Promise<ScheduledJob[]> {
     await tick(100)
 
-    return this.cronJobs
+    return this.scheduledJobs
   }
 
-  async setCronJobEnabled(id: string, enabled: boolean): Promise<void> {
-    this.cronJobs = this.cronJobs.map(job => (job.id === id ? { ...job, enabled } : job))
+  async listScheduledJobRuns(id: string): Promise<ScheduledJobRun[]> {
+    await tick(80)
+
+    return this.scheduledRuns[id] ?? []
   }
 
-  async triggerCronJob(id: string): Promise<void> {
-    const job = this.cronJobs.find(row => row.id === id)
+  async createScheduledJob(draft: ScheduledJobDraft): Promise<ScheduledJob> {
+    await tick(120)
+
+    const job: ScheduledJob = {
+      id: `job-${Date.now().toString(36)}`,
+      name: draft.name || draft.prompt.slice(0, 40),
+      kind: 'prompt',
+      schedule: draft.schedule,
+      scheduleExpr: draft.schedule,
+      enabled: true,
+      prompt: draft.prompt,
+      script: null,
+      skills: draft.skills ?? [],
+      deliver: draft.deliver || 'local',
+      model: null,
+      nextRunAt: Date.now() + 60 * MINUTE,
+      lastRunAt: null,
+      outcome: 'never',
+      lastError: null,
+      lastDeliveryError: null,
+      failureStreak: 0,
+      contextFrom: []
+    }
+
+    this.scheduledJobs = [...this.scheduledJobs, job]
+
+    return job
+  }
+
+  async updateScheduledJob(id: string, update: ScheduledJobUpdate): Promise<ScheduledJob> {
+    await tick(120)
+
+    const current = this.scheduledJobs.find(job => job.id === id)
+
+    if (!current) throw new Error('Job not found')
+
+    const next: ScheduledJob = {
+      ...current,
+      ...(update.name !== undefined ? { name: update.name } : {}),
+      ...(update.schedule !== undefined ? { schedule: update.schedule, scheduleExpr: update.schedule } : {}),
+      ...(update.prompt !== undefined ? { prompt: update.prompt } : {}),
+      ...(update.deliver !== undefined ? { deliver: update.deliver } : {}),
+      ...(update.skills !== undefined ? { skills: update.skills } : {}),
+      ...(update.contextFrom !== undefined ? { contextFrom: update.contextFrom } : {})
+    }
+
+    this.scheduledJobs = this.scheduledJobs.map(job => (job.id === id ? next : job))
+
+    return next
+  }
+
+  async deleteScheduledJob(id: string): Promise<void> {
+    await tick(80)
+    this.scheduledJobs = this.scheduledJobs.filter(job => job.id !== id)
+  }
+
+  async setScheduledJobEnabled(id: string, enabled: boolean): Promise<void> {
+    this.scheduledJobs = this.scheduledJobs.map(job =>
+      job.id === id ? { ...job, enabled, nextRunAt: enabled ? Date.now() + 60 * MINUTE : null } : job
+    )
+  }
+
+  async triggerScheduledJob(id: string): Promise<void> {
+    const job = this.scheduledJobs.find(row => row.id === id)
 
     for (const sink of this.eventSinks) {
       sink({
@@ -689,6 +820,16 @@ export class MockBackend implements AgentBackend {
         payload: { job: id, triggered: 'manually' }
       })
     }
+  }
+
+  async listDeliveryTargets(): Promise<DeliveryTarget[]> {
+    await tick(60)
+
+    return [
+      { id: 'local', name: 'Local (save only)', ready: true, hint: null },
+      { id: 'polyflow_agents_push', name: 'Polyflow Agents', ready: true, hint: null },
+      { id: 'telegram', name: 'Telegram', ready: false, hint: 'TELEGRAM_HOME_CHANNEL' }
+    ]
   }
 
   async registerPushDevice(): Promise<never> {

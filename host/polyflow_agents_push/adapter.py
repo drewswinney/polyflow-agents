@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import threading
 from typing import Any, Dict, List, Optional
 
@@ -404,27 +405,73 @@ def register(ctx: Any) -> None:
         logger.warning("[polyflow_agents_push] platform registration FAILED", exc_info=True)
 
 
-async def _standalone_send(*_args: Any, **kwargs: Any) -> Dict[str, Any]:
+async def _standalone_send(
+    _config: Any,
+    chat_id: str,
+    text: str,
+    *,
+    thread_id: Any = None,
+    media_files: Any = None,
+    force_document: bool = False,
+    **_ignored: Any,
+) -> Dict[str, Any]:
     """Out-of-process cron delivery.
 
     Cron jobs can run in a process with no live adapter, where a `deliver=` job
     otherwise fails with `No live adapter for platform 'polyflow_agents_push'`.
-    Push has no
-    connection to hold, so serving these is just sending.
+    Push has no connection to hold, so serving these is just sending.
+
+    Hermes calls this positionally — `(platform_config, chat_id, chunk, ...)`,
+    see `tools/send_message_tool.py` — and reads the result for a `success` or
+    `error` key. The first version read the text off keyword arguments and
+    answered `{"ok": True}`, so every delivery pushed an empty body and was then
+    logged by the scheduler as a delivery error. Both are contract, not style.
     """
-    text = str(kwargs.get("text") or kwargs.get("message") or "")
+    del thread_id, media_files, force_document
+
+    job, body = _split_cron_wrapper(str(text or ""))
 
     push.notify(
-        kind="cronFailures" if _looks_like_failure(text) else "turnComplete",
-        title="Hermes",
-        body=text[:200],
-        data={"source": "cron"},
+        kind="cronFailures" if _looks_like_failure(body) else "turnComplete",
+        title=job["name"] or "Scheduled job",
+        body=body[:200],
+        data={"source": "cron", "jobId": job["id"], "chatId": str(chat_id or "")},
         # The whole reason this function exists is delivery from a process with
         # no live adapter — which is usually one that is about to exit.
         flush=FLUSH_SECONDS,
     )
 
-    return {"ok": True}
+    return {"success": True}
+
+
+_CRON_HEADER = re.compile(
+    r"\A\s*Cronjob Response:[ \t]*(?P<name>[^\n]*)\n"
+    r"(?:\(job_id:[ \t]*(?P<id>[^)\n]*)\)\n)?"
+    r"-{3,}\n+",
+)
+_CRON_FOOTER = re.compile(r"\n+To stop or manage this job, send me a new message[^\n]*\s*\Z")
+
+
+def _split_cron_wrapper(text: str) -> tuple[Dict[str, str], str]:
+    """The job named by the scheduler's delivery wrapper, and the output under it.
+
+    `cron.scheduler._deliver_result` wraps every delivery in a header naming
+    the job and a footer saying how to stop it (unless `cron.wrap_response` is
+    off). On a phone the header is the notification's title and the footer is
+    noise, so the wrapper is read off and the job's own output is what shows.
+    Unwrapped text passes through with no name and no id.
+    """
+    head = _CRON_HEADER.match(text)
+    body = text[head.end():] if head else text
+    body = _CRON_FOOTER.sub("", body).strip()
+
+    return (
+        {
+            "name": (head.group("name") or "").strip() if head else "",
+            "id": (head.group("id") or "").strip() if head else "",
+        },
+        body,
+    )
 
 
 def _safe(callback: Any) -> Any:

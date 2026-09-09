@@ -19,7 +19,11 @@ import type {
   ClarifyRequest,
   ConfigField,
   ContentBlock,
-  CronJobSummary,
+  DeliveryTarget,
+  ScheduledJob,
+  ScheduledJobDraft,
+  ScheduledJobRun,
+  ScheduledJobUpdate,
   EventRecord,
   KanbanBoard,
   KanbanCardCreate,
@@ -214,12 +218,19 @@ export interface AgentBackend {
   /** Requires `capabilities.settings.schemaDriven`. */
   setConfigValue(key: string, value: string): Promise<void>
 
-  /** Requires `capabilities.extras.cron`. */
-  listCronJobs(): Promise<CronJobSummary[]>
-  /** Requires `capabilities.extras.cron`. */
-  setCronJobEnabled(id: string, enabled: boolean): Promise<void>
-  /** Requires `capabilities.extras.cron`. Runs the job now. */
-  triggerCronJob(id: string): Promise<void>
+  // Scheduled jobs (§7.20). All require `capabilities.extras.cron`.
+
+  listScheduledJobs(): Promise<ScheduledJob[]>
+  /** Runs that produced a session, newest first. A script job has none. */
+  listScheduledJobRuns(id: string, limit?: number): Promise<ScheduledJobRun[]>
+  createScheduledJob(draft: ScheduledJobDraft): Promise<ScheduledJob>
+  updateScheduledJob(id: string, update: ScheduledJobUpdate): Promise<ScheduledJob>
+  deleteScheduledJob(id: string): Promise<void>
+  setScheduledJobEnabled(id: string, enabled: boolean): Promise<void>
+  /** Runs the job now, off its schedule. */
+  triggerScheduledJob(id: string): Promise<void>
+  /** Where a job's output can be sent, as the host offers them. */
+  listDeliveryTargets(): Promise<DeliveryTarget[]>
 
   /**
    * Requires `capabilities.push.register`. Tell the host where to push.

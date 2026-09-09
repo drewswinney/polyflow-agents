@@ -157,9 +157,11 @@ def main() -> int:
 
         check_artifacts(module, client, base, Path(tmp))
 
+        check_standalone_send(Path(tmp))
+
     print(
         "Plugin API check passed: standalone import resolves, registration round-trips to disk, "
-        "and artifacts capture, serve, share and delete."
+        "artifacts capture, serve, share and delete, and cron delivery honours the host contract."
     )
 
     return 0
@@ -541,6 +543,76 @@ def check_artifacts(module, client, base: str, home: Path) -> None:
 
     if client.get(f"{base}/artifacts").json()["total"] != 4:
         fail("a terminal call should not have been captured")
+
+
+
+def check_standalone_send(home: Path) -> None:
+    """Cron delivery through the platform face honours the host's contract.
+
+    `tools/send_message_tool.py` calls a plugin's `standalone_sender_fn`
+    positionally — `(platform_config, chat_id, chunk, thread_id=…,
+    media_files=…, force_document=…)` — and treats any result without a
+    `success` or `error` key as a failed delivery. The deployed plugin got both
+    wrong for a week: it read the text off keyword arguments (so every push had
+    an empty body) and answered `{"ok": True}` (so the scheduler logged a
+    delivery error for a push that had gone out). The gateway log for the
+    `mealplan-saturday-prompt` job is what surfaced it; this pins the contract
+    so it cannot drift back.
+
+    Imported as a package here, unlike `plugin_api.py` above, because
+    `adapter.py`'s relative imports are exactly what the gateway's own loader
+    provides for it.
+    """
+    import asyncio
+
+    sys.path.insert(0, str(PLUGIN.parent))
+    try:
+        adapter = importlib.import_module("polyflow_agents_push.adapter")
+    finally:
+        sys.path.pop(0)
+
+    sent: list[dict] = []
+    adapter.push.notify = lambda **kwargs: sent.append(kwargs)  # type: ignore[assignment]
+
+    wrapped = (
+        "Cronjob Response: mealplan-saturday-prompt\n"
+        "(job_id: a4bc5d151ad1)\n"
+        "-------------\n\n"
+        "Next week's plan for 2. Tell me: theme, dishes, anything to avoid.\n\n"
+        "To stop or manage this job, send me a new message (e.g. \"stop reminder mealplan-saturday-prompt\")."
+    )
+
+    result = asyncio.run(
+        adapter._standalone_send(None, "greg", wrapped, thread_id=None, media_files=[], force_document=False)
+    )
+
+    if result != {"success": True}:
+        fail(f"standalone send must answer {{'success': True}} for the scheduler; got {result!r}")
+    if len(sent) != 1:
+        fail(f"one delivery should be one push, got {len(sent)}")
+
+    push_kwargs = sent[0]
+
+    if push_kwargs["title"] != "mealplan-saturday-prompt":
+        fail(f"the job's name is the notification title, got {push_kwargs['title']!r}")
+    if not push_kwargs["body"].startswith("Next week's plan for 2."):
+        fail(f"the job's own output is the body, got {push_kwargs['body']!r}")
+    if "To stop or manage" in push_kwargs["body"] or "job_id" in push_kwargs["body"]:
+        fail("the scheduler's wrapper leaked into the push body")
+    if push_kwargs["data"].get("jobId") != "a4bc5d151ad1" or push_kwargs["data"].get("source") != "cron":
+        fail(f"the push must carry the job id for routing, got {push_kwargs['data']!r}")
+    if push_kwargs["kind"] != "turnComplete":
+        fail(f"an ordinary output is not a failure, got kind={push_kwargs['kind']!r}")
+
+    # Unwrapped output (`cron.wrap_response: false`) passes through whole, and
+    # the failure heuristic still reads it.
+    sent.clear()
+    asyncio.run(adapter._standalone_send(None, "greg", "Traceback (most recent call last): boom"))
+
+    if sent[0]["kind"] != "cronFailures" or sent[0]["title"] != "Scheduled job":
+        fail(f"unwrapped failure output should push as a failure with the generic title, got {sent[0]!r}")
+    if sent[0]["body"] != "Traceback (most recent call last): boom":
+        fail(f"unwrapped output must pass through untouched, got {sent[0]['body']!r}")
 
 
 if __name__ == "__main__":

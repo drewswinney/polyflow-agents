@@ -251,7 +251,7 @@ export default function RootLayout() {
                 <Stack.Screen name="logs" />
                 <Stack.Screen name="tools" />
                 <Stack.Screen name="model" />
-                <Stack.Screen name="cron" />
+                <Stack.Screen name="scheduled" />
                 <Stack.Screen name="config" />
                 <Stack.Screen name="notifications" />
                 <Stack.Screen name="voice/[id]" />
@@ -308,6 +308,7 @@ function AppSidebar() {
       paired={Boolean(agent)}
       supportsArtifacts={backend?.capabilities.artifacts.store === true}
       supportsBoards={backend?.capabilities.extras.boards === true}
+      supportsScheduled={backend?.capabilities.extras.cron === true}
       onOpenSession={id => router.push(`/chat/${id}`)}
       // `navigate` returns to a top-level destination already on the stack
       // instead of stacking a second copy of it behind the drawer.
