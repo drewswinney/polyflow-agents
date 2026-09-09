@@ -3,7 +3,7 @@ import * as Clipboard from 'expo-clipboard'
 import { memo, useState } from 'react'
 import { Image, Pressable, StyleSheet, View } from 'react-native'
 
-import type { MessageImage, TranscriptEntry } from '@/domain'
+import type { MessageImage, SystemNoteKind, TranscriptEntry } from '@/domain'
 
 import { clockTime, duration } from '../format'
 import { fanFor, stackLabel } from '../image-stack'
@@ -35,8 +35,70 @@ export const TranscriptEntryView = memo(function TranscriptEntryView({ entry }: 
       return <ToolRow call={entry.call} />
     case 'stream_cut':
       return <StreamCut at={entry.at} />
+    case 'system':
+      return <SystemNote note={entry.note} label={entry.label} detail={entry.detail} text={entry.text} />
   }
 })
+
+/** The glyph for each kind of plumbing; the same muted ink as a collapsed work row. */
+const NOTE_GLYPH: Record<SystemNoteKind, string> = {
+  compaction: 'compress',
+  cron: 'clock',
+  skill: 'wand-magic-sparkles',
+  background: 'gears',
+  delegation: 'diagram-project',
+  continue: 'forward',
+  system: 'circle-info'
+}
+
+/**
+ * Something the host injected, drawn as plumbing.
+ *
+ * A quiet row in the same voice as a collapsed work section — a glyph, one
+ * muted line saying what it is, a chevron — because that is what it is: the
+ * agent's working conditions, not the conversation. It opens to the full
+ * text, since a compaction summary or a job's prompt is exactly what you go
+ * looking for when a reply does not make sense. Never a bubble: a bubble says
+ * "you said this", and you did not.
+ */
+function SystemNote({ note, label, detail, text }: { note: SystemNoteKind; label: string; detail?: string; text: string }) {
+  const theme = useTheme()
+  const [open, setOpen] = useState(false)
+  const muted = theme.color.muted
+
+  return (
+    <View style={styles.systemNote}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`${open ? 'Hide' : 'Show'} host note. ${label}`}
+        onPress={() => setOpen(value => !value)}
+        style={({ pressed }) => [styles.systemHeader, { opacity: pressed ? 0.6 : 1 }]}
+      >
+        <Icon name={NOTE_GLYPH[note]} size={12} color={muted} />
+        <View style={styles.systemLabel}>
+          <Text variant="secondary" color={muted} numberOfLines={1}>
+            {label}
+          </Text>
+          {/* The lifted line gets its own row: beside a label it was always
+              the part that got cut, and it is the part worth reading. */}
+          {detail ? (
+            <Text variant="secondary" color={theme.color.gray500} numberOfLines={1}>
+              {detail}
+            </Text>
+          ) : null}
+        </View>
+        <Icon name={open ? 'chevron-up' : 'chevron-down'} size={9} color={muted} />
+      </Pressable>
+
+      {open ? (
+        <View style={[styles.systemBody, { borderLeftColor: theme.color.border }]}>
+          <Markdown source={text} />
+        </View>
+      ) : null}
+    </View>
+  )
+}
 
 /**
  * A message you sent.
@@ -343,6 +405,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth
   },
+  systemNote: { gap: 6 },
+  systemHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 28 },
+  systemLabel: { flex: 1, minWidth: 0, gap: 1 },
+  // Indented under its header and marked by a rule rather than boxed: the
+  // text is long and boxing it made a second page inside the page.
+  systemBody: { borderLeftWidth: 2, paddingLeft: 12, marginLeft: 5 },
   userBubble: {
     paddingHorizontal: 13,
     paddingVertical: 10,

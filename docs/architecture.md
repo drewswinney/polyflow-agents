@@ -672,6 +672,20 @@ button and the iOS edge-swipe still pop it — only the chevron is gone. Its tit
 keeps the smaller type: the session's own name is not a screen name and should
 not be set like one.
 
+**What the host injects is drawn as plumbing, not as you.** Hermes writes its
+own material into the conversation under `role: 'user'` — compaction summaries,
+a scheduled job's prompt with its delivery preamble, a skill's full text,
+"background process finished" notes — because strict OpenAI-compatible
+providers reject a system message that is not first. Taken at face value each
+one renders in your bubble as something you said. `classifySystemNote`
+(`src/backends/hermes/system-notes.ts`) reads the host's own opening markers
+and the few `display_kind` values it stamps, and the transcript keeps them as
+`system` entries: a quiet collapsible row in the voice of a collapsed work
+section, with a label ("Earlier turns were compacted", "Scheduled job prompt ·
+weekly-meal-plan") and, where there is one, the readable line lifted out of
+the injection. Model-switch markers and `display_kind: hidden` rows stay
+dropped, as before.
+
 ### 7.3 Streaming performance
 
 The one genuine technical risk in a React Native chat client. Mitigations,

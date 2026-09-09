@@ -10,6 +10,7 @@ import type { SessionInfo, SessionMessage, SessionSearchResult } from '@hermes/t
 import type { MessageImage, SessionSearchHit, SessionSummary, ToolCall, TranscriptEntry } from '@/domain'
 
 import { coerceText } from './event-map'
+import { classifySystemNote } from './system-notes'
 
 /** Hermes epoch seconds → epoch milliseconds. Tolerates a value already in ms. */
 export function toMillis(seconds: number | null | undefined): number {
@@ -156,6 +157,19 @@ export function toTranscriptEntries(messages: SessionMessage[]): TranscriptEntry
     }
 
     const raw = coerceText(message.content) || coerceText(message.text)
+
+    // What the host put here rather than the person: a compaction summary, a
+    // scheduled job's prompt, a skill's text. Kept — it explains what the
+    // agent knew — but as its own kind, so it is not drawn in the user's
+    // bubble as something they said.
+    const note = classifySystemNote(message)
+
+    if (note) {
+      entries.push({ kind: 'system', id, at, text: raw, ...note })
+
+      return
+    }
+
     const role = message.role === 'user' ? 'user' : 'agent'
     const { text, images } = role === 'user' ? splitImageRefs(raw) : { text: raw, images: [] }
 
