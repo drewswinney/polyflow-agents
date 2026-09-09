@@ -148,7 +148,10 @@ def _send_now(*, kind: str, title: str, body: str, data: Dict[str, Any], profile
 
         # A success line, because silence used to be indistinguishable from
         # every way this can fail quietly.
-        logger.info("[polyflow_agents_push] %s: sent to %d device(s)", kind, len(messages))
+        # Names the session and job the push opens, when it opens one: that is
+        # the fact a log reader is checking after a cron delivery.
+        opens = " ".join(f"{key}={data[key]}" for key in ("sessionId", "jobId") if data.get(key))
+        logger.info("[polyflow_agents_push] %s: sent to %d device(s)%s", kind, len(messages), f" ({opens})" if opens else "")
     except Exception:
         logger.warning("[polyflow_agents_push] notification failed", exc_info=True)
 

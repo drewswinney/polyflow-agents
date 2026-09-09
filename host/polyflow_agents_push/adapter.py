@@ -390,12 +390,11 @@ def _build_adapter(config: Any) -> Any:
             reply_to: Optional[str] = None,
             metadata: Optional[Dict[str, Any]] = None,
         ) -> Any:
-            push.notify(
-                kind="cronFailures" if _looks_like_failure(content) else "turnComplete",
-                title="Hermes",
-                body=content[:200],
-                data={"chatId": chat_id or ""},
-            )
+            # The gateway's own delivery path: when it is running, the scheduler
+            # sends through this before it would ever try the standalone
+            # sender. Same push either way — the gateway outlives the send, so
+            # no flush is needed here.
+            _push_cron_delivery(chat_id, content, flush=0.0)
 
             return SendResult(success=True)
 
@@ -508,9 +507,10 @@ async def _standalone_send(
 ) -> Dict[str, Any]:
     """Out-of-process cron delivery.
 
-    Cron jobs can run in a process with no live adapter, where a `deliver=` job
-    otherwise fails with `No live adapter for platform 'polyflow_agents_push'`.
-    Push has no connection to hold, so serving these is just sending.
+    Cron jobs can run in a process with no live adapter — `hermes cron run`,
+    the dashboard's trigger route — where a `deliver=` job otherwise fails with
+    `No live adapter for platform 'polyflow_agents_push'`. Push has no
+    connection to hold, so serving these is just sending.
 
     Hermes calls this positionally — `(platform_config, chat_id, chunk, ...)`,
     see `tools/send_message_tool.py` — and reads the result for a `success` or
@@ -520,12 +520,22 @@ async def _standalone_send(
     """
     del thread_id, media_files, force_document
 
-    job, body = _split_cron_wrapper(str(text or ""))
+    # The whole reason this function exists is delivery from a process with no
+    # live adapter — which is usually one that is about to exit.
+    _push_cron_delivery(chat_id, str(text or ""), flush=FLUSH_SECONDS)
 
-    # The run this text came from, when the turn-finished hook saw it: an
-    # agent job's delivery names its session, so a tap opens the conversation
-    # that asked the question and a reply lands where it can be acted on. A
-    # script job has no turn and no session; its push opens nothing.
+    return {"success": True}
+
+
+def _push_cron_delivery(chat_id: str, text: str, *, flush: float) -> None:
+    """One cron delivery, as a push — from the live adapter or the standalone sender.
+
+    The run this text came from, when the turn-finished hook saw it, names its
+    session: an agent job's push then opens the conversation that asked the
+    question, and a reply lands where it can be acted on. A script job has no
+    turn and no session; its push opens nothing.
+    """
+    job, body = _split_cron_wrapper(text)
     turn = _recall_cron_turn(body)
     session_id = str(turn["session_id"]) if turn else ""
     job_id = job["id"] or _cron_job_id_of(session_id)
@@ -540,12 +550,8 @@ async def _standalone_send(
             "chatId": str(chat_id or ""),
             **({"sessionId": session_id} if session_id else {}),
         },
-        # The whole reason this function exists is delivery from a process with
-        # no live adapter — which is usually one that is about to exit.
-        flush=FLUSH_SECONDS,
+        flush=flush,
     )
-
-    return {"success": True}
 
 
 _CRON_HEADER = re.compile(
