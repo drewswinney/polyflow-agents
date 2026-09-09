@@ -106,6 +106,16 @@ describe('toScheduledJobRun', () => {
   })
 })
 
+describe('toScheduledJobRun preview', () => {
+  it("cuts the scheduler's preamble off a run that never answered", () => {
+    const row = { id: 'r', started_at: 1, ended_at: 2, last_active: 2, is_active: false, message_count: 1, model: null, input_tokens: 0, output_tokens: 0, source: 'cron', title: null, tool_call_count: 0 }
+
+    expect(toScheduledJobRun({ ...row, preview: '[IMPORTANT: You are running as a scheduled cron job. DELIVER the result.] Gather the digest.' }).preview).toBe('Gather the digest.')
+    expect(toScheduledJobRun({ ...row, preview: '[IMPORTANT: You are running as a scheduled cron job. DELIVER…' }).preview).toBe('')
+    expect(toScheduledJobRun({ ...row, preview: 'Plan for the week.' }).preview).toBe('Plan for the week.')
+  })
+})
+
 describe('payloads', () => {
   it('sends only the fields an edit changed, in the host\'s names', () => {
     expect(toUpdatePayload({ schedule: 'every 2h', contextFrom: ['a4'] })).toEqual({ updates: { schedule: 'every 2h', context_from: ['a4'] } })

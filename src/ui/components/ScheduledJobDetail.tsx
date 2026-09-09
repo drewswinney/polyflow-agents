@@ -12,7 +12,7 @@ import {
   useScheduledJobUpdate
 } from '@/state/scheduled'
 
-import { agoTime, duration, untilTime } from '../format'
+import { agoTime, untilTime } from '../format'
 import { kanbanErrorText as hostErrorText } from '../kanban'
 import { Markdown } from '../markdown/Markdown'
 import { deliverLabel, outcomeLabel, outcomeTone } from '../scheduled'
@@ -297,7 +297,7 @@ function ActionButton({ icon, label, disabled, onPress }: { icon: string; label:
 
 function RunRow({ run, first, onPress }: { run: ScheduledJobRun; first: boolean; onPress: () => void }) {
   const theme = useTheme()
-  const took = run.endedAt ? duration(run.endedAt - run.startedAt) : run.active ? 'running' : ''
+  const took = run.endedAt ? runDuration(run.endedAt - run.startedAt) : run.active ? 'running' : ''
 
   return (
     <Pressable
@@ -328,6 +328,19 @@ function RunRow({ run, first, onPress }: { run: ScheduledJobRun; first: boolean;
       <Icon name="chevron-right" size={11} color={theme.color.gray400} />
     </Pressable>
   )
+}
+
+/** How long a run took: `42s`, `3m`, `21h 2m`. A run is minutes, not milliseconds. */
+function runDuration(ms: number): string {
+  const seconds = Math.max(0, Math.round(ms / 1000))
+
+  if (seconds < 60) return `${seconds}s`
+
+  const minutes = Math.floor(seconds / 60)
+
+  if (minutes < 60) return `${minutes}m`
+
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
 function Notice({ tone, text }: { tone: 'error' | 'warning'; text: string }) {

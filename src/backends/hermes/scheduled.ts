@@ -154,9 +154,28 @@ export function toScheduledJobRun(row: HermesCronRun): ScheduledJobRun {
     startedAt: toMillis(row.started_at),
     endedAt: row.ended_at == null ? null : toMillis(row.ended_at),
     active: row.is_active === true,
-    preview: (row.preview ?? '').trim(),
+    preview: runPreview(row.preview),
     messageCount: typeof row.message_count === 'number' ? row.message_count : 0
   }
+}
+
+/**
+ * The run's preview without the scheduler's preamble.
+ *
+ * A cron run's prompt opens with a bracketed `[IMPORTANT: You are running as
+ * a scheduled cron job. …]` block the scheduler injects, and for a run that
+ * failed before answering that block *is* the session's last message. It
+ * says nothing about this run, so it is cut; a preview the host truncated
+ * inside the block is left empty rather than shown as a dangling bracket.
+ */
+function runPreview(preview: string | null | undefined): string {
+  const text = (preview ?? '').trim()
+
+  if (!text.startsWith('[IMPORTANT')) return text
+
+  const close = text.indexOf(']')
+
+  return close === -1 ? '' : text.slice(close + 1).trim()
 }
 
 export function toDeliveryTarget(target: CronDeliveryTarget): DeliveryTarget {
