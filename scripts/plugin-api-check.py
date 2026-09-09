@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+from contextvars import ContextVar
 import json
 import os
 import sqlite3
@@ -170,8 +171,16 @@ def check_profile_stamping(module, home: Path) -> None:
     The device registry is shared across every profile on a host, so a push's
     `agentId` (set at registration time) can name the wrong profile. The host
     must stamp the profile that is actually talking, so a tap re-scopes to the
-    right agent. This drives `_send_now` against a stubbed Expo to prove the
+    right agent. This drives `notify` against a stubbed Expo to prove the
     `profile` key lands on the wire, and checks the pure label derivation.
+
+    Driven through `notify`, not `_send_now`, on purpose. The profile is a
+    ContextVar in Hermes and the send happens on a thread that starts with an
+    empty context, so a lookup on the sender thread reads `default` for every
+    profile. Calling `_send_now` directly ran the lookup on the caller's
+    thread and passed while the deployed plugin stamped every push wrong. The
+    stub below is itself a ContextVar for the same reason: it answers `greg`
+    only from the context the hook fires in, exactly as Hermes's does.
     """
     devices = module.devices
     push = module.push
@@ -195,10 +204,14 @@ def check_profile_stamping(module, home: Path) -> None:
     def fake_post(messages):
         captured.extend(messages)
 
-    # Stub the two things `_send_now` reaches outside: the registry read and
-    # the Expo POST. `current_profile_name` reads `hermes_constants`, which is
-    # not importable in this standalone check, so point it at `greg` directly —
-    # the point is that the *stamped value* flows through, whatever its source.
+    # Stub the three things the send reaches outside: the registry read, the
+    # Expo POST, and the profile lookup. `current_profile_name` reads
+    # `hermes_constants`, which is not importable in this standalone check, so
+    # it is replaced with a lookup that behaves the same way: context-local,
+    # set on the thread the hook fires from, and `default` anywhere else.
+    firing: ContextVar[str] = ContextVar("firing_profile", default="default")
+    firing.set("greg")
+
     orig_post, orig_load, orig_profile = push._post, devices.load, devices.current_profile_name
     push._post = fake_post
     devices.load = lambda: [
@@ -210,11 +223,12 @@ def check_profile_stamping(module, home: Path) -> None:
             "prefs": dict(devices.DEFAULT_PREFS),
         }
     ]
-    devices.current_profile_name = lambda: "greg"
+    devices.current_profile_name = firing.get
     try:
         # `turnComplete` is a real, enabled-by-default kind — `wants()` will
         # accept the stub device, so the send proceeds to the (faked) Expo POST.
-        push._send_now(kind="turnComplete", title="t", body="b", data={"sessionId": "s1"})
+        # `flush` joins the sender thread, so the capture is complete on return.
+        push.notify(kind="turnComplete", title="t", body="b", data={"sessionId": "s1"}, flush=5.0)
     finally:
         push._post, devices.load, devices.current_profile_name = orig_post, orig_load, orig_profile
 
@@ -223,7 +237,7 @@ def check_profile_stamping(module, home: Path) -> None:
 
     data = captured[0].get("data", {})
     if data.get("profile") != "greg":
-        fail(f"push must stamp the firing profile 'greg', got data={data!r}")
+        fail(f"push must stamp the firing profile 'greg' (resolved on the caller's thread), got data={data!r}")
     if data.get("agentId") != "agent-default":
         fail(f"push must still echo the registered agentId, got data={data!r}")
     if data.get("sessionId") != "s1":
