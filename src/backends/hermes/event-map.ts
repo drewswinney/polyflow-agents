@@ -133,7 +133,12 @@ export interface MapContext {
  * Returns an array because a single Hermes event can mean two things to the UI
  * — `tool.complete` both settles the card and belongs in the event log.
  */
-export function mapGatewayEvent(event: GatewayEvent, ctx: MapContext): SessionUpdate[] {
+export function mapGatewayEvent(event: GatewayEvent, ctx: MapContext, storedId?: string): SessionUpdate[] {
+  // The id the *app* knows the session by. Events name the runtime id, which
+  // no REST route and no screen can use; a request that carried it was one the
+  // resume snapshot's twin (which carries the stored id) never agreed with.
+  const sessionId = storedId || str(event.session_id)
+
   const payload = (event.payload ?? undefined) as Payload
   const updates: SessionUpdate[] = []
 
@@ -269,7 +274,7 @@ export function mapGatewayEvent(event: GatewayEvent, ctx: MapContext): SessionUp
     case 'approval.request': {
       const req: PermissionRequest = {
         id: str(payload?.request_id),
-        sessionId: str(event.session_id),
+        sessionId,
         tool: str(payload?.tool) || 'shell',
         command: str(payload?.command),
         description: str(payload?.description) || 'dangerous command',
@@ -292,7 +297,7 @@ export function mapGatewayEvent(event: GatewayEvent, ctx: MapContext): SessionUp
         kind: 'clarify_request',
         req: {
           id: str(payload?.request_id),
-          sessionId: str(event.session_id),
+          sessionId,
           question: str(payload?.question) || str(payload?.prompt) || coerceText(payload?.text),
           // The choices are the whole point of a clarify: without them the UI
           // can only offer free text for a question the agent meant to be

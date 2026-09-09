@@ -146,7 +146,12 @@ export function describeNotification(
       data: 'approval',
       title: `${agent.displayName} has a question`,
       body: previewOf(question || record.detail) || 'The agent is waiting on your answer.',
-      key: notificationKey('clarify', str(payload?.request_id)),
+      // Under the session, not the request id. The host's push for a clarify
+      // fires from `pre_tool_call`, before the question has a request id, so
+      // that is the only key both paths can agree on. A session holds one
+      // question at a time; the wait ending forgets the key
+      // (`blocked-sessions`, `session-stream`) so the next one rings.
+      key: notificationKey('clarify', record.sessionId),
       sessionId: record.sessionId
     }
   }

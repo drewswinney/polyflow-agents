@@ -47,6 +47,29 @@ describe('assistant text', () => {
   })
 })
 
+describe('the id a blocking request names', () => {
+  const approval = { request_id: 'r1', command: 'rm -rf build', description: 'deletes files' }
+
+  it('is the runtime id when nothing better is known', () => {
+    const [update] = mapGatewayEvent({ type: 'approval.request', session_id: 'rt', payload: approval } as never, context())
+
+    expect(update).toMatchObject({ kind: 'permission_request', req: { id: 'r1', sessionId: 'rt' } })
+  })
+
+  it('is the stored id once the connection knows it, for approvals and questions alike', () => {
+    const ctx = context()
+    const [asked] = mapGatewayEvent({ type: 'approval.request', session_id: 'rt', payload: approval } as never, ctx, 'stored')
+    const [question] = mapGatewayEvent(
+      { type: 'clarify.request', session_id: 'rt', payload: { request_id: 'r2', question: 'Which?' } } as never,
+      ctx,
+      'stored'
+    )
+
+    expect(asked).toMatchObject({ kind: 'permission_request', req: { id: 'r1', sessionId: 'stored' } })
+    expect(question).toMatchObject({ kind: 'clarify_request', req: { id: 'r2', sessionId: 'stored' } })
+  })
+})
+
 describe('the start of a turn', () => {
   it('reports message.start to chat, and still logs it', () => {
     // The bug this pins: message.start was log-only, so between a submit and

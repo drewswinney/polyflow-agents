@@ -740,6 +740,12 @@ What makes leaving safe rather than negligent:
   read the command from is the habit an approval prompt exists to prevent.
 - **The blocked marker on every list that leads back**: the session row's
   "Waiting on your answer" strip (§7.1), and the chat header's `blocked on you`.
+  The list endpoint has no such flag, so `state/blocked-sessions` overlays it
+  onto `useSessions` from the live stream (`approval.request` /
+  `clarify.request` mark, the held tool completing or the turn ending clears),
+  the open chat (which also holds what the resume snapshot restored), and the
+  host's blocking and answered-elsewhere pushes for a session that changed
+  while the phone was asleep.
 - **The answer is checked.** `approval.respond` goes out under the session's
   *runtime* id like every other RPC (§5.4) — the gateway answers `4001` for a
   stored one — and the host's `resolved` count is read: zero, or a refused

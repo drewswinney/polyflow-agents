@@ -147,6 +147,17 @@ The platform face registers with:
 | Turn finished | `post_llm_call` hook | `session_id` (stored), `turn_id`, `assistant_response`, `platform`, `model` |
 | Cron job run | platform delivery target | the job's rendered output |
 
+Neither approval hook carries a `request_id` on the gateway surface — only a
+registered approval *transport* (§6) is handed one — but the app keys approvals
+by it on both paths, so a push without one rang twice against the socket's
+`approval.request` and could never be cleared. `_await_gateway_decision` queues
+the entry *before* it fires `pre_approval_request`, so the plugin reads the
+newest unresolved approval for `session_key` off the queue
+(`tools.approval.list_gateway_approvals`) and stamps its id on the request
+push; the resolved push reuses what the request hook remembered, keyed by
+session, tool call and command. A clarify has no request id at `pre_tool_call`
+time, so the app keys those by session on both paths instead.
+
 Notes that change behaviour rather than decorate it:
 
 - **`surface` discriminates where the approval came from** — `"cli"`, `"gateway"`

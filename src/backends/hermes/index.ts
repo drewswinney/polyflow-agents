@@ -407,6 +407,9 @@ export class HermesBackend implements AgentBackend {
       })
       .finally(() => {
         this.resuming.delete(stored)
+        // A resume that failed maps nothing, and anything held for it must not
+        // sit until some other session's mapping happens to land.
+        this.flushHeld()
       })
 
     this.resuming.set(stored, pending)
@@ -591,42 +594,30 @@ export class HermesBackend implements AgentBackend {
     // Any frame at all is proof of life, whatever it turns out to say.
     this.lastFrameAt = this.mapContext.now
 
-    // Activity and Logs are agent-scoped: every event reaches them, including
-    // ones for a session nobody has open.
-    //
-    // Named by the *stored* id wherever it is known. Events carry the runtime
-    // id, which is minted fresh by every `session.resume` — so a completion
-    // announced under it was keyed by something that changes each time a chat
-    // is reopened. The notification ledger therefore never recognised the turn
-    // it had already announced, and rang again for it; and the id it attached
-    // to the banner was one no REST route can look up, so tapping it opened an
-    // empty chat. It is also the id the host's own push uses, which is what
-    // lets the two paths finally agree on one key for one happening.
-    if (this.eventSinks.size) {
-      const stored = event.session_id ? this.storedByRuntime.get(event.session_id) : undefined
-      const record = toEventRecord(event, this.mapContext.now, stored)
-
-      for (const sink of this.eventSinks) sink(record)
-    }
-
     const runtimeId = event.session_id
 
-    if (!runtimeId) return
-    if (this.routeToSession(event, runtimeId)) return
-
-    // Nobody is listening under that id *yet*.
+    // Named by a runtime id this connection cannot translate *yet*.
     //
     // A reconnect clears the id maps and re-mints them with a `session.resume`
     // that `subscribe` deliberately does not await. Until it lands, every event
-    // for the session names a runtime id this client cannot translate, matches
-    // no sink, and used to be dropped on the floor — so a turn that was already
-    // running when the socket came back streamed to nobody for the length of a
-    // round trip, and the chat sat there looking idle while the agent worked.
+    // for the session names an id that matches no sink, and used to be dropped
+    // — so a turn already running when the socket came back streamed to nobody
+    // for the length of a round trip. Held for the session, then; but the
+    // agent-wide taps were still served on the way in, under the runtime id,
+    // and a turn that ended inside that window was announced with an id no
+    // chat could open and no ledger entry would match. So the whole event
+    // waits now, and is served under the stored id once the resume names it.
     //
-    // Held rather than dropped, and only while a resume is actually in flight:
-    // outside that window an unknown id really is a session nobody has open,
-    // which is what the event sinks above are for.
-    if (this.resuming.size > 0) this.held.hold(event, this.mapContext.now)
+    // Only while a resume is actually in flight. The host binds a session to
+    // the socket that resumed it, so outside that window an unknown id is not
+    // a session this client will ever learn — it is served as it is.
+    if (runtimeId && !this.storedByRuntime.has(runtimeId) && this.resuming.size > 0) {
+      this.held.hold(event, this.mapContext.now)
+
+      return
+    }
+
+    this.serve(event, this.mapContext.now)
   }
 
   /**
@@ -643,7 +634,7 @@ export class HermesBackend implements AgentBackend {
 
     if (!sinks?.size) return false
 
-    for (const update of mapGatewayEvent(event, this.mapContext)) {
+    for (const update of mapGatewayEvent(event, this.mapContext, sessionId)) {
       for (const sink of sinks) sink(update)
     }
 
@@ -651,15 +642,45 @@ export class HermesBackend implements AgentBackend {
   }
 
   /**
+   * Deliver one event to everyone: the agent-wide taps first, then the session.
+   *
+   * Activity and Logs are agent-scoped, so every event reaches them, including
+   * ones for a session nobody has open. Named by the *stored* id: events carry
+   * the runtime id, which changes with every resume, so a completion keyed by
+   * it was never recognised by the notification ledger — and the id it put on
+   * a banner was one no REST route could look up, so the tap opened an empty
+   * chat. The stored id is also what the host's own push uses, which is what
+   * lets the two paths agree on one key for one happening.
+   */
+  private serve(event: GatewayEvent, at: number): void {
+    const runtimeId = event.session_id
+    const stored = runtimeId ? this.storedByRuntime.get(runtimeId) : undefined
+
+    if (this.eventSinks.size) {
+      const record = toEventRecord(event, at, stored)
+
+      for (const sink of this.eventSinks) sink(record)
+    }
+
+    if (runtimeId) this.routeToSession(event, runtimeId)
+  }
+
+  /**
    * Replay whatever was waiting on a session id that has just been learned.
    *
-   * Through `routeToSession` alone: the event sinks were served on the way in,
-   * and Activity must not show the same row twice.
+   * Everything held is served in full — the agent-wide taps included, since
+   * nothing was served on the way in. An event whose id is still unknown is
+   * kept while a resume could yet name it; once none can, it is served as it
+   * is rather than lost, which is what happened to it before the hold existed.
    */
   private flushHeld(): void {
+    const resolving = this.resuming.size > 0
+
     this.held.flush(
       (event, at) => {
-        if (!event.session_id) return true
+        const runtimeId = event.session_id
+
+        if (runtimeId && resolving && !this.storedByRuntime.has(runtimeId)) return false
 
         // Map against the clock the event *arrived* on. `mapContext.now` is
         // what a tool's duration and an approval's deadline are measured from,
@@ -670,13 +691,15 @@ export class HermesBackend implements AgentBackend {
         this.mapContext.now = at
 
         try {
-          return this.routeToSession(event, event.session_id)
+          this.serve(event, at)
         } finally {
           this.mapContext.now = resumed
         }
+
+        return true
       },
       Date.now(),
-      this.resuming.size > 0
+      resolving
     )
   }
 

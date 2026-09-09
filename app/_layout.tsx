@@ -22,6 +22,7 @@ import { useNotificationRouting } from '@/state/notification-routing'
 import { useNotificationTap } from '@/state/notification-tap'
 import { visibleSessionFromPath } from '@/state/notification-presentation'
 import { useSessions } from '@/state/queries'
+import { useBlockedSessionsSync } from '@/state/blocked-sessions'
 import { useSessionListSync } from '@/state/session-list-sync'
 import { restoreQueryCache, startPersistingQueryCache } from '@/state/query-cache-persistence'
 import { useSidebar } from '@/state/sidebar'
@@ -296,6 +297,7 @@ function AppSidebar() {
   // The list is read here and never remounted, so nothing else would ever ask
   // it to refetch — see the hook for what did not show up as a result.
   useSessionListSync(agent?.scope ?? '', backend)
+  useBlockedSessionsSync(agent?.scope ?? '', backend)
 
   return (
     <Sidebar
