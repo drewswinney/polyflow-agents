@@ -34,6 +34,8 @@ import type { PickedImage } from '@/platform/image-attachments'
 import { ensureArtifactFile } from '@/platform/artifact-cache'
 
 import { cacheSentImage, cachedImageUri } from './attachment-cache'
+import { useBlockedStore } from './blocked-sessions'
+import { forgetAnnouncement, notificationKey } from './notification-ledger'
 import {
   alreadyLanded,
   pendingAfterSubmit,
@@ -476,6 +478,14 @@ export function useSessionStream(
 
         case 'tool_call_update':
           setEntries(current => patchTool(current, update.id, update.status, update.output))
+          // A tool that has moved on is a wait that is over. An approval halts
+          // the turn, so the tool completing under a card still showing means
+          // the answer came from somewhere else — the desktop, a timeout — and
+          // the card would otherwise sit there offering a choice that bounces.
+          if (update.status !== 'running') {
+            setApproval(null)
+            setClarify(null)
+          }
           break
 
         case 'permission_request':
@@ -500,6 +510,9 @@ export function useSessionStream(
         case 'turn_complete':
           sealTail()
           setTurnActive(false)
+          // Nothing is waiting once the turn is over.
+          setApproval(null)
+          setClarify(null)
           break
 
         case 'error':
@@ -756,14 +769,38 @@ export function useSessionStream(
 
       setClarify(null)
 
-      backend.respondToClarify(asked.id, answer).catch((cause: unknown) => {
-        if (shouldRequeue(cause)) setClarify(current => current ?? asked)
+      backend.respondToClarify(asked.id, answer).then(
+        // Announced under the session (`notification-copy`); the answer is
+        // what lets the next question in this session ring.
+        () => forgetAnnouncement(notificationKey('clarify', sessionId)),
+        (cause: unknown) => {
+          if (shouldRequeue(cause)) setClarify(current => current ?? asked)
 
-        setEntries(current => [...current, failureRow('Could not send the answer', cause)])
-      })
+          setEntries(current => [...current, failureRow('Could not send the answer', cause)])
+        }
+      )
     },
-    [backend, clarify]
+    [backend, clarify, sessionId]
   )
+
+  /**
+   * Tell the session lists what this chat knows.
+   *
+   * The open chat is the most current source for its own row: it holds the
+   * live request, the one the resume snapshot restored (which the stream never
+   * carried, see `blocked-sessions`), and the answer you gave. Only once the
+   * transcript is in, so a chat still loading does not clear a mark the stream
+   * set a moment ago.
+   */
+  useEffect(() => {
+    if (!transcript) return
+
+    const store = useBlockedStore.getState()
+
+    if (approval) store.mark(scope, sessionId, approval.sudo ? 'sudo' : 'approval')
+    else if (clarify) store.mark(scope, sessionId, 'clarify')
+    else store.clear(scope, sessionId)
+  }, [approval, clarify, scope, sessionId, transcript])
 
   const reload = useCallback(() => void refetch(), [refetch])
 

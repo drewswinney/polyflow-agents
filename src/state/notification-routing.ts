@@ -32,7 +32,7 @@
 
 import * as Notifications from 'expo-notifications'
 import { router } from 'expo-router'
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import { AppState } from 'react-native'
 
 import { ensureNotificationHandler } from '@/platform/notifications'
@@ -40,6 +40,7 @@ import { ensureNotificationHandler } from '@/platform/notifications'
 import type { Agent, AgentId } from '@/domain'
 
 import { useAgents } from './agents'
+import { useBlockedStore } from './blocked-sessions'
 import { forgetAnnouncement, markAnnounced, notificationKey } from './notification-ledger'
 
 interface NotificationPayload {
@@ -73,6 +74,30 @@ export function useNotificationRouting(): void {
   // The handler is rebuilt whenever the agent list changes, but a cold-start tap
   // must be consumed exactly once no matter how often that happens.
   const coldStartHandled = useRef(false)
+
+  /**
+   * Apply what a push says about a session's wait, without a tap.
+   *
+   * Marks a blocking push's session as waiting and clears it on the answered-
+   * elsewhere push: a session answered on the desktop while the phone slept
+   * has no socket event to say so, and this push is the only word of it.
+   */
+  const settle = useCallback(
+    (payload: NotificationPayload | null | undefined) => {
+      if (!payload?.sessionId) return
+      if (payload.kind !== 'approvals' && payload.kind !== 'clarify') return
+
+      const scope = scopeOf(agents, selectedId, payload)
+
+      if (scope === null) return
+
+      const store = useBlockedStore.getState()
+
+      if (payload.resolved) store.clear(scope, payload.sessionId)
+      else store.mark(scope, payload.sessionId, payload.kind === 'clarify' ? 'clarify' : 'approval')
+    },
+    [agents, selectedId]
+  )
 
   useEffect(() => {
     const handle = (payload: NotificationPayload | null | undefined) => {
@@ -119,7 +144,10 @@ export function useNotificationRouting(): void {
     // turn, hours later, at whatever moment the app happened to reconnect — is
     // what made notifications look random.
     const received = Notifications.addNotificationReceivedListener(notification => {
-      remember(notification.request.content.data as NotificationPayload)
+      const payload = notification.request.content.data as NotificationPayload
+
+      remember(payload)
+      settle(payload)
     })
 
     if (!coldStartHandled.current) {
@@ -134,7 +162,7 @@ export function useNotificationRouting(): void {
       subscription.remove()
       received.remove()
     }
-  }, [agents, select, selectedId])
+  }, [agents, select, selectedId, settle])
 
   /**
    * Read the tray on every wake, and treat what is in it as already said.
@@ -151,7 +179,10 @@ export function useNotificationRouting(): void {
       void Notifications.getPresentedNotificationsAsync()
         .then(presented => {
           for (const notification of presented) {
-            remember(notification.request.content.data as NotificationPayload)
+            const payload = notification.request.content.data as NotificationPayload
+
+            remember(payload)
+            settle(payload)
           }
         })
         .catch(() => {
@@ -167,7 +198,16 @@ export function useNotificationRouting(): void {
     })
 
     return () => subscription.remove()
-  }, [])
+  }, [settle])
+}
+
+/** The scope a push's session lives in, or null when no known agent matches. */
+function scopeOf(agents: readonly Agent[], selectedId: AgentId, payload: NotificationPayload): string | null {
+  const target = resolveTapTarget(agents, selectedId, payload)
+
+  if (target === null) return null
+
+  return agents.find(agent => agent.id === target)?.scope ?? ''
 }
 
 /**
@@ -232,15 +272,21 @@ export function resolveTapTarget(
 /**
  * Record a delivered notification against the same key the socket would use.
  *
- * A blocking notification is keyed by its request id, which every path carries
- * and which is the reason a still-pending approval no longer rings on each
- * reconnect. `approval` and `clarify` are both written because the payload's
- * `kind` does not distinguish them — it collapses to `approval` for routing —
- * and a request id is unique either way, so writing both cannot suppress
- * anything it did not describe.
+ * An approval is keyed by its request id. The host's hook does not hand the
+ * plugin one, but the plugin reads it off the gateway's approval queue
+ * (`adapter.py::_pending_request_id`), so a current host's push carries the
+ * same id the socket's `approval.request` will — which is what stops the two
+ * ringing for one prompt, and what lets the answered-elsewhere push clear it.
+ * A clarify has no request id at push time and is keyed by session instead,
+ * on both paths (`notification-copy`).
  */
 function remember(payload: NotificationPayload | null | undefined): void {
   if (!payload) return
+
+  if (payload.kind === 'clarify' && payload.sessionId) {
+    if (payload.resolved) forgetAnnouncement(notificationKey('clarify', payload.sessionId))
+    else markAnnounced(notificationKey('clarify', payload.sessionId))
+  }
 
   if (payload.requestId) {
     // Answered elsewhere. The banner exists to be cleared, not to stand in for

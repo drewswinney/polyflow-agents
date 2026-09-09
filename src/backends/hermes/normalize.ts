@@ -68,7 +68,8 @@ export function toSessionSummary(info: SessionInfo): SessionSummary {
     model: info.model,
     messageCount: info.message_count,
     // Hermes has no per-session "blocked" flag on the list endpoint; the live
-    // stream is what tells us a session is waiting (§7.1). Callers overlay it.
+    // stream is what tells us a session is waiting (§7.1). `useSessions`
+    // overlays it from `state/blocked-sessions`.
     blockedOn: null
   }
 }

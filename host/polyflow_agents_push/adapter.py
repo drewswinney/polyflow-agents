@@ -71,6 +71,73 @@ FLUSH_SECONDS = 5.0
 # ── Hooks ────────────────────────────────────────────────────────────────────
 
 
+# Approvals announced and not yet answered, so the "answered" push can name
+# the same request the "asked" push did. Keyed by the session and the tool
+# call, which both hooks carry; the request id itself only the first can see.
+# Bounded because a `post` can go missing (a process exit mid-wait), and an
+# entry that never clears must not be a leak.
+_ANNOUNCED_LIMIT = 64
+_announced_requests: Dict[str, str] = {}
+_announced_lock = threading.Lock()
+
+
+def _announced_key(kwargs: Dict[str, Any]) -> str:
+    return "%s\x00%s\x00%s" % (
+        kwargs.get("session_key") or "",
+        kwargs.get("tool_call_id") or "",
+        kwargs.get("command") or "",
+    )
+
+
+def _pending_request_id(session_key: str) -> str:
+    """The id of the approval the gateway has just queued for this session.
+
+    The hook carries no `request_id` on the gateway surface — only a plugin
+    registered as an approval *transport* is handed one — but the app needs
+    it: a push and the socket's `approval.request` are the same happening, and
+    the app tells them apart by request id, so a push without one rang twice
+    and could never be cleared by the answer.
+
+    It can be read all the same. `_await_gateway_decision` appends the queue
+    entry *before* it fires `pre_approval_request`, so at hook time the newest
+    unresolved approval for the session is the one being announced. Read-only,
+    through the same snapshot the gateway's own resume replay uses.
+    """
+    if not session_key:
+        return ""
+
+    try:
+        from tools.approval import list_gateway_approvals
+
+        pending = list_gateway_approvals(session_key)
+    except Exception:
+        logger.debug("[polyflow_agents_push] could not read the approval queue", exc_info=True)
+
+        return ""
+
+    if not pending:
+        return ""
+
+    return str(pending[-1].get("request_id") or "")
+
+
+def _remember_announced(kwargs: Dict[str, Any], request_id: str) -> None:
+    if not request_id:
+        return
+
+    with _announced_lock:
+        if len(_announced_requests) >= _ANNOUNCED_LIMIT:
+            oldest = next(iter(_announced_requests))
+            _announced_requests.pop(oldest, None)
+
+        _announced_requests[_announced_key(kwargs)] = request_id
+
+
+def _forget_announced(kwargs: Dict[str, Any]) -> str:
+    with _announced_lock:
+        return _announced_requests.pop(_announced_key(kwargs), "")
+
+
 def _on_approval_request(**kwargs: Any) -> None:
     """An approval is now blocking a turn.
 
@@ -84,13 +151,16 @@ def _on_approval_request(**kwargs: Any) -> None:
         return
 
     command = str(kwargs.get("command") or "").strip()
+    request_id = str(kwargs.get("request_id") or "") or _pending_request_id(str(kwargs.get("session_key") or ""))
+
+    _remember_announced(kwargs, request_id)
 
     push.notify(
         kind="approvals",
         title="Approval needed",
         body=command[:140] or str(kwargs.get("description") or "A command needs your approval"),
         data={
-            "requestId": kwargs.get("request_id") or "",
+            "requestId": request_id,
             "sessionId": kwargs.get("session_id") or "",
             "sessionKey": kwargs.get("session_key") or "",
         },
@@ -103,13 +173,19 @@ def _on_approval_response(**kwargs: Any) -> None:
     Sent data-only so the app can dismiss a banner it may still be showing. The
     phone cannot know an approval was resolved on the desktop any other way.
     """
+    # By the time this fires the queue entry is gone, so the id comes from what
+    # the request hook remembered. A smart-mode verdict never announced anything
+    # and is skipped by the request hook; it finds nothing here and pushes an
+    # id-less clear, which the app ignores.
+    request_id = str(kwargs.get("request_id") or "") or _forget_announced(kwargs)
+
     push.notify(
         kind="approvals",
         title="",
         body="",
         data={
             "resolved": True,
-            "requestId": kwargs.get("request_id") or "",
+            "requestId": request_id,
             "sessionId": kwargs.get("session_id") or "",
             "choice": kwargs.get("choice") or "",
         },

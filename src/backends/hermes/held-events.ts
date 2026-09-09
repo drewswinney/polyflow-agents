@@ -13,6 +13,12 @@
  * already running when the socket came back streamed to nobody until its next
  * chunk — the chat sitting idle while the agent worked.
  *
+ * Whole events wait here, for everyone. The agent-wide taps used to be served
+ * on the way in, under the runtime id nobody could open a chat by — so a turn
+ * that ended inside the resume window rang with a dead id and never matched
+ * the ledger entry the host's push had made. Nothing is served until the id is
+ * known, or until no resume can name it.
+ *
  * Generic over the event type on purpose: nothing here reads an event, it only
  * decides which ones are still worth offering to a router.
  */

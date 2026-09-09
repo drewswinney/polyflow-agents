@@ -8,10 +8,12 @@
  * expensive half is remembering to do it everywhere.
  */
 
-import { useMemo } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { AgentBackend, AgentId, SessionId, SessionTranscript } from '@/domain'
+import type { AgentBackend, AgentId, SessionId, SessionSummary, SessionTranscript } from '@/domain'
+
+import { overlayBlocked, useBlockedSessions } from './blocked-sessions'
 
 /**
  * The prefix every agent-scoped key starts with.
@@ -40,6 +42,14 @@ export const transcriptKey = (scope: string, id: SessionId) => ['agent', scope, 
 
 export function useSessions(scope: string, backend: AgentBackend | null) {
   const queryKey = useMemo(() => sessionsKey(scope), [scope])
+  // The list endpoint has no "blocked" flag (see `toSessionSummary`), so the
+  // marker is laid over the rows here, from what the live stream and the open
+  // chat have said. `select` rather than a map in each screen: three screens
+  // read this list, and a marker that only one of them knew about was the
+  // sidebar saying nothing was waiting while Sessions said otherwise.
+  const blocked = useBlockedSessions(scope)
+  const select = useCallback((rows: SessionSummary[]) => overlayBlocked(rows, blocked), [blocked])
+
   console.log('[useSessions] scope:', scope, 'backend:', backend ? 'present' : 'null', 'queryKey:', JSON.stringify(queryKey))
   return useQuery({
     queryKey,
@@ -49,7 +59,8 @@ export function useSessions(scope: string, backend: AgentBackend | null) {
       const result = await backend!.listSessions({ limit: 50 })
       console.log('[useSessions] fetched', result.length, 'sessions for scope:', scope)
       return result
-    }
+    },
+    select
   })
 }
 
