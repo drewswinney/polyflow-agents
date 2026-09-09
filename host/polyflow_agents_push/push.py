@@ -59,9 +59,20 @@ def notify(
     Never raises, and never waits on the approval path: an agent halted on a
     question must not also be waiting on a notification.
     """
+    # Resolved *here*, on the caller's thread, and never on the sender's.
+    # Hermes scopes a turn to its profile with a ContextVar
+    # (`set_hermes_home_override`), and a plain `threading.Thread` starts with
+    # an empty context — so `get_hermes_home()` on the sender thread falls back
+    # to the process home, which in `hermes serve` is the deployment root, and
+    # every push was stamped `default` no matter which profile fired it. The
+    # app then re-scoped to the wrong agent and opened the session against it:
+    # the blank chat the stamp exists to prevent. The hook runs in the turn's
+    # context; this line is the last point that context is still in reach.
+    profile = devices.current_profile_name()
+
     thread = threading.Thread(
         target=_send_now,
-        kwargs={"kind": kind, "title": title, "body": body, "data": data or {}},
+        kwargs={"kind": kind, "title": title, "body": body, "data": data or {}, "profile": profile},
         name=f"polyflow-push-{kind}",
         daemon=True,
     )
@@ -84,7 +95,12 @@ def notify(
         )
 
 
-def _send_now(*, kind: str, title: str, body: str, data: Dict[str, Any]) -> None:
+def _send_now(*, kind: str, title: str, body: str, data: Dict[str, Any], profile: str) -> None:
+    """The send itself, on the sender thread.
+
+    `profile` is an argument rather than a lookup because this thread cannot
+    look it up — see `notify`.
+    """
     try:
         registered = devices.load()
         targets = [d for d in registered if devices.wants(d, kind)]
@@ -103,12 +119,9 @@ def _send_now(*, kind: str, title: str, body: str, data: Dict[str, Any]) -> None
 
             return
 
-        # The profile *this* turn is running under, resolved once per send.
-        # Every device gets the same value — the device's own `agentId` (its
-        # registration-time scope) is the app-side fallback, not the source of
-        # truth: see `devices.current_profile_name`.
-        profile = devices.current_profile_name()
-
+        # Every device gets the same `profile` — the device's own `agentId`
+        # (its registration-time scope) is the app-side fallback, not the
+        # source of truth: see `devices.current_profile_name`.
         messages = [
             {
                 "to": device["token"],
