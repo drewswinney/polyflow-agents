@@ -233,6 +233,19 @@ export type TranscriptEntry =
   | { kind: 'thinking'; id: string; text: string; at: number; durationMs?: number; streaming?: boolean }
   | { kind: 'tool'; id: string; call: ToolCall }
   | { kind: 'stream_cut'; id: string; at: number }
+  /**
+   * Something the host put in the conversation, not the person.
+   *
+   * A compaction summary, a scheduled job's prompt, a skill's text, a note
+   * that a background process finished. Hermes persists these under
+   * `role: 'user'` — strict providers reject a system message that is not
+   * first — so taken at face value they render as things you said. They are
+   * kept, since they explain what the agent knew, but drawn as plumbing.
+   */
+  | { kind: 'system'; id: string; note: SystemNoteKind; label: string; detail?: string; text: string; at: number }
+
+/** What kind of plumbing a system entry is; picks its glyph. */
+export type SystemNoteKind = 'compaction' | 'cron' | 'skill' | 'background' | 'delegation' | 'continue' | 'system'
 
 export interface SessionTranscript {
   sessionId: SessionId
