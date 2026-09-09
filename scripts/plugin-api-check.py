@@ -614,6 +614,46 @@ def check_standalone_send(home: Path) -> None:
     if sent[0]["body"] != "Traceback (most recent call last): boom":
         fail(f"unwrapped output must pass through untouched, got {sent[0]['body']!r}")
 
+    # An agent job's delivery names its session. The turn-finished hook fires
+    # in the gateway for the cron run first, silently; the sender then finds
+    # the turn by its text and stamps the session id, so a tap opens the
+    # conversation that asked the question. A script job has no turn, so its
+    # push carries no session — which is the previous assertion.
+    sent.clear()
+    question = "Next week's plan for 2: theme, dishes you want, anything to avoid, effort level, special dinners?"
+    adapter._on_post_llm_call(platform="cron", session_id="cron_a4bc5d151ad1_20260912T170000", assistant_response=question)
+    adapter._on_post_llm_call(platform="tui", session_id="20260912_170000_abcdef", assistant_response="a chat reply")
+
+    if len(sent) != 1 or sent[0]["kind"] != "turnComplete" or sent[0]["data"].get("sessionId") != "20260912_170000_abcdef":
+        fail(f"a chat turn should push as before and a cron turn should push nothing itself, got {sent!r}")
+
+    sent.clear()
+    asyncio.run(adapter._standalone_send(None, "greg", question))
+
+    if len(sent) != 1:
+        fail(f"one delivery should be one push, got {len(sent)}")
+    if sent[0]["data"].get("sessionId") != "cron_a4bc5d151ad1_20260912T170000":
+        fail(f"the delivery push must name the run's session, got {sent[0]['data']!r}")
+    if sent[0]["data"].get("jobId") != "a4bc5d151ad1":
+        fail(f"the job id is read off the session id when the wrapper is off, got {sent[0]['data']!r}")
+
+    # A chunked delivery is still the same turn.
+    sent.clear()
+    asyncio.run(adapter._standalone_send(None, "greg", question[:60]))
+
+    if sent[0]["data"].get("sessionId") != "cron_a4bc5d151ad1_20260912T170000":
+        fail("a prefix of the reply should still find its turn")
+
+    # Text from no remembered turn, long after the last one, names no session.
+    sent.clear()
+    with adapter._RECENT_CRON_TURNS_LOCK:
+        for turn in adapter._RECENT_CRON_TURNS:
+            turn["at"] -= 120
+    asyncio.run(adapter._standalone_send(None, "greg", "Something else entirely, from a script."))
+
+    if "sessionId" in sent[0]["data"]:
+        fail(f"unmatched text a while after the last turn must not borrow its session, got {sent[0]['data']!r}")
+
 
 if __name__ == "__main__":
     raise SystemExit(main())
