@@ -479,11 +479,14 @@ export function useSessionStream(
           break
 
         case 'permission_request':
-          setApproval(update.req)
+          // A resume snapshot re-announces a request the live event may have
+          // delivered already, and without the deadline the event was given.
+          // Same id: keep what is on screen — its countdown is the honest one.
+          setApproval(current => (current?.id === update.req.id ? current : update.req))
           break
 
         case 'clarify_request':
-          setClarify(update.req)
+          setClarify(current => (current?.id === update.req.id ? current : update.req))
           break
 
         case 'model_changed':
@@ -710,23 +713,54 @@ export function useSessionStream(
     sealTail()
   }, [backend, sessionId, sealTail, setPending])
 
+  /**
+   * Answer the approval, and own what happens to the answer.
+   *
+   * This was a bare `void`, which meant a reply the host refused — and it
+   * refused every one, for as long as they went out under the wrong session id
+   * — took the card with it and left the host waiting on an answer that never
+   * came. The card goes at the tap, because the button has to feel like it did
+   * something; the tool card stays `held` until the host agrees, because the
+   * command has not been released until then.
+   *
+   * A failure that is the socket puts the card back — the request is still
+   * open, and the reconnect's resume will confirm as much. Any other failure
+   * is the host's verdict on a request that is no longer waiting, and is said
+   * where the card was rather than swallowed.
+   */
   const respondToApproval = useCallback(
     (outcome: PermissionOutcome) => {
-      if (!approval) return
+      if (!approval || !backend) return
 
-      void backend?.respondToPermission(approval.id, outcome, sessionId)
-      setEntries(current => patchToolHeld(current, false))
+      const answered = approval
+
       setApproval(null)
+
+      backend.respondToPermission(answered.id, outcome, sessionId).then(
+        () => setEntries(current => patchToolHeld(current, false)),
+        (cause: unknown) => {
+          if (shouldRequeue(cause)) setApproval(current => current ?? answered)
+
+          setEntries(current => [...current, failureRow('Could not answer the approval', cause)])
+        }
+      )
     },
     [approval, backend, sessionId]
   )
 
   const respondToClarify = useCallback(
     (answer: string) => {
-      if (!clarify) return
+      if (!clarify || !backend) return
 
-      void backend?.respondToClarify(clarify.id, answer)
+      const asked = clarify
+
       setClarify(null)
+
+      backend.respondToClarify(asked.id, answer).catch((cause: unknown) => {
+        if (shouldRequeue(cause)) setClarify(current => current ?? asked)
+
+        setEntries(current => [...current, failureRow('Could not send the answer', cause)])
+      })
     },
     [backend, clarify]
   )
@@ -995,6 +1029,17 @@ function patchTool(
       }
     }
   })
+}
+
+/** A system row saying what went wrong, where the thing that failed was. */
+function failureRow(what: string, cause: unknown): TranscriptEntry {
+  return {
+    kind: 'message',
+    id: `err-${Date.now()}`,
+    role: 'system',
+    text: `${what}: ${cause instanceof Error ? cause.message : String(cause)}`,
+    at: Date.now()
+  }
 }
 
 function patchToolHeld(entries: TranscriptEntry[], held: boolean): TranscriptEntry[] {

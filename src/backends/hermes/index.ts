@@ -235,7 +235,9 @@ export class HermesBackend implements AgentBackend {
    * Approvals recovered from a resume snapshot, by session.
    *
    * Resume is the only place an approval raised while this client was away can
-   * still be found; the event that announced it is long gone.
+   * still be found; the event that announced it is long gone. Read by
+   * `loadSession`, and handed to the open chat directly by `deliver` — see
+   * there for why the load alone missed it.
    */
   private readonly pendingApprovals = new Map<SessionId, PermissionRequest>()
   /** Questions recovered from a resume snapshot, for the same reason. */
@@ -364,8 +366,7 @@ export class HermesBackend implements AgentBackend {
 
         if (waiting?.request_id) {
           const command = String(waiting.command ?? '')
-
-          this.pendingApprovals.set(stored, {
+          const req: PermissionRequest = {
             id: String(waiting.request_id),
             sessionId: stored,
             tool: 'shell',
@@ -377,7 +378,10 @@ export class HermesBackend implements AgentBackend {
             // prompt was raised, which may have been long before this resume —
             // a countdown anchored to now would promise time that is gone.
             expiresAt: null
-          })
+          }
+
+          this.pendingApprovals.set(stored, req)
+          this.deliver(stored, { kind: 'permission_request', req })
         } else {
           this.pendingApprovals.delete(stored)
         }
@@ -385,13 +389,16 @@ export class HermesBackend implements AgentBackend {
         const asking = result?.pending_clarify
 
         if (asking?.request_id) {
-          this.pendingClarifies.set(stored, {
+          const req: ClarifyRequest = {
             id: String(asking.request_id),
             sessionId: stored,
             question: String(asking.question ?? '') || 'The agent asked a question.',
             choices: Array.isArray(asking.choices) ? asking.choices.map(choice => String(choice)) : [],
             multiSelect: asking.multi_select === true
-          })
+          }
+
+          this.pendingClarifies.set(stored, req)
+          this.deliver(stored, { kind: 'clarify_request', req })
         } else {
           this.pendingClarifies.delete(stored)
         }
@@ -421,6 +428,31 @@ export class HermesBackend implements AgentBackend {
    */
   private resumeWatchedSessions(): void {
     for (const id of this.sinks.keys()) void this.runtimeIdFor(id).catch(() => undefined)
+  }
+
+  /**
+   * Hand what a resume learned straight to whoever has the session open.
+   *
+   * The snapshot is also kept for `loadSession`, but that is not enough on its
+   * own. The transcript load routinely runs *before* the resume that carries
+   * the prompt: on the way back from background it asks a socket the OS has
+   * already cut, which still answers with the runtime id it already knew and
+   * skips the resume; on a reconnect it asks the backend `useConnection`
+   * publishes before dialling, and the resume throws "not connected" and is
+   * swallowed. The resume that finally lands is the one `connect` fires for
+   * every watched session — and it wrote into a map nothing on screen read
+   * until the chat was next mounted. So an approval you were pushed about was
+   * invisible until you left the chat and came back.
+   *
+   * Whichever of the two arrives last now reaches the screen. The sink keeps a
+   * request it already shows, so this never clobbers a live one.
+   */
+  private deliver(stored: SessionId, update: SessionUpdate): void {
+    const sinks = this.sinks.get(stored)
+
+    if (!sinks?.size) return
+
+    for (const sink of sinks) sink(update)
   }
 
   private rememberRuntime(stored: SessionId, runtime: string): void {
@@ -805,11 +837,24 @@ export class HermesBackend implements AgentBackend {
   }
 
   async respondToPermission(reqId: string, outcome: PermissionOutcome, sessionId?: SessionId): Promise<void> {
-    await this.gateway.request('approval.respond', {
+    // Under the runtime id, like every other RPC — the gateway looks the
+    // session up by it and answers `4001 session not found` for a stored one.
+    // This sent the stored id, so every Allow ever tapped was refused, and the
+    // caller was not looking: the card vanished, the host went on waiting,
+    // `approvals.timeout` denied the command, and the agent asked again.
+    const runtimeId = sessionId ? await this.runtimeIdFor(sessionId) : undefined
+    const result = await this.gateway.request<{ resolved?: number }>('approval.respond', {
       choice: OUTCOME_TO_CHOICE[outcome],
       request_id: reqId,
-      ...(sessionId ? { session_id: sessionId } : {})
+      ...(runtimeId ? { session_id: runtimeId } : {})
     })
+
+    // The host answers with how many it resolved, and zero is not success: the
+    // request was already answered elsewhere or has expired, and a reply that
+    // reached the host but moved nothing must not look like one that did.
+    if (result?.resolved === 0) {
+      throw new Error('the host has no approval waiting under that id — it was answered elsewhere, or expired')
+    }
   }
 
   async respondToClarify(reqId: string, answer: string): Promise<void> {
