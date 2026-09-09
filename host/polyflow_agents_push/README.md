@@ -172,7 +172,15 @@ A rewrite of the same path in the same session updates the row and bumps its
 `POLYFLOW_AGENTS_PUSH_HOME_CHANNEL`
 is declared for (`cron_deliver_env_var` on the platform registration). Set it to
 any non-empty value — the devices come from the registry, not from the channel.
-Untested: no cron job has delivered here yet.
+
+The scheduler wraps each delivery in a `Cronjob Response: <name>` header and a
+"to stop or manage" footer (unless `cron.wrap_response: false`). The
+standalone sender reads the wrapper off: the job's name becomes the
+notification title, its own output the body, and the job id travels in the
+push data as `jobId`. Hermes calls the sender positionally and requires a
+`success` or `error` key in the answer — `scripts/plugin-api-check.py` pins
+both, because the first version got both wrong and every delivery went out
+empty and was logged as failed.
 
 ## Known weak points
 
