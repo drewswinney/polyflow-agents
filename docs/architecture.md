@@ -269,7 +269,7 @@ than rendering blank rows.
 interface Capabilities {
   sessions: { search: boolean; rename: boolean; pin: boolean }
   settings: { schemaDriven: boolean; model: boolean; providers: boolean }
-  extras:   { cron: boolean; skills: boolean; mcp: boolean; profiles: boolean }
+  extras:   { cron: boolean; skills: boolean; mcp: boolean; boards: boolean }
   approvals:{ requests: boolean; policy: boolean }
   logs:     { events: boolean }
   media:    { images: boolean; audioIn: boolean; audioOut: boolean }
@@ -630,6 +630,7 @@ sub-screen reached by a back chevron.
 | 7.17 | Sidebar | overlay | `/api/sessions` |
 | 7.18 | New session | home | `/api/sessions` (on first send) |
 | 7.19 | Artifacts | top-level / sub | `/api/plugins/polyflow_agents_push/artifacts` — see [artifacts.md](artifacts.md) |
+| 7.20 | Scheduled | top-level | `/api/cron/jobs`, `/api/cron/jobs/{id}/runs`, `/api/cron/delivery-targets` |
 
 ### 7.1 Sessions
 
@@ -689,8 +690,9 @@ behind the same interface — contained, not architectural.
 ### 7.4 Settings
 
 Sections: **Server** (host, version, reachability, Reconnect, Remove), **Agent**
-(model & providers, skills, MCP servers, cron), **This phone** (notifications,
-logs & usage), **About**.
+(model & providers, skills, MCP servers), **This phone** (notifications,
+logs & usage), **About**. Scheduled jobs are not here: they are a sidebar
+destination of their own (§7.20).
 
 Rendered from `/api/config/schema` (§2.3) and gated on `capabilities` (§4.1). A
 non-Hermes agent shows only Model and Tools, plus a card naming what it doesn't
@@ -875,8 +877,9 @@ in from the left over a scrim, opened by the hamburger in each top-level header
 and dismissed by the scrim or the Android back button.
 
 It carries the two things reached for constantly — **New session**, which is
-home, and the eight most recent sessions — plus rows for **Sessions** and
-**Settings**. It
+home, and the eight most recent sessions — plus rows for **Sessions**,
+**Artifacts**, **Boards** and **Scheduled** (each present only when the agent
+reports the capability behind it), and **Settings**. It
 deliberately does not try to be the sessions list: recency grouping, the blocked
 strip and search all stay on the Sessions screen (§7.1, §7.7), one row away. A
 drawer that reimplements the list ends up a worse list.
@@ -912,6 +915,58 @@ No mic on this screen: dictation records into a session, and there is not one
 yet.
 
 ---
+
+### 7.20 Scheduled
+
+The agent's cron jobs, as a destination of their own. Gated on
+`capabilities.extras.cron`; the sidebar row is absent, not disabled, without it.
+
+**Why the sidebar and not Settings.** A job is something the agent *does* —
+closer to a session than to a config key — and the list is where you look when a
+push says a run failed. Hermes calls them cron jobs; the app says *Scheduled*,
+because "cron" names the mechanism and the row is about the job.
+
+**What a row carries.** State (paused, running, last run OK, failed, delivery
+failed, not yet run), schedule and next run, a one-line description — the
+prompt's first paragraph, or `Runs <script>` for a no-agent script job — and
+where the output goes. The state tones come off the same info / warning /
+success / error ramp a board card reads (`src/ui/scheduled.ts`).
+
+**The sheet.** Same shape as a board card's: the facts in a grid, the full prompt
+rendered as markdown, and a **Runs** list. A run is an ordinary session whose id
+starts with the job id (`/api/cron/jobs/{id}/runs` answers in the sessions
+list's row shape), so tapping one opens the transcript in chat. Script jobs
+leave no session; their output is what was delivered, and the sheet says so.
+With `editable`, the sheet also runs, pauses, edits and deletes; the transcript
+opens it read-only.
+
+**Create and edit.** One form: name, when, prompt, deliver-to. The schedule is a
+free string in the forms the host parses — a cron expression, `every 2h`, `in
+30m`, a timestamp — and the edit form seeds it with `scheduleExpr`, the one
+string per stored kind that round-trips. Delivery targets come from
+`/api/cron/delivery-targets`; a platform without a home channel is offered
+greyed with the env var it needs, as the host lists it. A new job defaults to
+this app as its target when the push plugin's platform is present. Deliberately
+no model, skills, workdir or toolsets on the phone.
+
+**From chat.** The agent's own `cronjob` tool, on the `hermes-cli` toolset the
+app's turns run with, already creates and edits jobs. The transcript shows what
+it did: each work section that holds a settled `cronjob` call gets a card row
+straight under it (`withScheduledJobRows`), read off the call's result rather
+than fetched — so the card stands after the job is deleted, and a create
+followed by an edit is one card in its final state. The card draws from the live
+list while the job is on it, and opens the same sheet.
+
+**Staying current.** The gateway watches the profile's `cron/jobs.json` and
+broadcasts `cron.changed` to every socket when it moves — on a create, an edit,
+a pause, and on the scheduler's own bookkeeping after a run. The list refetches
+on it; a thirty-second stale time is the backstop.
+
+**Chaining.** A job may declare `context_from`, and the host injects those
+jobs' newest outputs above its prompt; the sheet shows it as *Reads from*. That
+is the host's only chaining primitive — jobs are time-based, there is no
+trigger-on-completion — and it is the seed of a workflow view.
+
 
 ## 8. Design system
 

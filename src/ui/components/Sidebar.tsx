@@ -17,7 +17,7 @@ import { Icon } from './Icon'
 import { Text } from './Text'
 
 /** The drawer's destinations, as expo-router's typed routes see them. */
-export type SidebarPath = '/' | '/sessions' | '/artifacts' | '/boards' | '/settings'
+export type SidebarPath = '/' | '/sessions' | '/artifacts' | '/boards' | '/scheduled' | '/settings'
 
 const MAX_WIDTH = 320
 const WIDTH_FRACTION = 0.84
@@ -59,6 +59,7 @@ export function Sidebar({
   paired,
   supportsArtifacts,
   supportsBoards,
+  supportsScheduled,
   onOpenSession,
   onNavigate,
   onDismiss
@@ -80,6 +81,8 @@ export function Sidebar({
   /** Whether the host keeps artifacts (`docs/artifacts.md`); the row is absent, not disabled, without it. */
   supportsArtifacts: boolean
   supportsBoards: boolean
+  /** Whether the agent has a scheduler (§7.20); absent, not disabled, without one. */
+  supportsScheduled: boolean
   onOpenSession: (id: string) => void
   onNavigate: (path: SidebarPath) => void
   onDismiss: () => void
@@ -154,6 +157,18 @@ export function Sidebar({
               onPress={() => {
                 onDismiss()
                 onNavigate('/boards')
+              }}
+            />
+          ) : null}
+          {supportsScheduled ? (
+            <NavRow
+              icon="clock"
+              label="Scheduled"
+              disabled={!paired}
+              selected={activePath === '/scheduled'}
+              onPress={() => {
+                onDismiss()
+                onNavigate('/scheduled')
               }}
             />
           ) : null}

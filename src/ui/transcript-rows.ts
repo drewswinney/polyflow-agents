@@ -1,5 +1,7 @@
 import type { Artifact, TranscriptEntry } from '@/domain'
 
+import { type ScheduledJobRef, scheduledJobRefs } from './scheduled'
+
 /**
  * What the transcript list actually renders.
  *
@@ -21,6 +23,14 @@ export type TranscriptRow =
    * it and above the reply that mentions it.
    */
   | { kind: 'artifacts'; id: string; artifacts: Artifact[] }
+  /**
+   * The scheduled jobs a stretch of working-out created or changed, as cards.
+   *
+   * Read off the `cronjob` tool calls in the section above it rather than
+   * fetched: the call's result names the job, so the card can stand even
+   * when the job has since been deleted. `at` is when the section settled.
+   */
+  | { kind: 'scheduled'; id: string; refs: ScheduledJobRef[]; at: number }
 
 /** Thinking and tool calls group; messages and stream cuts break the run. */
 function isWork(entry: TranscriptEntry): boolean {
@@ -74,6 +84,8 @@ function rowTime(row: TranscriptRow): number {
       return row.entries.reduce((latest, entry) => Math.max(latest, entryTime(entry)), 0)
     case 'artifacts':
       return row.artifacts.reduce((latest, artifact) => Math.max(latest, artifact.createdAt), 0)
+    case 'scheduled':
+      return row.at
   }
 }
 
@@ -117,6 +129,33 @@ export function withArtifactRows(rows: readonly TranscriptRow[], artifacts: read
 
     if (group) merged.push({ kind: 'artifacts', id: `artifacts:${group[0].id}`, artifacts: group })
     if (index < rows.length) merged.push(rows[index])
+  }
+
+  return merged
+}
+
+/**
+ * Slot a card under each stretch of working-out that touched a scheduled job.
+ *
+ * The `cronjob` call sits inside a collapsed work row, where a result nobody
+ * opens is a job nobody sees. The card goes straight after that row, so it
+ * lands under the work that made it and above the reply that describes it —
+ * the same place an artifact the section wrote would go. Keyed off the first
+ * entry in the section, for the same reason the section is.
+ */
+export function withScheduledJobRows(rows: readonly TranscriptRow[]): TranscriptRow[] {
+  const merged: TranscriptRow[] = []
+
+  for (const row of rows) {
+    merged.push(row)
+
+    if (row.kind !== 'work') continue
+
+    const refs = scheduledJobRefs(row.entries)
+
+    if (refs.length === 0) continue
+
+    merged.push({ kind: 'scheduled', id: `scheduled:${row.entries[0].id}`, refs, at: rowTime(row) })
   }
 
   return merged

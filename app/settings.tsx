@@ -122,13 +122,6 @@ export default function SettingsScreen() {
       go: () => router.push('/tools')
     },
     {
-      key: 'cron',
-      label: 'Cron jobs',
-      icon: 'clock',
-      show: capabilities?.extras.cron ?? false,
-      go: () => router.push('/cron')
-    },
-    {
       key: 'config',
       label: 'Agent configuration',
       icon: 'sliders',

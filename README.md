@@ -216,7 +216,7 @@ vendored and why the desktop client is reference-only.
 
 Every screen in the design handoff is built: Sessions and search, Chat with
 token streaming, tool cards and blocking approvals, Logs & events,
-Tools & integrations, Model, Cron, Notifications, Voice, the agent switcher and
+Tools & integrations, Model, Scheduled jobs, Notifications, Voice, the agent switcher and
 add-agent — on top of the domain seam, the vendored Hermes client and its React
 Native shims, and a theme layer whose accent follows the selected agent.
 

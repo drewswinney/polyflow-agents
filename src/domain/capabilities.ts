@@ -58,7 +58,7 @@ export function missingCapabilityLabels(caps: Capabilities): string[] {
 
   if (!caps.media.audioIn && !caps.media.audioOut) missing.push('Voice')
   if (!caps.extras.skills) missing.push('Skills')
-  if (!caps.extras.cron) missing.push('Cron')
+  if (!caps.extras.cron) missing.push('Scheduled jobs')
   if (!caps.extras.mcp) missing.push('MCP')
   if (!caps.extras.boards) missing.push('Boards')
   if (!caps.approvals.requests) missing.push('Approvals')

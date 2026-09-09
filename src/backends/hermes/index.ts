@@ -35,7 +35,11 @@ import {
   type ConnectionState,
   createObservable,
   type ContentBlock,
-  type CronJobSummary,
+  type DeliveryTarget,
+  type ScheduledJob,
+  type ScheduledJobDraft,
+  type ScheduledJobRun,
+  type ScheduledJobUpdate,
   type EventRecord,
   type KanbanBoard,
   type KanbanCardCreate,
@@ -65,6 +69,7 @@ import {
 
 import { mapGatewayEvent, type MapContext, toEventRecord } from './event-map'
 import { createHeldEvents } from './held-events'
+import { toCreatePayload, toDeliveryTarget, toScheduledJob, toScheduledJobRun, toUpdatePayload } from './scheduled'
 import { toSearchHit, toSessionSummary, toTranscriptEntries, usableTitle } from './normalize'
 import { type ArtifactRow, HermesRest, type HermesRestConfig, HermesRestError } from './rest'
 
@@ -1093,27 +1098,36 @@ export class HermesBackend implements AgentBackend {
     await this.gateway.request('config.set', { key, value })
   }
 
-  async listCronJobs(): Promise<CronJobSummary[]> {
-    const jobs = await this.rest.cronJobs()
-
-    return jobs.map(job => ({
-      id: job.id,
-      name: (job.name ?? '').trim() || job.id,
-      schedule: job.schedule_display ?? job.schedule?.display ?? job.schedule?.expr ?? 'unscheduled',
-      enabled: job.enabled,
-      nextRunAt: parseTimestamp(job.next_run_at),
-      lastRunAt: parseTimestamp(job.last_run_at),
-      lastError: job.last_error ?? null,
-      model: job.model ?? null
-    }))
+  async listScheduledJobs(): Promise<ScheduledJob[]> {
+    return (await this.rest.cronJobs()).map(toScheduledJob)
   }
 
-  async setCronJobEnabled(id: string, enabled: boolean): Promise<void> {
+  async listScheduledJobRuns(id: string, limit = 20): Promise<ScheduledJobRun[]> {
+    return (await this.rest.cronJobRuns(id, limit)).runs.map(toScheduledJobRun)
+  }
+
+  async createScheduledJob(draft: ScheduledJobDraft): Promise<ScheduledJob> {
+    return toScheduledJob(await this.rest.cronCreate(toCreatePayload(draft)))
+  }
+
+  async updateScheduledJob(id: string, update: ScheduledJobUpdate): Promise<ScheduledJob> {
+    return toScheduledJob(await this.rest.cronUpdate(id, toUpdatePayload(update)))
+  }
+
+  async deleteScheduledJob(id: string): Promise<void> {
+    await this.rest.cronDelete(id)
+  }
+
+  async setScheduledJobEnabled(id: string, enabled: boolean): Promise<void> {
     await (enabled ? this.rest.cronResume(id) : this.rest.cronPause(id))
   }
 
-  async triggerCronJob(id: string): Promise<void> {
+  async triggerScheduledJob(id: string): Promise<void> {
     await this.rest.cronTrigger(id)
+  }
+
+  async listDeliveryTargets(): Promise<DeliveryTarget[]> {
+    return (await this.rest.cronDeliveryTargets()).targets.map(toDeliveryTarget)
   }
 
   async registerPushDevice(registration: PushDeviceRegistration): Promise<void> {
@@ -1263,15 +1277,6 @@ function categoryRank(category: string, order: string[]): number {
   // Categories the server did not rank sort after the ones it did, rather than
   // jumping to the front on a -1.
   return index === -1 ? order.length : index
-}
-
-/** Cron timestamps come back as ISO strings, not epochs. */
-function parseTimestamp(value: string | null | undefined): number | null {
-  if (!value) return null
-
-  const parsed = Date.parse(value)
-
-  return Number.isNaN(parsed) ? null : parsed
 }
 
 /**
