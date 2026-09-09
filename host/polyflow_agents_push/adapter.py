@@ -27,6 +27,8 @@ import logging
 import os
 import re
 import threading
+import time
+from collections import deque
 from typing import Any, Dict, List, Optional
 
 from . import artifacts, devices, push
@@ -228,6 +230,13 @@ def _on_post_llm_call(**kwargs: Any) -> None:
     """
     platform = str(kwargs.get("platform") or "")
 
+    # A cron run is silent here but not forgotten: its delivery goes out a
+    # moment later through the standalone sender, which knows the text and
+    # nothing else. This is where the session id is, so this is where it is
+    # kept for the push to carry.
+    if platform == "cron":
+        _remember_cron_turn(str(kwargs.get("session_id") or ""), str(kwargs.get("assistant_response") or ""))
+
     if platform in SILENT_TURN_PLATFORMS:
         # Debug, not info: subagent turns are frequent and this is the designed
         # outcome. It is logged at all because a turn vanishing here looks
@@ -257,6 +266,88 @@ def _preview(text: str, limit: int = PREVIEW_LIMIT) -> str:
     space = cut.rfind(" ")
 
     return (cut[:space] if space > limit * 0.6 else cut).rstrip() + "…"
+
+
+# ── Cron runs, remembered for their delivery ─────────────────────────────────
+#
+# The scheduler runs a job's turn and then hands its text to the platform for
+# delivery, in that order and in the same process. `post_llm_call` fires in
+# between with the session id; the standalone sender gets only the text. A few
+# recent turns are kept here so the sender can find the session its text came
+# from, and the push can open it. Small and short-lived on purpose: a delivery
+# follows its turn within seconds, and a job that runs for a day is still one
+# entry.
+
+_RECENT_CRON_TURNS: "deque[Dict[str, Any]]" = deque(maxlen=8)
+_RECENT_CRON_TURNS_LOCK = threading.Lock()
+# How long a turn stays claimable. Delivery is normally immediate; the margin
+# covers a slow send path, not a later run.
+_CRON_TURN_TTL_SECONDS = 15 * 60
+# When the text does not match any remembered turn, the newest one this recent
+# is still taken to be it — the scheduler may have reshaped the text (media
+# tags, chunking) between the turn and the send.
+_CRON_TURN_FRESH_SECONDS = 60
+
+_CRON_SESSION_ID = re.compile(r"^cron_(?P<job>[0-9a-f]+)_")
+
+
+def _remember_cron_turn(session_id: str, response: str) -> None:
+    if not session_id:
+        return
+
+    with _RECENT_CRON_TURNS_LOCK:
+        _RECENT_CRON_TURNS.append({"session_id": session_id, "response": " ".join(response.split()), "at": time.time()})
+
+
+def _recall_cron_turn(body: str) -> Optional[Dict[str, Any]]:
+    """The remembered turn whose reply this delivery text is, or None.
+
+    Matched on the text first — exact, then either being a prefix of the other,
+    since the scheduler may have chunked a long reply or cut media tags out of
+    it. Failing that, the newest turn from the last minute: two jobs finishing
+    in the same minute is rare, and a wrong session beats no session by less
+    than it costs, so the window is short.
+    """
+    flat = " ".join(body.split())
+    now = time.time()
+
+    with _RECENT_CRON_TURNS_LOCK:
+        recent = [turn for turn in _RECENT_CRON_TURNS if now - turn["at"] < _CRON_TURN_TTL_SECONDS]
+
+    if not recent or not flat:
+        return None
+
+    for turn in reversed(recent):
+        response = turn["response"]
+
+        if response == flat or (len(flat) >= 40 and (response.startswith(flat) or flat.startswith(response))):
+            return turn
+
+    newest = recent[-1]
+
+    return newest if now - newest["at"] < _CRON_TURN_FRESH_SECONDS else None
+
+
+def _cron_job_id_of(session_id: str) -> str:
+    """The job a cron run session belongs to: run sessions are named `cron_<job>_<stamp>`."""
+    match = _CRON_SESSION_ID.match(session_id or "")
+
+    return match.group("job") if match else ""
+
+
+def _cron_job_name(job_id: str) -> str:
+    """The job's name off the profile's store, or empty. Only importable where cron is."""
+    if not job_id:
+        return ""
+
+    try:
+        from cron.jobs import get_job
+
+        job = get_job(job_id) or {}
+
+        return str(job.get("name") or "")
+    except Exception:
+        return ""
 
 
 # ── Platform face ────────────────────────────────────────────────────────────
@@ -431,11 +522,24 @@ async def _standalone_send(
 
     job, body = _split_cron_wrapper(str(text or ""))
 
+    # The run this text came from, when the turn-finished hook saw it: an
+    # agent job's delivery names its session, so a tap opens the conversation
+    # that asked the question and a reply lands where it can be acted on. A
+    # script job has no turn and no session; its push opens nothing.
+    turn = _recall_cron_turn(body)
+    session_id = str(turn["session_id"]) if turn else ""
+    job_id = job["id"] or _cron_job_id_of(session_id)
+
     push.notify(
         kind="cronFailures" if _looks_like_failure(body) else "turnComplete",
-        title=job["name"] or "Scheduled job",
+        title=job["name"] or _cron_job_name(job_id) or "Scheduled job",
         body=body[:200],
-        data={"source": "cron", "jobId": job["id"], "chatId": str(chat_id or "")},
+        data={
+            "source": "cron",
+            "jobId": job_id,
+            "chatId": str(chat_id or ""),
+            **({"sessionId": session_id} if session_id else {}),
+        },
         # The whole reason this function exists is delivery from a process with
         # no live adapter — which is usually one that is about to exit.
         flush=FLUSH_SECONDS,
