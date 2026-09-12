@@ -20,7 +20,15 @@ say so. That exact fault cost the device registry an evening.
 minute later. The artifact is the snapshot the conversation produced, so the
 bytes are read once and written here. A rewrite of the same path in the same
 session updates the row in place and bumps `version`, so a file the agent
-iterates on is one artifact with a history count, not twelve rows.
+iterates on is one artifact with a history, not twelve rows.
+
+**Superseded bytes are kept.** Before a rewrite replaces the file, the bytes
+it replaces are copied to `files/<id>.v<n>.<ext>` and described by a row in
+`artifact_versions`, so a report the agent redrafted three times can still be
+read as it was after the first draft. Bounded per artifact
+(`MAX_ARCHIVED_VERSIONS`): the oldest goes when the bound is passed, since a
+store that kept every draft of a file an agent rewrites in a loop would grow
+without anyone asking it to.
 
 SQLite rather than the registry's JSON-with-atomic-replace because the writers
 are many and in different processes: `hermes serve`'s worker threads, cron and
@@ -41,6 +49,7 @@ import mimetypes
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import tempfile
 import time
@@ -67,6 +76,11 @@ MAX_BYTES = 25 * 1024 * 1024
 # provider that takes longer than this to serve a file it just made is not one
 # worth holding a thread for.
 FETCH_TIMEOUT_SECONDS = 10
+
+# How many superseded versions of one artifact are kept. Ten drafts back is
+# further than anyone asks to look; past that the oldest is dropped with its
+# bytes, so an artifact rewritten in a loop costs at most eleven files.
+MAX_ARCHIVED_VERSIONS = 10
 
 # What `origin` may be. `agent` produced it; `upload` the phone sent it.
 ORIGINS = ("agent", "upload")
@@ -153,6 +167,17 @@ def thumbnail_marker_path(row: Dict[str, Any]) -> Path:
     return files_dir() / f"{row['id']}.thumb.sha"
 
 
+def _version_id(artifact_id: str, version: int) -> str:
+    """The key an archived version is filed under: `<id>.v<n>`.
+
+    Distinct from the artifact's own id, so the bytes, thumbnail and marker of
+    a kept version sit beside the live ones under `files/` without colliding,
+    and so `thumbnails.ensure` — which keys its cache and its lock on `id` —
+    treats a version as the separate file it is.
+    """
+    return f"{artifact_id}.v{int(version)}"
+
+
 # ── Schema ───────────────────────────────────────────────────────────────────
 
 _SCHEMA = """
@@ -177,6 +202,20 @@ CREATE TABLE IF NOT EXISTS artifacts (
 );
 CREATE INDEX IF NOT EXISTS artifacts_by_session ON artifacts (session_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS artifacts_by_time ON artifacts (updated_at DESC);
+CREATE TABLE IF NOT EXISTS artifact_versions (
+    artifact_id      TEXT NOT NULL,
+    version          INTEGER NOT NULL,
+    name             TEXT NOT NULL,
+    kind             TEXT NOT NULL,
+    mime_type        TEXT NOT NULL,
+    size             INTEGER NOT NULL,
+    sha256           TEXT NOT NULL,
+    tool             TEXT,
+    file             TEXT NOT NULL,
+    created_at       INTEGER NOT NULL,
+    archived_at      INTEGER NOT NULL,
+    PRIMARY KEY (artifact_id, version)
+);
 """
 
 
@@ -311,6 +350,54 @@ def to_public(row: Dict[str, Any], share_base: Optional[str] = None) -> Dict[str
     }
 
 
+def version_to_public(row: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[str, Any]:
+    """A kept version, described the way the artifact itself is (`docs/artifacts.md` §4.2).
+
+    The same shape as the live row — the app already knows how to draw, cache
+    and open one of those by `(id, version)` — with the version's own name,
+    size and type, the artifact's id rather than the file key, no share (the
+    link is the artifact's, and opens its current bytes), and `archivedAt`
+    for when these bytes stopped being the current ones.
+    """
+    public = to_public(
+        {
+            **artifact,
+            "name": row["name"],
+            "kind": row["kind"],
+            "mime_type": row["mime_type"],
+            "size": row["size"],
+            "tool": row.get("tool") or artifact.get("tool"),
+            "created_at": row["created_at"],
+            "updated_at": row["created_at"],
+            "version": row["version"],
+            "share_token": None,
+        }
+    )
+    public["archivedAt"] = int(row["archived_at"])
+
+    return public
+
+
+def _version_as_row(row: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[str, Any]:
+    """A kept version as a row the bytes and thumbnail paths (and `thumbnails.ensure`) can take."""
+    return {
+        **artifact,
+        "id": _version_id(str(artifact["id"]), int(row["version"])),
+        "artifact_id": artifact["id"],
+        "name": row["name"],
+        "kind": row["kind"],
+        "mime_type": row["mime_type"],
+        "size": row["size"],
+        "sha256": row["sha256"],
+        "tool": row.get("tool"),
+        "file": row["file"],
+        "created_at": row["created_at"],
+        "updated_at": row["created_at"],
+        "version": row["version"],
+        "archived_at": row["archived_at"],
+    }
+
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -367,6 +454,9 @@ def record(
     digest = hashlib.sha256(data).hexdigest()
     key_path = source_path or display
     now = _now_ms()
+    # Files a pruned version leaves behind, unlinked once the transaction that
+    # forgot them has committed — the same order `delete` keeps.
+    pruned: List[Path] = []
 
     conn = _connect()
 
@@ -381,12 +471,14 @@ def record(
                 row = _row_to_dict(existing)
 
                 if row["sha256"] != digest:
+                    _archive_current(conn, row, now)
                     _write_bytes(file_path(row), data)
                     conn.execute(
                         "UPDATE artifacts SET size = ?, sha256 = ?, mime_type = ?, kind = ?, name = ?, "
                         "updated_at = ?, version = version + 1, tool = COALESCE(?, tool) WHERE id = ?",
                         (len(data), digest, mime, kind, display, now, tool, row["id"]),
                     )
+                    pruned.extend(_prune_versions(conn, row["id"]))
                 else:
                     # Same bytes again: worth a fresh timestamp so the list
                     # surfaces it, not a version — nothing changed.
@@ -410,6 +502,121 @@ def record(
             fresh = conn.execute("SELECT * FROM artifacts WHERE id = ?", (artifact_id,)).fetchone()
 
             return to_public(_row_to_dict(fresh))
+    finally:
+        conn.close()
+        _unlink_all(pruned)
+
+
+def _archive_current(conn: sqlite3.Connection, row: Dict[str, Any], now: int) -> None:
+    """Keep the bytes a rewrite is about to replace, as version `row['version']`.
+
+    A *copy* of the live file, not a rename: the live path stays valid whatever
+    happens between here and the new bytes landing, and a crash in that window
+    costs one duplicate rather than a row whose file is gone. The thumbnail
+    and its marker are moved, since they describe these bytes and the live
+    artifact needs a fresh one anyway.
+    """
+    source = file_path(row)
+
+    if not source.is_file():
+        # The row outlived its bytes already; there is nothing to keep.
+        return
+
+    version = int(row.get("version") or 1)
+    key = _version_id(str(row["id"]), version)
+    stored = f"{key}{Path(str(row['file'])).suffix}"
+
+    shutil.copy2(source, files_dir() / stored)
+
+    kept = {"id": key}
+
+    for current, archived in ((thumbnail_path(row), thumbnail_path(kept)), (thumbnail_marker_path(row), thumbnail_marker_path(kept))):
+        try:
+            os.replace(current, archived)
+        except OSError:
+            pass
+
+    conn.execute(
+        "INSERT OR REPLACE INTO artifact_versions (artifact_id, version, name, kind, mime_type, size, sha256, tool, file, "
+        "created_at, archived_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (row["id"], version, row["name"], row["kind"], row["mime_type"], int(row["size"] or 0), row["sha256"], row.get("tool"), stored, int(row["updated_at"]), now),
+    )
+
+
+def _prune_versions(conn: sqlite3.Connection, artifact_id: str) -> List[Path]:
+    """Forget the oldest kept versions past `MAX_ARCHIVED_VERSIONS`. Returns the files to unlink after commit."""
+    stale = conn.execute(
+        "SELECT version, file FROM artifact_versions WHERE artifact_id = ? ORDER BY version DESC LIMIT -1 OFFSET ?",
+        (artifact_id, MAX_ARCHIVED_VERSIONS),
+    ).fetchall()
+
+    paths: List[Path] = []
+
+    for old in stale:
+        conn.execute("DELETE FROM artifact_versions WHERE artifact_id = ? AND version = ?", (artifact_id, old["version"]))
+        paths.extend(_version_files(artifact_id, int(old["version"]), str(old["file"])))
+
+    return paths
+
+
+def _version_files(artifact_id: str, version: int, stored: str) -> List[Path]:
+    kept = {"id": _version_id(artifact_id, version)}
+
+    return [files_dir() / stored, thumbnail_path(kept), thumbnail_marker_path(kept)]
+
+
+def _unlink_all(paths: Iterable[Path]) -> None:
+    for path in paths:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            logger.warning("[polyflow_agents_push] %s remains after its row was forgotten", path.name, exc_info=True)
+
+
+def list_versions(artifact_id: str) -> Optional[List[Dict[str, Any]]]:
+    """The kept versions of one artifact, newest first, as public rows. None when the artifact is unknown.
+
+    Only what was archived: an artifact at version 4 lists versions 3, 2 and
+    1 if every rewrite was kept, fewer if some predate the archive or fell
+    past the bound. The live version is the artifact itself.
+    """
+    conn = _connect()
+
+    try:
+        artifact = conn.execute("SELECT * FROM artifacts WHERE id = ?", (artifact_id,)).fetchone()
+
+        if artifact is None:
+            return None
+
+        rows = conn.execute("SELECT * FROM artifact_versions WHERE artifact_id = ? ORDER BY version DESC", (artifact_id,)).fetchall()
+
+        return [version_to_public(_row_to_dict(row), _row_to_dict(artifact)) for row in rows]
+    finally:
+        conn.close()
+
+
+def get_version(artifact_id: str, version: int) -> Optional[Dict[str, Any]]:
+    """One kept version as a row the bytes routes can serve — or None: unknown artifact, or a version not kept.
+
+    The live version is not answered here; a caller holding the artifact's
+    row already has it, and this is the fallback for a `?v=` that names an
+    earlier one.
+    """
+    conn = _connect()
+
+    try:
+        artifact = conn.execute("SELECT * FROM artifacts WHERE id = ?", (artifact_id,)).fetchone()
+
+        if artifact is None:
+            return None
+
+        row = conn.execute(
+            "SELECT * FROM artifact_versions WHERE artifact_id = ? AND version = ?", (artifact_id, int(version))
+        ).fetchone()
+
+        return _version_as_row(_row_to_dict(row), _row_to_dict(artifact)) if row is not None else None
     finally:
         conn.close()
 
@@ -461,7 +668,7 @@ def get(artifact_id: str) -> Optional[Dict[str, Any]]:
 
 
 def delete(artifact_id: str) -> bool:
-    """Row and bytes. The bytes go last, so a failed unlink leaves no row pointing at nothing."""
+    """Row and bytes, and every kept version's. The bytes go last, so a failed unlink leaves no row pointing at nothing."""
     conn = _connect()
 
     try:
@@ -471,19 +678,20 @@ def delete(artifact_id: str) -> bool:
             if row is None:
                 return False
 
+            kept = conn.execute("SELECT version, file FROM artifact_versions WHERE artifact_id = ?", (artifact_id,)).fetchall()
+
+            conn.execute("DELETE FROM artifact_versions WHERE artifact_id = ?", (artifact_id,))
             conn.execute("DELETE FROM artifacts WHERE id = ?", (artifact_id,))
     finally:
         conn.close()
 
     gone = _row_to_dict(row)
+    paths = [file_path(gone), thumbnail_path(gone), thumbnail_marker_path(gone)]
 
-    for path in (file_path(gone), thumbnail_path(gone), thumbnail_marker_path(gone)):
-        try:
-            path.unlink()
-        except FileNotFoundError:
-            pass
-        except OSError:
-            logger.warning("[polyflow_agents_push] artifact %s: row deleted, %s remains", artifact_id, path.name, exc_info=True)
+    for old in kept:
+        paths.extend(_version_files(artifact_id, int(old["version"]), str(old["file"])))
+
+    _unlink_all(paths)
 
     return True
 

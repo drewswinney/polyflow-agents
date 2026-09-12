@@ -16,6 +16,7 @@ import type {
   ArtifactQuery,
   ArtifactShare,
   ArtifactUpload,
+  ArtifactVersion,
   ClarifyRequest,
   ConfigField,
   ContentBlock,
@@ -263,6 +264,12 @@ export interface AgentBackend {
   /** Newest first. */
   listArtifacts(query?: ArtifactQuery): Promise<ArtifactPage>
   getArtifact(id: string): Promise<Artifact>
+  /**
+   * The earlier versions the host kept, newest first — empty for an artifact
+   * never rewritten, or whose rewrites predate the archive. The current
+   * version is the artifact itself, so it is not among them.
+   */
+  listArtifactVersions(id: string): Promise<ArtifactVersion[]>
   /**
    * The bytes, over the same authenticated connection everything else uses.
    *

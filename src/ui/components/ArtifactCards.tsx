@@ -28,8 +28,9 @@ const PREVIEW_MAX_WIDTH = 260
  *
  * HTML artifacts open as a rendered page in a sheet that starts at half the
  * screen and takes it all when dragged up; everything else keeps the detail
- * screen. The sheet is held here, the way the entry holds its image viewer,
- * so the chat screen never hears about it.
+ * screen, and the sheet's info button leads there too. The sheet is held
+ * here, the way the entry holds its image viewer, so the chat screen never
+ * hears about it.
  *
  * Memoised like every other transcript row: nothing here changes while text
  * streams below it.
@@ -44,6 +45,11 @@ export const ArtifactCards = memo(function ArtifactCards({ artifacts }: { artifa
     else router.push(`/artifacts/${artifact.id}` as never)
   }
 
+  const showInfo = (artifact: Artifact) => {
+    setPreview(null)
+    router.push(`/artifacts/${artifact.id}` as never)
+  }
+
   return (
     <>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.strip}>
@@ -52,7 +58,7 @@ export const ArtifactCards = memo(function ArtifactCards({ artifacts }: { artifa
         ))}
       </ScrollView>
 
-      <PreviewSheet visible={preview !== null} backend={backend} artifact={preview} onClose={() => setPreview(null)} />
+      <PreviewSheet visible={preview !== null} backend={backend} artifact={preview} onClose={() => setPreview(null)} onInfo={showInfo} />
     </>
   )
 })

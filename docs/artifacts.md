@@ -47,8 +47,9 @@ learned that the hard way (plugin README, "Known weak points").
 
 ```
 ~/.hermes/polyflow_agents_push/artifacts/
-  artifacts.db          # SQLite, WAL. The index.
+  artifacts.db          # SQLite, WAL. The index, and the versions a rewrite replaced.
   files/<id>.<ext>      # The bytes, copied — never a link to the agent's path.
+  files/<id>.v<n>.<ext> # The bytes version n had, kept when a rewrite replaced them (§4.2).
 ```
 
 SQLite rather than the registry's JSON-with-atomic-replace: the hooks fire from
@@ -60,7 +61,9 @@ answer and it is stdlib, so the plugin stays dependency-free.
 **Copied, not linked.** The agent may overwrite or delete the file it wrote a
 minute later. An artifact is the snapshot the conversation produced. A rewrite
 of the same path in the same session *updates* the artifact in place and bumps
-its `version`, so the list does not fill with twelve revisions of one file.
+its `version`, so the list does not fill with twelve revisions of one file —
+and keeps the bytes it replaced (§4.2), so the revision before is still there
+to read.
 
 ## 3. What is captured
 
@@ -102,8 +105,9 @@ the same auth the app already clears.
 |---|---|
 | `GET /artifacts?session=&kind=&limit=&offset=` | newest first |
 | `GET /artifacts/{id}` | one row |
-| `GET /artifacts/{id}/content` | the bytes, inline; `?download=1` for attachment |
-| `GET /artifacts/{id}/thumbnail` | a first-page PNG, rendered on first ask (§4.1); 404 when nothing on the host can |
+| `GET /artifacts/{id}/versions` | the earlier versions the host kept, newest first (§4.2) |
+| `GET /artifacts/{id}/content` | the bytes, inline; `?download=1` for attachment; `?v=n` for a kept earlier version |
+| `GET /artifacts/{id}/thumbnail` | a first-page PNG, rendered on first ask (§4.1); 404 when nothing on the host can; `?v=n` as above |
 | `POST /artifacts` | the app filing a sent image: `{name, mimeType, sessionId, dataUrl}` |
 | `DELETE /artifacts/{id}` | row and bytes |
 | `POST /artifacts/{id}/share` | mint (or return) a share token; `{expiresInHours?}` |
@@ -112,11 +116,14 @@ the same auth the app already clears.
 
 Both bytes routes answer with `Cache-Control: private, max-age=86400` and the
 file's sha256 as the ETag, on the promise that the bytes for one id and
-version never change. The routes ignore the query, but the app requests them
-as `…/content?v={version}` and `…/thumbnail?v={version}`: the HTTP cache under
+version never change. The app requests them as `…/content?v={version}` and
+`…/thumbnail?v={version}` — originally only because the HTTP cache under
 `fetch` (OkHttp on Android, NSURLCache on iOS) keys on the whole URL, and
 without the version it answers a rewritten artifact with the previous file
-for the rest of the day.
+for the rest of the day. Since §4.2 the host reads `v` too: absent, or the
+current version, is the artifact; an earlier one is served from what was
+kept, and 404s when it was not — never the current bytes under an old
+number, which that same cache would then keep for a day as that version.
 
 One row:
 
@@ -157,6 +164,36 @@ both. A failed render is remembered for an hour so a broken file does not
 cost a Chromium launch on every scroll. Renders run off the event loop, one at
 a time per artifact. Every renderer is optional: the plugin still imports
 nothing beyond the stdlib, and probes each tool when it is needed.
+
+### 4.2 Versions
+
+A rewrite used to overwrite: version 3 was the only version, and the two
+drafts before it were gone the moment the agent wrote the third. Now the
+bytes a rewrite replaces are copied to `files/<id>.v<n>.<ext>` first and
+described by a row in `artifact_versions` — name, kind, MIME, size, sha,
+tool, when they were written and when they were replaced. The same bytes
+written again (a fresh timestamp, no new version) keep nothing.
+
+`GET /artifacts/{id}/versions` lists them, newest first, each in the shape of
+§4's row *at that version* — same `id`, the version's own `name`, `size`,
+`mimeType`, `version`, `createdAt`/`updatedAt` (when those bytes were
+written), `share: null`, plus `archivedAt` for when they stopped being
+current. The current version is not among them; it is the artifact. That
+shape is deliberate: everything in the app that draws, caches or opens an
+artifact does so by `(id, version)`, so an earlier version is one it can take
+unchanged — the bytes through `…/content?v=n`, the thumbnail (rendered and
+cached on its own, under `<id>.v<n>`) through `…/thumbnail?v=n`.
+
+**Bounded.** `MAX_ARCHIVED_VERSIONS` (10) per artifact; past that the oldest
+kept version goes, bytes and thumbnail with it. Ten drafts back is further
+than anyone looks, and an agent rewriting a file in a loop should cost the
+store eleven files, not one per iteration. Versions written before this
+existed were not kept, so an artifact at version 4 may list fewer than
+three; the app says so when asked for one it cannot have. Deleting the
+artifact deletes every kept version.
+
+A re-sent picture under the same name is a rewrite like any other, and there
+is no route to delete one version alone: the artifact is the unit.
 
 `kind` is derived from the MIME type and extension on the host, once, so every
 client agrees on what is an image. `sessionId` is the **stored** id — the one
@@ -206,7 +243,17 @@ reverse proxy that satisfies the gate for that one prefix — is the whole gap.
   by day; images as tiles, everything else as rows. Filter by kind. A chat's
   header links to the same screen scoped to that session.
 - **Detail:** `/artifacts/[id]`. Preview, provenance, *Open session*, *Share
-  file*, *Copy link* / *Stop sharing*, *Delete*.
+  file*, *Copy link* / *Stop sharing*, *Delete*. For a type the sheet renders,
+  a *View the page* / *View as formatted text* / *View as a table* / *View the
+  PDF* row (and the page preview itself) opens the sheet from here. Below
+  the provenance, **Earlier versions** — when the host kept any (§4.2): one
+  row per version with its thumbnail, size, and when it was written and
+  replaced. Each opens `/artifacts/[id]?v=n`: the same screen showing that
+  version — its own preview, size and dates, *Share file* for those bytes —
+  but no link, no delete and no version list, since those belong to the
+  artifact, not to a draft of it, and a row back to the current one. A `v`
+  the host has nothing for says why (never kept, or since let go) rather
+  than showing the wrong bytes.
 - **Preview sheet:** what can be shown as the thing it is opens in a sheet
   instead — half the screen, dragged up to all of it (`PreviewSheet`,
   `previewMode` in `ui/artifacts.ts`). HTML renders in a WebView from the
@@ -214,7 +261,11 @@ reverse proxy that satisfies the gate for that one prefix — is the whole gap.
   table sized to its columns, the first 500 rows. A PDF takes the same sheet
   on iOS, whose WebView draws one; Android's has no viewer, so a PDF there
   keeps the detail screen and its share button. Everything else — plain text,
-  code, images, Office files — is the detail screen.
+  code, images, Office files — is the detail screen. The sheet's header
+  carries an info button opposite its close button: the sheet leaves and the
+  detail screen arrives, so a page, a report or a table — the types the agent
+  produces most — is never a dead end with no way to its provenance, its
+  link, its versions or its delete.
 - **In the chat itself:** each file the agent produced appears as a tile in the
   transcript, slotted by time under the work section that made it and above
   the reply that mentions it (`withArtifactRows` in `transcript-rows.ts`). The
@@ -243,6 +294,8 @@ reverse proxy that satisfies the gate for that one prefix — is the whole gap.
 - No capture from `terminal` output (guessing, see §3).
 - No de-duplication across sessions: the same file written in two sessions is
   two artifacts, because it was two events.
-- No quota or eviction on the host beyond the per-file cap. Delete is a route.
-- No thumbnails. The phone downscaled its uploads already; agent images are
-  fetched full-size and cached once.
+- No quota or eviction on the host beyond the per-file cap and the per-artifact
+  bound on kept versions (§4.2). Delete is a route.
+- No deleting one version on its own, and no restoring an earlier version as
+  the current one: the agent's file is the agent's, and "make it like it was"
+  is a thing to ask the agent, not the store.

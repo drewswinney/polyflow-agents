@@ -50,17 +50,26 @@ export function opensInSheet(artifact: Pick<Artifact, 'name' | 'mimeType' | 'siz
  * Rendered by whoever is showing artifacts (the Artifacts screen, a chat's
  * tile strip): it mounts only while open, like the image viewer. Callers ask
  * `opensInSheet` first; an artifact this cannot draw is theirs to route.
+ *
+ * The sheet shows the thing and nothing about it — no provenance, no share,
+ * no delete — and for the types that open here that used to be the end of
+ * the road. `onInfo` is the way through: an info button in the header,
+ * handing the artifact back to the caller to take to its own screen. A
+ * caller that *is* that screen leaves it out.
  */
 export function PreviewSheet({
   visible,
   backend,
   artifact,
-  onClose
+  onClose,
+  onInfo
 }: {
   visible: boolean
   backend: AgentBackend | null
   artifact: Artifact | null
   onClose: () => void
+  /** Show everything about the artifact: the detail screen. */
+  onInfo?: (artifact: Artifact) => void
 }) {
   const theme = useTheme()
   // Kept across closes: the query refetches nothing (the bytes for an id and
@@ -85,6 +94,7 @@ export function PreviewSheet({
       expandable
       onDismiss={onClose}
       onClose={onClose}
+      {...(onInfo && shown ? { action: { icon: 'circle-info', label: `About ${shown.name}`, onPress: () => onInfo(shown) } } : {})}
     >
       <View style={styles.body}>
         {file.isLoading ? (

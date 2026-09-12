@@ -30,6 +30,7 @@ import {
   type ArtifactQuery,
   type ArtifactShare,
   type ArtifactUpload,
+  type ArtifactVersion,
   type Capabilities,
   type ConfigField,
   type ConnectionState,
@@ -71,7 +72,7 @@ import { mapGatewayEvent, type MapContext, toEventRecord } from './event-map'
 import { createHeldEvents } from './held-events'
 import { toCreatePayload, toDeliveryTarget, toScheduledJob, toScheduledJobRun, toUpdatePayload } from './scheduled'
 import { toSearchHit, toSessionSummary, toTranscriptEntries, usableTitle } from './normalize'
-import { type ArtifactRow, HermesRest, type HermesRestConfig, HermesRestError } from './rest'
+import { type ArtifactRow, type ArtifactVersionRow, HermesRest, type HermesRestConfig, HermesRestError } from './rest'
 
 export { HermesRest, HermesRestError, probeScheme } from './rest'
 export { mapGatewayEvent } from './event-map'
@@ -1177,6 +1178,12 @@ export class HermesBackend implements AgentBackend {
     return toArtifact(await this.rest.artifact(id))
   }
 
+  async listArtifactVersions(id: string): Promise<ArtifactVersion[]> {
+    const result = await this.rest.artifactVersions(id)
+
+    return (result.versions ?? []).map(toArtifactVersion)
+  }
+
   readArtifact(id: string, version: number): Promise<ArtifactBytes> {
     return this.rest.artifactBytes(id, version)
   }
@@ -1254,6 +1261,12 @@ function toArtifact(row: ArtifactRow): Artifact {
         }
       : null
   }
+}
+
+function toArtifactVersion(row: ArtifactVersionRow): ArtifactVersion {
+  const artifact = toArtifact(row)
+
+  return { ...artifact, share: null, archivedAt: Number(row.archivedAt) || artifact.updatedAt }
 }
 
 /** Hermes's own key and vocabulary for the approval policy. */

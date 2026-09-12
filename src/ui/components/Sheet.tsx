@@ -52,6 +52,7 @@ export function Sheet({
   onClose,
   titleLines = 1,
   onRename,
+  action,
   children
 }: {
   visible: boolean
@@ -89,6 +90,13 @@ export function Sheet({
    * the new name here if it changed. Absent, the title is just a heading.
    */
   onRename?: (title: string) => void
+  /**
+   * One button at the leading edge of the header, opposite the close button
+   * — for the thing a sheet about a *thing* can do besides close: go to that
+   * thing's own screen, say. Drawn only when `expandable`, whose header
+   * already reserves the room on both sides.
+   */
+  action?: { icon: string; label: string; onPress: () => void }
   children: ReactNode
 }) {
   const theme = useTheme()
@@ -412,6 +420,11 @@ export function Sheet({
                   {title}
                 </Text>
               )}
+              {expandable && action ? (
+                <View style={styles.leading}>
+                  <IconButton name={action.icon} accessibilityLabel={action.label} outlined onPress={action.onPress} />
+                </View>
+              ) : null}
               {expandable ? (
                 <View style={styles.close}>
                   <IconButton name="xmark" accessibilityLabel={`Close ${title}`} outlined onPress={close} />
@@ -459,5 +472,6 @@ const styles = StyleSheet.create({
   renameCatch: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   /* Room for the close button on both sides, so the title stays centred. */
   titleBesideClose: { paddingHorizontal: 52 },
+  leading: { position: 'absolute', left: 0 },
   close: { position: 'absolute', right: 0 }
 })

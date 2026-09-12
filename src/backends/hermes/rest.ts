@@ -148,6 +148,11 @@ export interface ArtifactsPage {
   total: number
 }
 
+/** A kept earlier version, described as the artifact at that version (`docs/artifacts.md` §4.2). */
+export interface ArtifactVersionRow extends ArtifactRow {
+  archivedAt: number
+}
+
 /** Audio endpoints scale with payload size, between three and ten minutes. */
 function audioTimeoutMs(estimate: number): number {
   return Math.min(600_000, Math.max(180_000, Math.ceil(estimate)))
@@ -482,14 +487,20 @@ export class HermesRest {
     return this.request<ArtifactRow>(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}`, { timeoutMs: 15_000 })
   }
 
+  /** The kept earlier versions, newest first. */
+  artifactVersions(id: string): Promise<{ versions: ArtifactVersionRow[]; total: number }> {
+    return this.request<{ versions: ArtifactVersionRow[]; total: number }>(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}/versions`, { timeoutMs: 15_000 })
+  }
+
   /**
    * The bytes, at a URL that names the version.
    *
    * The host serves both bytes routes with `Cache-Control: max-age=86400`
    * on the promise that the bytes for one id and version never change. The
-   * route ignores the query, but the HTTP cache under `fetch` (OkHttp on
-   * Android, NSURLCache on iOS) keys on the whole URL, so `v=` is what turns
-   * a rewrite into a fresh download rather than a day of the old file.
+   * HTTP cache under `fetch` (OkHttp on Android, NSURLCache on iOS) keys on
+   * the whole URL, so `v=` is what turns a rewrite into a fresh download
+   * rather than a day of the old file — and, on the host, what names a kept
+   * earlier version rather than the current bytes.
    */
   artifactBytes(id: string, version: number): Promise<{ bytes: Uint8Array; mimeType: string }> {
     return this.requestBytes(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}/content?v=${encodeURIComponent(version)}`)

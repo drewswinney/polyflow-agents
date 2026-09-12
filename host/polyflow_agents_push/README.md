@@ -140,14 +140,16 @@ different phone.
 ~/.hermes/polyflow_agents_push/artifacts/
   artifacts.db          # SQLite index
   files/<id>.<ext>      # the bytes, copied — never a link to the agent's path
+  files/<id>.v<n>.<ext> # the bytes a rewrite replaced, as version n
 ```
 
 | Route | Does |
 |---|---|
 | `GET /artifacts?session=&kind=&limit=&offset=` | newest first |
 | `GET /artifacts/{id}` | one row |
-| `GET /artifacts/{id}/content` | the bytes, inline; `?download=1` for a save-as |
-| `GET /artifacts/{id}/thumbnail` | a first-page PNG, rendered on first ask with Pillow / `pdftoppm` / Chromium / LibreOffice, whichever this host has; 404 otherwise |
+| `GET /artifacts/{id}/versions` | the earlier versions the store kept, newest first |
+| `GET /artifacts/{id}/content` | the bytes, inline; `?download=1` for a save-as; `?v=n` for a kept earlier version |
+| `GET /artifacts/{id}/thumbnail` | a first-page PNG, rendered on first ask with Pillow / `pdftoppm` / Chromium / LibreOffice, whichever this host has; 404 otherwise; `?v=n` as above |
 | `POST /artifacts` | the app filing a sent picture: `{name, mimeType, sessionId, dataUrl}` |
 | `DELETE /artifacts/{id}` | row and bytes |
 | `POST /artifacts/{id}/share` | mint or return a share token; `{expiresInHours?}` |
@@ -164,7 +166,8 @@ the gate to let that one prefix through. Design and the rest of the contract:
 
 Per-file cap of 25 MB, matching the gateway's own `image.attach_bytes` ceiling.
 A rewrite of the same path in the same session updates the row and bumps its
-`version` rather than adding a row.
+`version` rather than adding a row — and keeps the bytes it replaced, up to
+`MAX_ARCHIVED_VERSIONS` (10) back, so an earlier draft can still be opened.
 
 ## Cron delivery
 

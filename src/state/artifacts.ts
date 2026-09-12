@@ -9,12 +9,13 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 
-import type { AgentBackend, Artifact, ArtifactKind, ArtifactPage, ArtifactShare, SessionId } from '@/domain'
+import type { AgentBackend, Artifact, ArtifactKind, ArtifactPage, ArtifactShare, ArtifactVersion, SessionId } from '@/domain'
 
 /** Every artifact query for one agent — what a mutation invalidates. */
 export const artifactsRootKey = (scope: string) => ['agent', scope, 'artifacts'] as const
 export const artifactsKey = (scope: string, sessionId = '', kind = '') => ['agent', scope, 'artifacts', 'list', sessionId, kind] as const
 export const artifactKey = (scope: string, id: string) => ['agent', scope, 'artifacts', 'one', id] as const
+export const artifactVersionsKey = (scope: string, id: string) => ['agent', scope, 'artifacts', 'versions', id] as const
 
 /** Whether this backend keeps artifacts at all — the screen and the sidebar row hang off it. */
 export function supportsArtifacts(backend: AgentBackend | null): boolean {
@@ -84,6 +85,23 @@ export function useArtifact(scope: string, backend: AgentBackend | null, id: str
 
       return undefined
     }
+  })
+}
+
+/**
+ * The earlier versions the host kept of one artifact, newest first.
+ *
+ * Only asked for when there could be any — `enabled` is the caller's
+ * `artifact.version > 1` — since an artifact never rewritten has nothing to
+ * list and the detail screen should not cost a request to learn that. Under
+ * the agent's artifact root, so a delete or a rewrite refreshes it with the
+ * rest.
+ */
+export function useArtifactVersions(scope: string, backend: AgentBackend | null, id: string, enabled: boolean) {
+  return useQuery<ArtifactVersion[]>({
+    queryKey: artifactVersionsKey(scope, id),
+    enabled: supportsArtifacts(backend) && id.length > 0 && enabled,
+    queryFn: () => backend!.listArtifactVersions(id)
   })
 }
 
