@@ -18,6 +18,7 @@ import {
   type ArtifactQuery,
   type ArtifactShare,
   type ArtifactUpload,
+  type ArtifactVersion,
   type Capabilities,
   type ConfigField,
   type ConnectionState,
@@ -208,7 +209,9 @@ export class MockBackend implements AgentBackend {
   private board: KanbanBoard
   /** Seeded on first use, so the constructor stays as it was. */
   private artifacts: Artifact[] | null = null
+  /** Bytes by id; an earlier version's under `<id>@<version>` (`versionKey`). */
   private readonly artifactBytes = new Map<string, Uint8Array>()
+  private artifactVersions: Map<string, ArtifactVersion[]> | null = null
   private models: ModelOption[] = [
     { id: 'sonnet-4.5', provider: 'anthropic', selected: true },
     { id: 'opus-4.5', provider: 'anthropic', selected: false },
@@ -881,18 +884,39 @@ export class MockBackend implements AgentBackend {
     return hit
   }
 
-  async readArtifact(id: string): Promise<ArtifactBytes> {
+  private seededVersions(): Map<string, ArtifactVersion[]> {
+    if (this.artifactVersions === null) {
+      this.artifactVersions = this.options.seed === false ? new Map() : seedArtifactVersions(this.seededArtifacts(), this.artifactBytes)
+    }
+
+    return this.artifactVersions
+  }
+
+  async listArtifactVersions(id: string): Promise<ArtifactVersion[]> {
+    await tick(120)
+    await this.getArtifact(id)
+
+    return this.seededVersions().get(id) ?? []
+  }
+
+  async readArtifact(id: string, version?: number): Promise<ArtifactBytes> {
     await tick(200)
 
     const artifact = await this.getArtifact(id)
-    const bytes = this.artifactBytes.get(id)
 
-    if (!bytes) throw new Error('The demo agent lost the bytes for that artifact.')
+    this.seededVersions()
+
+    // An earlier version's bytes under their own key, like the host's `?v=`;
+    // the current version, or no version, is the artifact's own.
+    const kept = version !== undefined && version !== artifact.version ? this.artifactBytes.get(versionKey(id, version)) : undefined
+    const bytes = kept ?? (version === undefined || version === artifact.version ? this.artifactBytes.get(id) : undefined)
+
+    if (!bytes) throw new Error(kept === undefined && version !== undefined && version !== artifact.version ? 'That version was not kept.' : 'The demo agent lost the bytes for that artifact.')
 
     return { bytes, mimeType: artifact.mimeType }
   }
 
-  async readArtifactThumbnail(id: string): Promise<ArtifactBytes> {
+  async readArtifactThumbnail(id: string, version?: number): Promise<ArtifactBytes> {
     // The demo has no renderer. Pictures are their own thumbnail; everything
     // else is honestly a miss, which is what draws the glyph the real host
     // draws when it has no Pillow or `pdftoppm`.
@@ -900,7 +924,7 @@ export class MockBackend implements AgentBackend {
 
     if (artifact.kind !== 'image') throw new Error('The demo agent renders no thumbnails.')
 
-    return this.readArtifact(id)
+    return this.readArtifact(id, version)
   }
 
   async uploadArtifact(upload: ArtifactUpload): Promise<Artifact> {
@@ -946,6 +970,10 @@ export class MockBackend implements AgentBackend {
     const index = rows.findIndex(artifact => artifact.id === id)
 
     if (index === -1) throw new Error('No such artifact.')
+
+    for (const kept of this.seededVersions().get(id) ?? []) this.artifactBytes.delete(versionKey(id, kept.version))
+
+    this.seededVersions().delete(id)
 
     rows.splice(index, 1)
     this.artifactBytes.delete(id)
@@ -1242,4 +1270,54 @@ function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] 
 
     return { ...artifact, size: bytes.length }
   })
+}
+
+function versionKey(id: string, version: number): string {
+  return `${id}@${version}`
+}
+
+/**
+ * The drafts behind the one rewritten artifact: the scrub report is at
+ * version 3, so two earlier ones — the way the host keeps what a rewrite
+ * replaced (`docs/artifacts.md` §4.2). Newest first, like the route.
+ */
+function seedArtifactVersions(artifacts: Artifact[], store: Map<string, Uint8Array>): Map<string, ArtifactVersion[]> {
+  const report = artifacts.find(artifact => artifact.id === 'mock-art-report')
+  const versions = new Map<string, ArtifactVersion[]>()
+
+  if (!report) return versions
+
+  // Each draft was written when the one before it was replaced, and the
+  // last replaced when the report was last updated.
+  const drafts: { version: number; createdAt: number; archivedAt: number; text: string }[] = [
+    {
+      version: 2,
+      createdAt: report.createdAt + 10_000,
+      archivedAt: report.updatedAt,
+      text:
+        '# Scrub report — tank\n\n' +
+        '- Scrub finished clean in 3h 41m\n' +
+        '- 110 stale snapshots from the failed replication\n\n' +
+        'Still totting up what is reclaimable.\n'
+    },
+    {
+      version: 1,
+      createdAt: report.createdAt,
+      archivedAt: report.createdAt + 10_000,
+      text: '# Scrub report — tank\n\nScrub still running; nothing to report yet.\n'
+    }
+  ]
+
+  versions.set(
+    report.id,
+    drafts.map(draft => {
+      const bytes = bytesFromText(draft.text)
+
+      store.set(versionKey(report.id, draft.version), bytes)
+
+      return { ...report, size: bytes.length, version: draft.version, createdAt: draft.createdAt, updatedAt: draft.createdAt, share: null, archivedAt: draft.archivedAt }
+    })
+  )
+
+  return versions
 }

@@ -637,6 +637,20 @@ export interface Artifact {
   share: ArtifactShare | null
 }
 
+/**
+ * A version of an artifact that a rewrite replaced, kept by the host
+ * (`docs/artifacts.md` §4.2).
+ *
+ * The artifact as it was at that `version` — same `id`, its own name, size,
+ * type and timestamps — so everything that draws, caches or opens an
+ * `Artifact` by `(id, version)` takes one of these unchanged. `share` is
+ * always null: a link is the artifact's and opens its current bytes.
+ */
+export interface ArtifactVersion extends Artifact {
+  /** Epoch ms; when these bytes stopped being the current ones. */
+  archivedAt: number
+}
+
 export interface ArtifactQuery {
   sessionId?: SessionId
   kind?: ArtifactKind

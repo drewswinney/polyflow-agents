@@ -17,6 +17,7 @@ import {
   isTextLike,
   matchesArtifactFilter,
   parseDelimited,
+  previewLabel,
   previewMode,
   previewNavigationDecision,
   shareCaption
@@ -173,6 +174,16 @@ describe('previewMode', () => {
     expect(previewMode({ name: 'huge.html', mimeType: 'text/html', size: 5 * 1024 * 1024 }, false)).toBe('page')
     expect(previewMode({ name: 'notes.txt', mimeType: 'text/plain', size: 10 }, false)).toBeNull()
     expect(previewMode({ name: 'photo.png', mimeType: 'image/png', size: 10 }, false)).toBeNull()
+  })
+})
+
+describe('previewLabel', () => {
+  it('names what the sheet shows the file as, for every mode it has', () => {
+    expect(previewLabel('page')).toBe('View the page')
+    expect(previewLabel('pdf')).toBe('View the PDF')
+    expect(previewLabel('markdown')).toBe('View as formatted text')
+    expect(previewLabel('csv')).toBe('View as a table')
+    expect(previewLabel('tsv')).toBe('View as a table')
   })
 })
 

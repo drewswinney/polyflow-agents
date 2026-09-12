@@ -16,8 +16,9 @@ check cannot, each of which was a real failure mode rather than a hypothetical:
    A register that returns 200 without landing in `devices.json` is a device
    that will never be pushed to and nothing that says so.
 4. **The artifact store round-trips.** Capture from a tool result, the upload
-   route, the content and share routes, versioning on rewrite and delete — all
-   against a real SQLite file under the temporary home (`docs/artifacts.md`).
+   route, the content and share routes, versioning on rewrite — the replaced
+   bytes kept, listed, served by `?v=`, bounded, and deleted with the artifact —
+   all against a real SQLite file under the temporary home (`docs/artifacts.md`).
 5. **Thumbnails render with whatever this machine has**, and 404 cleanly with
    what it lacks — never a 500. Pillow, `pdftoppm` and a Chromium are each
    probed rather than assumed.
@@ -282,6 +283,62 @@ def check_artifacts(module, client, base: str, home: Path) -> None:
     if arts.file_path(arts.get(first["id"])).read_text() != written.read_text():
         fail("a rewrite did not replace the stored bytes")
 
+    # --- Versions: the bytes a rewrite replaced are kept, and reachable ----
+    versions = client.get(f"{base}/artifacts/{first['id']}/versions").json()
+
+    if versions["total"] != 1 or [row["version"] for row in versions["versions"]] != [1]:
+        fail(f"a rewrite should keep the version it replaced, got {versions}")
+
+    kept = versions["versions"][0]
+
+    if kept["id"] != first["id"] or kept["name"] != "report.md" or kept["size"] != len("# Findings\n\nnothing yet\n"):
+        fail(f"a kept version should be described as the artifact at that version, got {kept}")
+    if not isinstance(kept.get("archivedAt"), int) or kept["archivedAt"] < kept["updatedAt"]:
+        fail(f"a kept version should say when it was superseded, got {kept}")
+    if kept["share"] is not None:
+        fail("a kept version carries no share of its own")
+    if client.get(f"{base}/artifacts/{first['id']}/content", params={"v": 1}).text != "# Findings\n\nnothing yet\n":
+        fail("?v=1 should answer with the kept bytes")
+    if client.get(f"{base}/artifacts/{first['id']}/content", params={"v": 2}).text != written.read_text():
+        fail("?v= naming the live version should answer with the live bytes")
+    if client.get(f"{base}/artifacts/{first['id']}/content").text != written.read_text():
+        fail("no ?v= should answer with the live bytes")
+    if client.get(f"{base}/artifacts/{first['id']}/content", params={"v": 7}).status_code != 404:
+        fail("?v= naming a version that was not kept should 404, not serve the live bytes")
+    if client.get(f"{base}/artifacts/nope/versions").status_code != 404:
+        fail("versions of an unknown artifact should 404")
+
+    # The same bytes written again are not a new version, and keep nothing.
+    same = arts.capture_tool_result(tool_name="write_file", args={"path": str(written)}, result=result, session_id=SESSION)
+
+    if same[0]["version"] != 2 or client.get(f"{base}/artifacts/{first['id']}/versions").json()["total"] != 1:
+        fail("rewriting identical bytes must not archive a version")
+
+    # Bounded: past MAX_ARCHIVED_VERSIONS the oldest kept version goes, bytes and all.
+    churn = home / "churn.txt"
+    churned = None
+
+    for step in range(arts.MAX_ARCHIVED_VERSIONS + 3):
+        churn.write_text(f"draft {step}\n")
+        churned = arts.capture_tool_result(tool_name="write_file", args={"path": str(churn)}, result=json.dumps({"success": True, "resolved_path": str(churn)}), session_id=SESSION)[0]
+
+    kept_versions = client.get(f"{base}/artifacts/{churned['id']}/versions").json()["versions"]
+    expected = list(range(churned["version"] - 1, churned["version"] - 1 - arts.MAX_ARCHIVED_VERSIONS, -1))
+
+    if [row["version"] for row in kept_versions] != expected:
+        fail(f"kept versions should be the newest {arts.MAX_ARCHIVED_VERSIONS}, got {[row['version'] for row in kept_versions]}")
+    if any(path.name.startswith(f"{churned['id']}.v1.") for path in arts.files_dir().iterdir()):
+        fail("a pruned version left its bytes behind")
+    if client.get(f"{base}/artifacts/{churned['id']}/content", params={"v": 1}).status_code != 404:
+        fail("a pruned version should no longer be served")
+    if client.get(f"{base}/artifacts/{churned['id']}/content", params={"v": expected[-1]}).text != f"draft {expected[-1] - 1}\n":
+        fail("the oldest kept version should still answer with its own bytes")
+
+    client.request("DELETE", f"{base}/artifacts/{churned['id']}")
+
+    if any(path.name.startswith(churned["id"]) for path in arts.files_dir().iterdir()):
+        fail("deleting an artifact should remove every kept version's files")
+
     # A failed call produced nothing, whatever its arguments say.
     if arts.capture_tool_result(tool_name="write_file", args={"path": str(written)}, result=json.dumps({"error": "denied"}), session_id=SESSION):
         fail("a tool result carrying an error must not be captured")
@@ -452,6 +509,16 @@ def check_artifacts(module, client, base: str, home: Path) -> None:
         if not expected and response.status_code != 404:
             fail(f"{label} thumbnail without a renderer should 404, got {response.status_code}")
 
+    # A kept version renders on its own, under its own key — or 404s cleanly.
+    response = client.get(f"{base}/artifacts/{first['id']}/thumbnail", params={"v": 1})
+
+    if thumbs.has_pillow() and (response.status_code != 200 or not response.content.startswith(b"\x89PNG")):
+        fail(f"a kept version's thumbnail should be a PNG, got {response.status_code}")
+    if not thumbs.has_pillow() and response.status_code != 404:
+        fail(f"a kept version's thumbnail without a renderer should 404, got {response.status_code}")
+    if client.get(f"{base}/artifacts/{first['id']}/thumbnail", params={"v": 9}).status_code != 404:
+        fail("a thumbnail for a version that was not kept should 404")
+
     # A second ask is served from the cache: the marker matches the sha.
     if thumbs.has_pillow():
         if not arts.thumbnail_marker_path(arts.get(first["id"])).read_text().strip() == arts.get(first["id"])["sha256"]:
@@ -496,13 +563,20 @@ def check_artifacts(module, client, base: str, home: Path) -> None:
     # --- Delete -----------------------------------------------------------
     bytes_path = arts.file_path(arts.get(first["id"]))
     thumb_path = arts.thumbnail_path(arts.get(first["id"]))
+    kept_path = arts.file_path(arts.get_version(first["id"], 1))
 
+    if not kept_path.is_file():
+        fail("the kept version's bytes should be on disk before the delete")
     if client.request("DELETE", f"{base}/artifacts/{first['id']}").json() != {"ok": True}:
         fail("delete did not report success")
     if bytes_path.exists():
         fail("delete left the bytes behind")
     if thumb_path.exists():
         fail("delete left the thumbnail behind")
+    if kept_path.exists():
+        fail("delete left a kept version's bytes behind")
+    if client.get(f"{base}/artifacts/{first['id']}/versions").status_code != 404:
+        fail("a deleted artifact still lists versions")
     if client.get(f"{base}/artifacts/{first['id']}").status_code != 404:
         fail("a deleted artifact is still listed")
     if client.request("DELETE", f"{base}/artifacts/{first['id']}").status_code != 404:

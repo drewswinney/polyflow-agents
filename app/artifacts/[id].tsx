@@ -5,20 +5,21 @@ import { useEffect, useState } from 'react'
 import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import type { Artifact } from '@/domain'
+import type { Artifact, ArtifactVersion } from '@/domain'
 import { ensureArtifactFile, useArtifactFile } from '@/platform/artifact-cache'
 import { useBackend } from '@/state/ConnectionProvider'
 import { useAgentScopedRoute } from '@/state/agent-scope'
 import { useSelectedAgent, useSelectedServer } from '@/state/agents'
-import { useArtifact, useArtifactActions } from '@/state/artifacts'
+import { useArtifact, useArtifactActions, useArtifactVersions } from '@/state/artifacts'
 import { withAgent } from '@/ui/components/AgentGate'
 import { ArtifactPreview } from '@/ui/components/ArtifactPreview'
 import { Card, Divider } from '@/ui/components/Card'
 import { Icon } from '@/ui/components/Icon'
 import { ImageViewer } from '@/ui/components/ImageViewer'
+import { PDF_IN_SHEET, PreviewSheet } from '@/ui/components/PreviewSheet'
 import { ScreenHeader, useHeaderInset } from '@/ui/components/ScreenHeader'
 import { Text } from '@/ui/components/Text'
-import { describeOrigin, formatBytes, isTextLike, kindLabel, shareCaption } from '@/ui/artifacts'
+import { describeOrigin, formatBytes, isTextLike, kindLabel, previewLabel, previewMode, shareCaption } from '@/ui/artifacts'
 import { clockTime, relativeTime } from '@/ui/format'
 import { useTheme } from '@/ui/ThemeProvider'
 
@@ -48,7 +49,15 @@ async function loadSharing(): Promise<typeof import('expo-sharing') | null> {
 /**
  * One artifact (`docs/artifacts.md` §6): preview, provenance, and the four
  * things you can do with it — open the conversation it came from, hand the
- * file to another app, share or stop sharing a link, delete it.
+ * file to another app, share or stop sharing a link, delete it. For a type
+ * the preview sheet renders, a row (and the preview itself) opens the sheet,
+ * so the screen the sheet's info button leads to also leads back.
+ *
+ * With `?v=`, the same screen shows one of the artifact's *earlier* versions
+ * (§4.2): the file as it was, its own size and dates, and "Share file" for
+ * those bytes — but no link, no delete and no version list, since those are
+ * the artifact's, not the draft's. Without it, the current version, with the
+ * earlier ones listed below when the host kept any.
  *
  * "Share file" and "Copy link" are separate on purpose. The file goes anywhere
  * the share sheet reaches, outsiders included; the link works for anyone who
@@ -62,7 +71,7 @@ function ArtifactScreen() {
   const agent = useSelectedAgent()
   const server = useSelectedServer()
   const backend = useBackend()
-  const { id } = useLocalSearchParams<{ id: string }>()
+  const { id, v } = useLocalSearchParams<{ id: string; v?: string }>()
   const scope = agent.scope ?? ''
 
   const stale = useAgentScopedRoute()
@@ -70,9 +79,20 @@ function ArtifactScreen() {
   const artifact = query.data ?? null
   const actions = useArtifactActions(scope, backend)
 
+  // `?v=` naming the current version is the artifact itself, so the URL a
+  // list row was opened by and the plain one show the same screen.
+  const wanted = v && Number.isInteger(Number(v)) && Number(v) !== artifact?.version ? Number(v) : null
+  const versions = useArtifactVersions(scope, stale ? null : backend, id ?? '', wanted !== null || (artifact?.version ?? 1) > 1)
+  const kept: ArtifactVersion | null = wanted === null ? null : (versions.data?.find(row => row.version === wanted) ?? null)
+  /** What the screen is about: the artifact, or one of its kept versions. */
+  const shown: Artifact | null = wanted === null ? artifact : kept
+
   const [busy, setBusy] = useState<'share-file' | null>(null)
   const [copied, setCopied] = useState(false)
   const [notice, setNotice] = useState<string | null>(null)
+  const [previewing, setPreviewing] = useState(false)
+
+  const mode = shown ? previewMode(shown, PDF_IN_SHEET) : null
 
   useEffect(() => {
     if (!copied) return
@@ -83,13 +103,13 @@ function ArtifactScreen() {
   }, [copied])
 
   const shareFile = async () => {
-    if (!backend || !artifact) return
+    if (!backend || !shown) return
 
     setBusy('share-file')
     setNotice(null)
 
     try {
-      const uri = await ensureArtifactFile(artifact, () => backend.readArtifact(artifact.id, artifact.version))
+      const uri = await ensureArtifactFile(shown, () => backend.readArtifact(shown.id, shown.version))
       const Sharing = await loadSharing()
 
       if (!Sharing) {
@@ -104,7 +124,7 @@ function ArtifactScreen() {
         return
       }
 
-      await Sharing.shareAsync(uri, { mimeType: artifact.mimeType, dialogTitle: artifact.name })
+      await Sharing.shareAsync(uri, { mimeType: shown.mimeType, dialogTitle: shown.name })
     } catch (error) {
       setNotice(String((error as Error).message))
     } finally {
@@ -153,30 +173,57 @@ function ArtifactScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
-      <ScreenHeader title={artifact?.name ?? 'Artifact'} titleVariant="sub" onBack={() => router.back()} />
+      <ScreenHeader title={shown?.name ?? artifact?.name ?? 'Artifact'} titleVariant="sub" onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}>
-        {artifact ? (
+        {shown && artifact ? (
           <>
-            <Preview artifact={artifact} />
+            {kept ? (
+              <Card style={styles.messageCard}>
+                <Text variant="rowLabelStrong">{`Version ${kept.version} of ${artifact.version}`}</Text>
+                <Text variant="secondary">{`Replaced ${relativeTime(kept.archivedAt)} ago. The current version is what the link and the conversation point at.`}</Text>
+              </Card>
+            ) : null}
+
+            <Preview artifact={shown} onOpen={mode ? () => setPreviewing(true) : undefined} />
 
             <Card>
-              <MetaRow label="Kind" value={`${kindLabel(artifact.kind)} · ${artifact.mimeType}`} />
+              {mode ? (
+                <>
+                  <ActionRow icon="eye" label={previewLabel(mode)} onPress={() => setPreviewing(true)} />
+                  <Divider />
+                </>
+              ) : null}
+              <MetaRow label="Kind" value={`${kindLabel(shown.kind)} · ${shown.mimeType}`} />
               <Divider />
-              <MetaRow label="Size" value={formatBytes(artifact.size)} />
+              <MetaRow label="Size" value={formatBytes(shown.size)} />
               <Divider />
-              <MetaRow label="From" value={describeOrigin(artifact)} />
-              {artifact.sourcePath ? (
+              <MetaRow label="From" value={describeOrigin(shown)} />
+              {shown.sourcePath ? (
                 <>
                   <Divider />
-                  <MetaRow label="Path" value={artifact.sourcePath} mono />
+                  <MetaRow label="Path" value={shown.sourcePath} mono />
                 </>
               ) : null}
               <Divider />
-              <MetaRow
-                label={artifact.version > 1 ? `Updated · v${artifact.version}` : 'Created'}
-                value={`${relativeTime(artifact.updatedAt)} ago · ${clockTime(artifact.updatedAt)}`}
-              />
+              {kept ? (
+                <>
+                  <MetaRow label={`Written · v${kept.version}`} value={`${relativeTime(kept.updatedAt)} ago · ${clockTime(kept.updatedAt)}`} />
+                  <Divider />
+                  <MetaRow label="Replaced" value={`${relativeTime(kept.archivedAt)} ago · ${clockTime(kept.archivedAt)}`} />
+                </>
+              ) : (
+                <MetaRow
+                  label={artifact.version > 1 ? `Updated · v${artifact.version}` : 'Created'}
+                  value={`${relativeTime(artifact.updatedAt)} ago · ${clockTime(artifact.updatedAt)}`}
+                />
+              )}
+              {kept ? (
+                <>
+                  <Divider />
+                  <ActionRow icon="file" label="Show the current version" onPress={() => router.navigate(`/artifacts/${artifact.id}` as never)} />
+                </>
+              ) : null}
               {artifact.sessionId ? (
                 <>
                   <Divider />
@@ -184,6 +231,8 @@ function ArtifactScreen() {
                 </>
               ) : null}
             </Card>
+
+            {!kept ? <Versions artifact={artifact} versions={versions.data ?? null} error={versions.error ? String((versions.error as Error).message) : null} /> : null}
 
             <View style={styles.group}>
               <Text variant="sectionHeader" style={styles.groupLabel}>
@@ -193,11 +242,11 @@ function ArtifactScreen() {
                 <ActionRow
                   icon="arrow-up-from-bracket"
                   label="Share file…"
-                  detail="AirDrop, Messages, Mail — the file itself, to anyone"
+                  detail={kept ? 'AirDrop, Messages, Mail — this version of the file, to anyone' : 'AirDrop, Messages, Mail — the file itself, to anyone'}
                   busy={busy === 'share-file'}
                   onPress={() => void shareFile()}
                 />
-                {backend?.capabilities.artifacts.share ? (
+                {!kept && backend?.capabilities.artifacts.share ? (
                   <>
                     <Divider />
                     <ActionRow
@@ -218,9 +267,11 @@ function ArtifactScreen() {
               </Card>
             </View>
 
-            <Card>
-              <ActionRow icon="trash" label="Delete from host" destructive busy={actions.remove.isPending} onPress={confirmDelete} />
-            </Card>
+            {!kept ? (
+              <Card>
+                <ActionRow icon="trash" label="Delete from host" destructive busy={actions.remove.isPending} onPress={confirmDelete} />
+              </Card>
+            ) : null}
 
             {notice ? (
               <Text variant="secondary" color={theme.color.error700} style={styles.notice}>
@@ -233,10 +284,79 @@ function ArtifactScreen() {
             <Text variant="rowLabelStrong">Could not load this artifact</Text>
             <Text variant="secondary">{String((query.error as Error).message)}</Text>
           </Card>
+        ) : artifact && wanted !== null && (versions.error || versions.data) ? (
+          <>
+            <Card style={styles.messageCard}>
+              <Text variant="rowLabelStrong">{`Version ${wanted} is not available`}</Text>
+              <Text variant="secondary">
+                {versions.error
+                  ? String((versions.error as Error).message)
+                  : 'The host did not keep this version: it was written before versions were kept, or enough rewrites have passed since that it was let go.'}
+              </Text>
+            </Card>
+            <Card>
+              <ActionRow icon="file" label="Show the current version" onPress={() => router.navigate(`/artifacts/${artifact.id}` as never)} />
+            </Card>
+          </>
         ) : (
           <ActivityIndicator color={theme.color.secondary} style={styles.loading} />
         )}
       </ScrollView>
+
+      <PreviewSheet visible={previewing} backend={backend} artifact={shown} onClose={() => setPreviewing(false)} />
+    </View>
+  )
+}
+
+/**
+ * The versions a rewrite replaced, newest first, each a row to the same
+ * screen at `?v=`. Nothing at all when there are none — an artifact never
+ * rewritten, or one whose rewrites the host did not keep — since a heading
+ * over an empty card would only raise the question.
+ */
+function Versions({ artifact, versions, error }: { artifact: Artifact; versions: ArtifactVersion[] | null; error: string | null }) {
+  const theme = useTheme()
+
+  if (!error && !versions?.length) return null
+
+  return (
+    <View style={styles.group}>
+      <Text variant="sectionHeader" style={styles.groupLabel}>
+        Earlier versions
+      </Text>
+      {error ? (
+        <Text variant="secondary" color={theme.color.error700} style={styles.notice}>
+          {`Could not list earlier versions: ${error}`}
+        </Text>
+      ) : (
+        <Card>
+          {versions!.map((kept, index) => (
+            <View key={kept.version}>
+              {index > 0 ? <Divider /> : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Version ${kept.version} of ${artifact.name}`}
+                onPress={() => router.push(`/artifacts/${artifact.id}?v=${kept.version}` as never)}
+                style={({ pressed }) => [styles.versionRow, pressed && { backgroundColor: theme.color.bgSubtle }]}
+              >
+                <ArtifactPreview artifact={kept} mode="cover" width={40} height={40} radius={8} />
+                <View style={styles.versionBody}>
+                  <View style={styles.versionTitle}>
+                    <Text variant="rowLabelStrong" numberOfLines={1} style={styles.versionName}>
+                      {`Version ${kept.version}`}
+                    </Text>
+                    <Text variant="monoSmall">{relativeTime(kept.updatedAt)}</Text>
+                  </View>
+                  <Text variant="secondary" numberOfLines={1}>
+                    {`${formatBytes(kept.size)}${kept.name !== artifact.name ? ` · ${kept.name}` : ''} · replaced ${relativeTime(kept.archivedAt)} ago`}
+                  </Text>
+                </View>
+                <Icon name="chevron-right" size={11} color={theme.color.secondaryMuted} />
+              </Pressable>
+            </View>
+          ))}
+        </Card>
+      )}
     </View>
   )
 }
@@ -244,9 +364,12 @@ function ArtifactScreen() {
 /**
  * The top of the screen: the picture, the text, or a glyph for what cannot be
  * drawn. Fetched through the same on-disk cache the list's tiles use, so a
- * picture tapped from the grid is already here.
+ * picture tapped from the grid is already here. Given `onOpen`, the page is
+ * a button to the preview sheet — the thing as itself — the way the picture
+ * is a button to the image viewer. Inline text stays selectable instead; the
+ * row under it is its way to the sheet.
  */
-function Preview({ artifact }: { artifact: Artifact }) {
+function Preview({ artifact, onOpen }: { artifact: Artifact; onOpen?: () => void }) {
   const theme = useTheme()
   const backend = useBackend()
   const { width } = useWindowDimensions()
@@ -323,9 +446,15 @@ function Preview({ artifact }: { artifact: Artifact }) {
   // shown whole. `ArtifactPreview` falls back to the kind's glyph on its own
   // when the host could not render this one.
   return (
-    <View style={styles.pageWrap}>
+    <Pressable
+      accessibilityRole={onOpen ? 'button' : undefined}
+      accessibilityLabel={onOpen ? `Open ${artifact.name}` : undefined}
+      disabled={!onOpen}
+      onPress={onOpen}
+      style={({ pressed }) => [styles.pageWrap, { opacity: pressed ? 0.8 : 1 }]}
+    >
       <ArtifactPreview artifact={artifact} mode="natural" height={Math.round(edge * 0.95)} maxWidth={edge} radius={theme.radius.card} />
-    </View>
+    </Pressable>
   )
 }
 
@@ -415,6 +544,10 @@ const styles = StyleSheet.create({
   actionRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 11 },
   actionIcon: { width: 22, alignItems: 'center' },
   actionBody: { flex: 1, minWidth: 0, gap: 2 },
+  versionRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 11 },
+  versionBody: { flex: 1, minWidth: 0, gap: 3 },
+  versionTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  versionName: { flex: 1, minWidth: 0 },
   messageCard: { padding: 14, gap: 4 },
   notice: { paddingHorizontal: 4 }
 })

@@ -220,6 +220,24 @@ export function previewMode(artifact: Pick<Artifact, 'name' | 'mimeType' | 'size
 }
 
 /**
+ * What the detail screen's row that opens the preview sheet says, per mode:
+ * the sheet shows the thing *as* something, and the row names what.
+ */
+export function previewLabel(mode: PreviewMode): string {
+  switch (mode) {
+    case 'page':
+      return 'View the page'
+    case 'pdf':
+      return 'View the PDF'
+    case 'markdown':
+      return 'View as formatted text'
+    case 'csv':
+    case 'tsv':
+      return 'View as a table'
+  }
+}
+
+/**
  * Delimited text as rows of cells, the way a spreadsheet would read it.
  *
  * RFC 4180 without ceremony: a cell in double quotes may hold the delimiter,

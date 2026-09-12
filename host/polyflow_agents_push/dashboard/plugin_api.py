@@ -813,6 +813,29 @@ def _artifact_or_404(artifact_id: str) -> Dict[str, Any]:
     return row
 
 
+def _version_or_404(artifact_id: str, v: int | None) -> Dict[str, Any]:
+    """The row whose bytes `?v=` asks for: the artifact itself, or one of its kept versions.
+
+    The app has always sent `?v={version}` on the bytes routes so the HTTP
+    cache under `fetch` keys a rewrite as a new URL (`docs/artifacts.md` §4);
+    this is where the query stops being ignored. No `v`, or the live version,
+    is the artifact. An earlier version is served from the archive when it
+    was kept and is a 404 when not — never the current bytes under an old
+    number, which a cache would then keep for a day as that version.
+    """
+    row = _artifact_or_404(artifact_id)
+
+    if v is None or int(v) == int(row.get("version") or 1):
+        return row
+
+    kept = artifacts.get_version(artifact_id, int(v))
+
+    if kept is None:
+        raise HTTPException(status_code=404, detail="that version of the artifact was not kept")
+
+    return kept
+
+
 def _serve(row: Dict[str, Any], *, download: bool) -> FileResponse:
     path = artifacts.file_path(row)
 
@@ -860,21 +883,33 @@ async def get_artifact(artifact_id: str, request: Request) -> Dict[str, Any]:
     return artifacts.to_public(_artifact_or_404(artifact_id), _route_prefix(request, "/artifacts"))
 
 
+@router.get("/artifacts/{artifact_id}/versions")
+async def artifact_versions(artifact_id: str, request: Request) -> Dict[str, Any]:
+    """The kept earlier versions, newest first (`docs/artifacts.md` §4.2). The live one is the artifact."""
+    rows = artifacts.list_versions(artifact_id)
+
+    if rows is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+
+    return {"versions": rows, "total": len(rows)}
+
+
 @router.get("/artifacts/{artifact_id}/content")
-async def artifact_content(artifact_id: str, download: bool = False) -> FileResponse:
-    """The bytes. Inline by default so an image renders; `?download=1` for a save-as."""
-    return _serve(_artifact_or_404(artifact_id), download=download)
+async def artifact_content(artifact_id: str, download: bool = False, v: int | None = None) -> FileResponse:
+    """The bytes. Inline by default so an image renders; `?download=1` for a save-as; `?v=` for a kept version."""
+    return _serve(_version_or_404(artifact_id, v), download=download)
 
 
 @router.get("/artifacts/{artifact_id}/thumbnail")
-async def artifact_thumbnail(artifact_id: str) -> FileResponse:
+async def artifact_thumbnail(artifact_id: str, v: int | None = None) -> FileResponse:
     """A first-page PNG, rendered on the host the first time it is asked for.
 
     404 when nothing here can render this kind of file — the app shows a glyph
     instead. Off the event loop: a cold LibreOffice takes seconds, and every
-    other request on this server would otherwise wait for it.
+    other request on this server would otherwise wait for it. `?v=` names a
+    kept version, rendered and cached on its own.
     """
-    row = _artifact_or_404(artifact_id)
+    row = _version_or_404(artifact_id, v)
     path = await asyncio.to_thread(thumbnails.ensure, row)
 
     if path is None:

@@ -85,6 +85,13 @@ function ArtifactsScreen() {
     else router.push(`/artifacts/${artifact.id}` as never)
   }
 
+  // From the sheet's info button: the sheet leaves and the detail screen
+  // arrives under it, so the page becomes the file it is.
+  const showInfo = (artifact: Artifact) => {
+    setPreview(null)
+    router.push(`/artifacts/${artifact.id}` as never)
+  }
+
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
       {/* No subtitle: the floating header's inset is one row tall, and a
@@ -162,7 +169,7 @@ function ArtifactsScreen() {
         )}
       </ScrollView>
 
-      <PreviewSheet visible={preview !== null} backend={backend} artifact={preview} onClose={() => setPreview(null)} />
+      <PreviewSheet visible={preview !== null} backend={backend} artifact={preview} onClose={() => setPreview(null)} onInfo={showInfo} />
     </View>
   )
 }
