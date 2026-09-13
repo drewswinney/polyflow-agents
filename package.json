@@ -34,7 +34,8 @@
     "check:m0": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/m0-offline-check.mts",
     "check:images": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/node-resolve.mjs scripts/images-offline-check.mts",
     "check:discovery": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --import ./scripts/node-resolve.mjs scripts/discovery-offline-check.mts",
-    "check:plugin": "python3 scripts/plugin-api-check.py"
+    "check:plugin": "python3 scripts/plugin-api-check.py",
+    "check:listing": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/listing-check.mts"
   },
   "dependencies": {
     "@expo-google-fonts/inter": "~0.4.2",
