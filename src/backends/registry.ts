@@ -31,7 +31,6 @@ export { MOCK_HOST }
  * harness actually wanted (§5.2).
  */
 export function createBackend(server: Server, agent: Agent, credential: AgentCredential): AgentBackend {
-  console.log('[createBackend] server:', server.displayName, 'agent:', agent.displayName, 'scope:', agent.scope)
   if (server.host === MOCK_HOST) {
     return new MockBackend()
   }
@@ -47,7 +46,6 @@ export function createBackend(server: Server, agent: Agent, credential: AgentCre
     })
   }
 
-  console.log('[createBackend] creating HermesBackend with profile:', agent.scope)
   return new HermesBackend({
     host: server.host,
     profile: agent.scope,
