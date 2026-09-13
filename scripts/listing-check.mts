@@ -12,9 +12,8 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { fileURLToPath } from 'node:url'
 
-const source = readFileSync(fileURLToPath(new URL('../docs/store/listing.md', import.meta.url)), 'utf8')
+const source = readFileSync(new URL('../docs/store/listing.md', import.meta.url).pathname, 'utf8')
 const lines = source.split('\n')
 
 type Field = { name: string; limit: number; value: string }
