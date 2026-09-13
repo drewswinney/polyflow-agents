@@ -22,6 +22,13 @@ bytes are read once and written here. A rewrite of the same path in the same
 session updates the row in place and bumps `version`, so a file the agent
 iterates on is one artifact with a history, not twelve rows.
 
+**Every artifact has a title.** `name` is the filename and the upsert key;
+`title` is what a person calls the thing — read off the file when it says
+(an HTML `<title>`, a markdown heading), made from the filename when it does
+not, and replaceable by hand (`retitle`), after which a rewrite leaves it
+alone. Rows from before titles existed are given one the first time the
+store is opened (`_migrate`).
+
 **Superseded bytes are kept.** Before a rewrite replaces the file, the bytes
 it replaces are copied to `files/<id>.v<n>.<ext>` and described by a row in
 `artifact_versions`, so a report the agent redrafted three times can still be
@@ -43,6 +50,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import html
 import json
 import logging
 import mimetypes
@@ -138,6 +146,24 @@ _LIST_KEYS = ("images", "videos", "files", "outputs")
 
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
 
+# Longest a title gets, however it was arrived at. A heading longer than this
+# is a paragraph, and a name typed longer than this was a mistake.
+MAX_TITLE_LENGTH = 120
+
+_HTML_TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+_HTML_H1 = re.compile(r"<h1[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
+_HTML_TAG = re.compile(r"<[^>]+>")
+_MARKDOWN_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$", re.MULTILINE)
+_FRONT_MATTER_TITLE = re.compile(r"^title:\s*(.+?)\s*$", re.MULTILINE)
+_WHITESPACE = re.compile(r"\s+")
+# The names this module and Hermes make up when nothing named the file: a
+# data-URL generation (`_read_data_url`) and an upload the gateway stored.
+_GENERATED_STEM = re.compile(r"^generated-[0-9a-f]{10}$")
+_UPLOAD_STEM = re.compile(r"^upload_\d{8}_\d{6}(?:_\d+)?$")
+# How much of a text file is read for a title. A heading is at the top or it
+# is not the title, and the 25 MB cap is not a reason to read 25 MB.
+_TITLE_SCAN_BYTES = 64 * 1024
+
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 
@@ -198,7 +224,9 @@ CREATE TABLE IF NOT EXISTS artifacts (
     version          INTEGER NOT NULL DEFAULT 1,
     share_token      TEXT UNIQUE,
     share_created_at INTEGER,
-    share_expires_at INTEGER
+    share_expires_at INTEGER,
+    title            TEXT,
+    title_custom     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS artifacts_by_session ON artifacts (session_id, updated_at DESC);
 CREATE INDEX IF NOT EXISTS artifacts_by_time ON artifacts (updated_at DESC);
@@ -239,8 +267,53 @@ def _connect() -> sqlite3.Connection:
         pass
 
     conn.executescript(_SCHEMA)
+    _migrate(conn)
 
     return conn
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring a store from before titles up to the schema, and give its rows one.
+
+    `CREATE TABLE IF NOT EXISTS` leaves an existing table as it was, so the
+    two title columns are added here when they are missing. Two processes
+    can find them missing at once; the second `ALTER` fails with "duplicate
+    column" and is ignored, since the column it wanted is there. The backfill
+    is checked on every open — one indexed miss on a table with no untitled
+    row — so a row that somehow lands without a title (a hand-edited store)
+    is titled the next time anything opens the database, not never.
+    """
+    columns = {row["name"] for row in conn.execute("PRAGMA table_info(artifacts)")}
+
+    for column, definition in (("title", "TEXT"), ("title_custom", "INTEGER NOT NULL DEFAULT 0")):
+        if column in columns:
+            continue
+
+        try:
+            conn.execute(f"ALTER TABLE artifacts ADD COLUMN {column} {definition}")
+        except sqlite3.OperationalError as exc:
+            if "duplicate column" not in str(exc).lower():
+                raise
+
+    if conn.execute("SELECT 1 FROM artifacts WHERE title IS NULL LIMIT 1").fetchone() is None:
+        return
+
+    # Titled row by row rather than in one statement, because a title comes
+    # from the bytes: the report's heading, not just its filename. A file
+    # whose bytes are gone gets the filename's title, like any other.
+    with conn:
+        for row in conn.execute("SELECT * FROM artifacts WHERE title IS NULL").fetchall():
+            current = _row_to_dict(row)
+
+            try:
+                data = file_path(current).read_bytes()
+            except OSError:
+                data = b""
+
+            conn.execute(
+                "UPDATE artifacts SET title = ?, title_custom = 0 WHERE id = ? AND title IS NULL",
+                (derive_title(current["name"], data, current["mime_type"]), current["id"]),
+            )
 
 
 # ── Classification ───────────────────────────────────────────────────────────
@@ -314,6 +387,92 @@ def safe_name(name: str) -> str:
     return cleaned or "artifact"
 
 
+# ── Titles ───────────────────────────────────────────────────────────────────
+
+
+def clean_title(title: Any) -> str:
+    """One line, collapsed, bounded. Empty when nothing usable was given."""
+    text = _WHITESPACE.sub(" ", str(title or "")).strip()
+
+    return text[:MAX_TITLE_LENGTH].rstrip()
+
+
+def title_from_name(name: str) -> str:
+    """The filename as a person would say it: `q3-report_final.md` → `Q3 report final`.
+
+    The extension goes, joiners become spaces, and the first letter is
+    capitalised — nothing cleverer, since a filename is the agent's choice of
+    words and the words are what a person recognises. Two names that carry no
+    words at all — the sha this module stamps a data-URL generation with, and
+    the timestamp the gateway files an upload under — say what they are
+    instead.
+    """
+    stem = Path(safe_name(name)).stem
+
+    if _GENERATED_STEM.match(stem):
+        return "Generated image"
+    if _UPLOAD_STEM.match(stem):
+        return "Sent picture"
+
+    words = clean_title(re.sub(r"[-_]+", " ", stem))
+
+    if not words:
+        return "Artifact"
+
+    return words[:1].upper() + words[1:]
+
+
+def _title_from_html(text: str) -> str:
+    for pattern in (_HTML_TITLE, _HTML_H1):
+        match = pattern.search(text)
+
+        if match:
+            found = clean_title(html.unescape(_HTML_TAG.sub("", match.group(1))))
+
+            if found:
+                return found
+
+    return ""
+
+
+def _title_from_markdown(text: str) -> str:
+    if text.startswith("---"):
+        end = text.find("\n---", 3)
+
+        if end > 0:
+            match = _FRONT_MATTER_TITLE.search(text[3:end])
+
+            if match:
+                found = clean_title(match.group(1).strip("\"'"))
+
+                if found:
+                    return found
+
+    match = _MARKDOWN_HEADING.search(text)
+
+    return clean_title(match.group(1)) if match else ""
+
+
+def derive_title(name: str, data: bytes, mime_type: Optional[str] = None) -> str:
+    """What the file calls itself, or else what its name does.
+
+    A page has a `<title>` (or a top heading); a markdown document has a
+    front-matter `title:` or a `#` heading. Both are the author's own name
+    for the thing, so both win over the filename. Everything else — a
+    picture, a spreadsheet, a PDF — is named from the filename, which is at
+    least the agent's summary of it. Never empty.
+    """
+    display = safe_name(name)
+    mime = mime_for(display, mime_type)
+    found = ""
+
+    if data and mime in ("text/html", "text/markdown"):
+        text = data[:_TITLE_SCAN_BYTES].decode("utf-8", errors="replace")
+        found = _title_from_html(text) if mime == "text/html" else _title_from_markdown(text)
+
+    return found or title_from_name(display)
+
+
 # ── Rows ─────────────────────────────────────────────────────────────────────
 
 
@@ -336,6 +495,8 @@ def to_public(row: Dict[str, Any], share_base: Optional[str] = None) -> Dict[str
     return {
         "id": row["id"],
         "name": row["name"],
+        "title": row.get("title") or title_from_name(row["name"]),
+        "titleCustom": bool(row.get("title_custom")),
         "kind": row["kind"],
         "mimeType": row["mime_type"],
         "size": int(row["size"] or 0),
@@ -355,9 +516,10 @@ def version_to_public(row: Dict[str, Any], artifact: Dict[str, Any]) -> Dict[str
 
     The same shape as the live row — the app already knows how to draw, cache
     and open one of those by `(id, version)` — with the version's own name,
-    size and type, the artifact's id rather than the file key, no share (the
-    link is the artifact's, and opens its current bytes), and `archivedAt`
-    for when these bytes stopped being the current ones.
+    size and type, the artifact's id and title (a title names the artifact,
+    not a draft of it), no share (the link is the artifact's, and opens its
+    current bytes), and `archivedAt` for when these bytes stopped being the
+    current ones.
     """
     public = to_public(
         {
@@ -432,6 +594,7 @@ def record(
     tool: Optional[str] = None,
     source_path: Optional[str] = None,
     mime_type: Optional[str] = None,
+    title: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Store one file. Returns the public row.
 
@@ -440,6 +603,11 @@ def record(
     Raises `ValueError` for input the caller should have refused (empty, too
     large, unknown origin) — the route turns that into a 400, the hook into a
     log line.
+
+    A `title` given here is the caller's and is kept through rewrites; none
+    given, the title is read off the bytes (`derive_title`) — and read again
+    on each rewrite, so a report whose heading changed is listed under its
+    new heading, unless someone has since named it by hand.
     """
     if origin not in ORIGINS:
         raise ValueError(f"origin must be one of {ORIGINS}")
@@ -453,6 +621,7 @@ def record(
     kind = kind_for(mime, display)
     digest = hashlib.sha256(data).hexdigest()
     key_path = source_path or display
+    given = clean_title(title)
     now = _now_ms()
     # Files a pruned version leaves behind, unlinked once the transaction that
     # forgot them has committed — the same order `delete` keeps.
@@ -470,6 +639,9 @@ def record(
             if existing is not None:
                 row = _row_to_dict(existing)
 
+                if given:
+                    conn.execute("UPDATE artifacts SET title = ?, title_custom = 1 WHERE id = ?", (given, row["id"]))
+
                 if row["sha256"] != digest:
                     _archive_current(conn, row, now)
                     _write_bytes(file_path(row), data)
@@ -478,6 +650,12 @@ def record(
                         "updated_at = ?, version = version + 1, tool = COALESCE(?, tool) WHERE id = ?",
                         (len(data), digest, mime, kind, display, now, tool, row["id"]),
                     )
+
+                    if not given and not row.get("title_custom"):
+                        conn.execute(
+                            "UPDATE artifacts SET title = ? WHERE id = ?", (derive_title(display, data, mime), row["id"])
+                        )
+
                     pruned.extend(_prune_versions(conn, row["id"]))
                 else:
                     # Same bytes again: worth a fresh timestamp so the list
@@ -495,8 +673,12 @@ def record(
             _write_bytes(files_dir() / stored, data)
             conn.execute(
                 "INSERT INTO artifacts (id, name, kind, mime_type, size, sha256, session_id, origin, tool, "
-                "source_path, file, created_at, updated_at, version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
-                (artifact_id, display, kind, mime, len(data), digest, session_id or None, origin, tool, source_path, stored, now, now),
+                "source_path, file, created_at, updated_at, version, title, title_custom) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+                (
+                    artifact_id, display, kind, mime, len(data), digest, session_id or None, origin, tool, source_path, stored, now, now,
+                    given or derive_title(display, data, mime), 1 if given else 0,
+                ),
             )
 
             fresh = conn.execute("SELECT * FROM artifacts WHERE id = ?", (artifact_id,)).fetchone()
@@ -663,6 +845,48 @@ def get(artifact_id: str) -> Optional[Dict[str, Any]]:
         row = conn.execute("SELECT * FROM artifacts WHERE id = ?", (artifact_id,)).fetchone()
 
         return _row_to_dict(row) if row is not None else None
+    finally:
+        conn.close()
+
+
+def retitle(artifact_id: str, title: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Name the artifact by hand, or — given nothing — let the file name it again.
+
+    A title set here survives rewrites (`record` leaves a custom title
+    alone). Clearing it puts the artifact back under whatever its current
+    bytes say, read afresh, so "undo my rename" is the same call with no
+    name and never needs the app to know what the derived one was. None
+    when the artifact is unknown; the row otherwise.
+    """
+    given = clean_title(title)
+
+    conn = _connect()
+
+    try:
+        with conn:
+            row = conn.execute("SELECT * FROM artifacts WHERE id = ?", (artifact_id,)).fetchone()
+
+            if row is None:
+                return None
+
+            current = _row_to_dict(row)
+
+            if given:
+                conn.execute("UPDATE artifacts SET title = ?, title_custom = 1 WHERE id = ?", (given, artifact_id))
+            else:
+                try:
+                    data = file_path(current).read_bytes()
+                except OSError:
+                    data = b""
+
+                conn.execute(
+                    "UPDATE artifacts SET title = ?, title_custom = 0 WHERE id = ?",
+                    (derive_title(current["name"], data, current["mime_type"]), artifact_id),
+                )
+
+            fresh = conn.execute("SELECT * FROM artifacts WHERE id = ?", (artifact_id,)).fetchone()
+
+            return _row_to_dict(fresh)
     finally:
         conn.close()
 

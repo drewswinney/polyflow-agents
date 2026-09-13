@@ -4,6 +4,8 @@ import { Pressable, ScrollView, StyleSheet, View } from 'react-native'
 
 import type { Artifact } from '@/domain'
 import { useBackend } from '@/state/ConnectionProvider'
+import { useSelectedAgent } from '@/state/agents'
+import { useArtifactActions } from '@/state/artifacts'
 import { opensInSheet, PreviewSheet } from './PreviewSheet'
 
 import { useTheme } from '../ThemeProvider'
@@ -20,7 +22,7 @@ const PREVIEW_MAX_WIDTH = 260
  * What a stretch of working-out produced, in the transcript (`docs/artifacts.md` §6).
  *
  * A tile per artifact, and nothing more than the tile: the host's rendering
- * of the thing (`ArtifactPreview`) at its own proportions, its filename, and
+ * of the thing (`ArtifactPreview`) at its own proportions, its title, and
  * "Open". The card is meant to be *seen* — a page that looks like the
  * report, a picture that is the picture — so the metadata a list row would
  * carry stays on the detail screen it opens. Several artifacts from one
@@ -37,6 +39,8 @@ const PREVIEW_MAX_WIDTH = 260
  */
 export const ArtifactCards = memo(function ArtifactCards({ artifacts }: { artifacts: Artifact[] }) {
   const backend = useBackend()
+  const scope = useSelectedAgent().scope ?? ''
+  const actions = useArtifactActions(scope, backend)
   const [preview, setPreview] = useState<Artifact | null>(null)
 
   const open = (artifact: Artifact) => {
@@ -58,7 +62,14 @@ export const ArtifactCards = memo(function ArtifactCards({ artifacts }: { artifa
         ))}
       </ScrollView>
 
-      <PreviewSheet visible={preview !== null} backend={backend} artifact={preview} onClose={() => setPreview(null)} onInfo={showInfo} />
+      <PreviewSheet
+        visible={preview !== null}
+        backend={backend}
+        artifact={preview}
+        onClose={() => setPreview(null)}
+        onInfo={showInfo}
+        onRename={(artifact, title) => actions.rename.mutate({ id: artifact.id, title })}
+      />
     </>
   )
 })
@@ -72,7 +83,7 @@ function Tile({ artifact, onOpen }: { artifact: Artifact; onOpen: () => void }) 
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={`Open ${artifact.name}`}
+      accessibilityLabel={`Open ${artifact.title}`}
       onPress={onOpen}
       style={({ pressed }) => [styles.tile, { opacity: pressed ? 0.8 : 1 }]}
     >
@@ -87,7 +98,7 @@ function Tile({ artifact, onOpen }: { artifact: Artifact; onOpen: () => void }) 
 
       <View style={{ width }}>
         <Text variant="rowLabel" numberOfLines={1} style={styles.name}>
-          {artifact.name}
+          {artifact.title}
         </Text>
 
         <View style={styles.open}>

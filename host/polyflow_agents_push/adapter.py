@@ -195,7 +195,9 @@ def _capture_then_notify(*, tool_name: str, args: Any, result: Any, session_id: 
 
     if stored:
         first = stored[0]
-        body = first["name"] if len(stored) == 1 else f"{first['name']} and {len(stored) - 1} more"
+        # The title, not the filename: "Q3 report" reads on a lock screen the
+        # way `q3-report-final-v2.md` does not.
+        body = first["title"] if len(stored) == 1 else f"{first['title']} and {len(stored) - 1} more"
         data: Dict[str, Any] = {
             "sessionId": session_id,
             "tool": tool_name,

@@ -1204,12 +1204,17 @@ export class HermesBackend implements AgentBackend {
 
     const result = await this.rest.uploadArtifact({
       name: upload.name,
+      ...(upload.title ? { title: upload.title } : {}),
       mimeType: upload.mimeType,
       sessionId: upload.sessionId,
       dataUrl
     })
 
     return toArtifact(result.artifact)
+  }
+
+  async renameArtifact(id: string, title: string | null): Promise<Artifact> {
+    return toArtifact((await this.rest.retitleArtifact(id, title)).artifact)
   }
 
   deleteArtifact(id: string): Promise<void> {
@@ -1240,9 +1245,16 @@ const ARTIFACT_KINDS: ReadonlySet<string> = new Set<ArtifactKind>(['image', 'vid
  * `other` rather than as a tile the screen cannot draw.
  */
 function toArtifact(row: ArtifactRow): Artifact {
+  const name = String(row.name ?? '')
+  // A host from before titles sends none; the filename stands in, as it
+  // always did, rather than a blank label.
+  const title = String(row.title ?? '').trim()
+
   return {
     id: String(row.id),
-    name: String(row.name ?? ''),
+    name,
+    title: title || name || 'Artifact',
+    titleCustom: row.titleCustom === true,
     kind: (ARTIFACT_KINDS.has(row.kind) ? row.kind : 'other') as ArtifactKind,
     mimeType: String(row.mimeType ?? 'application/octet-stream'),
     size: Number(row.size) || 0,

@@ -90,7 +90,7 @@ export function ArtifactPreview({
           source={{ uri }}
           style={StyleSheet.absoluteFill}
           resizeMode={size.mode === 'cover' ? 'cover' : 'contain'}
-          accessibilityLabel={artifact.name}
+          accessibilityLabel={artifact.title}
         />
       ) : (
         <View style={styles.fallback}>

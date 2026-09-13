@@ -30,6 +30,8 @@ function artifact(overrides: Partial<Artifact> = {}): Artifact {
   return {
     id: 'a1',
     name: 'report.md',
+    title: 'Report',
+    titleCustom: false,
     kind: 'document',
     mimeType: 'text/markdown',
     size: 4312,

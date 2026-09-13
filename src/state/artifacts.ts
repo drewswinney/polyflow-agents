@@ -106,8 +106,9 @@ export function useArtifactVersions(scope: string, backend: AgentBackend | null,
 }
 
 /**
- * Delete, share, unshare — each invalidating every artifact query for the
- * agent, because a share shows on the list row as well as the detail.
+ * Rename, delete, share, unshare — each invalidating every artifact query
+ * for the agent, because a title or a share shows on the list row as well
+ * as the detail.
  */
 export function useArtifactActions(scope: string, backend: AgentBackend | null) {
   const queryClient = useQueryClient()
@@ -121,6 +122,22 @@ export function useArtifactActions(scope: string, backend: AgentBackend | null) 
     },
     onSuccess: (_result, id) => {
       queryClient.removeQueries({ queryKey: artifactKey(scope, id) })
+      void invalidate()
+    }
+  })
+
+  // The host answers with the row: a cleared name comes back as whatever the
+  // file says, which only the host can read. Written into the one-artifact
+  // query at once, so the heading changes under the finger rather than after
+  // the refetch.
+  const rename = useMutation({
+    mutationFn: async ({ id, title }: { id: string; title: string | null }): Promise<Artifact> => {
+      if (!backend) throw new Error('Not connected')
+
+      return backend.renameArtifact(id, title)
+    },
+    onSuccess: artifact => {
+      queryClient.setQueryData<Artifact>(artifactKey(scope, artifact.id), artifact)
       void invalidate()
     }
   })
@@ -143,5 +160,5 @@ export function useArtifactActions(scope: string, backend: AgentBackend | null) 
     onSuccess: () => void invalidate()
   })
 
-  return { remove, share, unshare }
+  return { rename, remove, share, unshare }
 }

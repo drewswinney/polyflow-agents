@@ -300,6 +300,13 @@ export interface AgentBackend {
    * sent it (`attachment-cache.ts` is per phone).
    */
   uploadArtifact(upload: ArtifactUpload): Promise<Artifact>
+  /**
+   * Name the artifact, or — with `null` — let the file name it again.
+   *
+   * Resolves with the row as the host now has it, since clearing a name
+   * yields a title only the host can compute (it reads the bytes).
+   */
+  renameArtifact(id: string, title: string | null): Promise<Artifact>
   deleteArtifact(id: string): Promise<void>
   /** Mint a link, or return the one already live. Requires `capabilities.artifacts.share`. */
   shareArtifact(id: string, options?: { expiresInHours?: number }): Promise<ArtifactShare>

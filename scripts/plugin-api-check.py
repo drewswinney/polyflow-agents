@@ -18,7 +18,9 @@ check cannot, each of which was a real failure mode rather than a hypothetical:
 4. **The artifact store round-trips.** Capture from a tool result, the upload
    route, the content and share routes, versioning on rewrite — the replaced
    bytes kept, listed, served by `?v=`, bounded, and deleted with the artifact —
-   all against a real SQLite file under the temporary home (`docs/artifacts.md`).
+   titles read off the bytes, renamed and reset through the route, and given
+   to a store from before titles existed — all against a real SQLite file
+   under the temporary home (`docs/artifacts.md`).
 5. **Thumbnails render with whatever this machine has**, and 404 cleanly with
    what it lacks — never a 500. Pillow, `pdftoppm` and a Chromium are each
    probed rather than assumed.
@@ -272,16 +274,20 @@ def check_artifacts(module, client, base: str, home: Path) -> None:
         fail(f"write_file artifact lost its session or version: {first}")
     if not arts.file_path(arts.get(first["id"])).is_file():
         fail("capture returned a row but copied no bytes")
+    if first["title"] != "Findings" or first["titleCustom"] is not False:
+        fail(f"a markdown artifact should be titled by its heading, got {first['title']!r}")
 
     # A rewrite of the same path in the same session is the same artifact, one
     # version on — not a second row.
-    written.write_text("# Findings\n\nthree things\n")
+    written.write_text("# Findings, so far\n\nthree things\n")
     again = arts.capture_tool_result(tool_name="write_file", args={"path": str(written)}, result=result, session_id=SESSION)
 
     if again[0]["id"] != first["id"] or again[0]["version"] != 2:
         fail(f"a rewrite should bump the version in place, got {again[0]}")
     if arts.file_path(arts.get(first["id"])).read_text() != written.read_text():
         fail("a rewrite did not replace the stored bytes")
+    if again[0]["title"] != "Findings, so far":
+        fail(f"a rewrite should re-read a derived title from the new bytes, got {again[0]['title']!r}")
 
     # --- Versions: the bytes a rewrite replaced are kept, and reachable ----
     versions = client.get(f"{base}/artifacts/{first['id']}/versions").json()
@@ -297,6 +303,8 @@ def check_artifacts(module, client, base: str, home: Path) -> None:
         fail(f"a kept version should say when it was superseded, got {kept}")
     if kept["share"] is not None:
         fail("a kept version carries no share of its own")
+    if kept["title"] != "Findings, so far":
+        fail(f"a kept version is listed under the artifact's title, got {kept['title']!r}")
     if client.get(f"{base}/artifacts/{first['id']}/content", params={"v": 1}).text != "# Findings\n\nnothing yet\n":
         fail("?v=1 should answer with the kept bytes")
     if client.get(f"{base}/artifacts/{first['id']}/content", params={"v": 2}).text != written.read_text():
@@ -376,6 +384,77 @@ def check_artifacts(module, client, base: str, home: Path) -> None:
     if len(typed) != 1 or typed[0]["kind"] != "data":
         fail(f"a .csv file should be captured as data, got {typed}")
 
+    # --- Titles: what the file says, else what its name says (§4.3) --------
+    if typed[0]["title"] != "Export":
+        fail(f"a file with nothing to say for itself is titled from its name, got {typed[0]['title']!r}")
+    if image[0]["title"] != "Generated image":
+        fail(f"a data-URL generation carries no words; it says what it is, got {image[0]['title']!r}")
+
+    page = home / "q3-report_final-v2.html"
+    page.write_text("<!doctype html><html><head><title>\n  Q3 &amp; Q4 <em>outlook</em>\n</title></head><body><h1>Other</h1></body></html>")
+    paged = arts.capture_tool_result(tool_name="write_file", args={"path": str(page)}, result=json.dumps({"success": True}), session_id="other")
+
+    if paged[0]["title"] != "Q3 & Q4 outlook":
+        fail(f"a page is titled by its <title>, unescaped and collapsed, got {paged[0]['title']!r}")
+
+    for name, data, mime, expected in (
+        ("q3-report_final-v2.md", b"no heading here\n", None, "Q3 report final v2"),
+        ("notes.md", b"---\ntitle: \"Weekly notes\"\ndate: 2026-09-12\n---\n\n# Not this\n", None, "Weekly notes"),
+        ("notes.md", b"intro\n\n## Second-level counts too ##\n", None, "Second-level counts too"),
+        ("bare.html", b"<html><body><h1>Fallback <b>heading</b></h1></body></html>", None, "Fallback heading"),
+        ("empty.html", b"<html><head><title>   </title></head></html>", None, "Empty"),
+        ("upload_20260907_132822_1.png", b"\x89PNG", "image/png", "Sent picture"),
+        ("archive.tar.gz", b"x", None, "Archive.tar"),
+        ("____", b"x", None, "Artifact"),
+        ("long.md", b"# " + b"word " * 60 + b"\n", None, ("word " * 60)[: arts.MAX_TITLE_LENGTH].rstrip()),
+    ):
+        got = arts.derive_title(name, data, mime)
+
+        if got != expected:
+            fail(f"derive_title({name!r}) should be {expected!r}, got {got!r}")
+
+    # A title given with the bytes is the caller's, and a rewrite keeps it.
+    named = arts.record(data=b"a,b\n", name="t.csv", session_id="other", origin="agent", title="  Table   one  ")
+
+    if named["title"] != "Table one" or named["titleCustom"] is not True:
+        fail(f"a given title should be kept, cleaned, and marked as given, got {named}")
+
+    named = arts.record(data=b"a,b\n1,2\n", name="t.csv", session_id="other", origin="agent")
+
+    if named["version"] != 2 or named["title"] != "Table one" or named["titleCustom"] is not True:
+        fail(f"a rewrite must not replace a title someone gave, got {named}")
+
+    # Renaming through the route, and handing naming back to the file.
+    renamed = client.patch(f"{base}/artifacts/{first['id']}", json={"title": "The findings"})
+
+    if renamed.status_code != 200 or renamed.json()["artifact"]["title"] != "The findings" or renamed.json()["artifact"]["titleCustom"] is not True:
+        fail(f"PATCH should rename the artifact, got {renamed.status_code} {renamed.text}")
+    if client.get(f"{base}/artifacts/{first['id']}").json()["title"] != "The findings":
+        fail("a rename did not persist")
+
+    written.write_text("# Findings, finally\n")
+    arts.capture_tool_result(tool_name="write_file", args={"path": str(written)}, result=result, session_id=SESSION)
+
+    if client.get(f"{base}/artifacts/{first['id']}").json()["title"] != "The findings":
+        fail("a rewrite must not replace a title given through the route")
+
+    reset = client.patch(f"{base}/artifacts/{first['id']}", json={"title": None}).json()["artifact"]
+
+    if reset["title"] != "Findings, finally" or reset["titleCustom"] is not False:
+        fail(f"clearing the title should re-read it from the current bytes, got {reset}")
+    if client.patch(f"{base}/artifacts/{first['id']}", json={"title": "  "}).json()["artifact"]["titleCustom"] is not False:
+        fail("a blank title is a clear, not a name")
+    if client.patch(f"{base}/artifacts/{first['id']}", json={}).status_code != 400:
+        fail("PATCH without a title key should be a 400")
+    if client.patch(f"{base}/artifacts/{first['id']}", json={"title": 7}).status_code != 400:
+        fail("a non-string title should be a 400")
+    if client.patch(f"{base}/artifacts/nope", json={"title": "x"}).status_code != 404:
+        fail("renaming an unknown artifact should 404")
+
+    # The check's own bookkeeping: the two title probes above added rows.
+    for probe in (paged[0], named):
+        client.request("DELETE", f"{base}/artifacts/{probe['id']}")
+
     # Over the cap is refused, loudly enough to be a ValueError and not a row.
     try:
         arts.record(data=b"x" * (arts.MAX_BYTES + 1), name="huge.bin", session_id=None, origin="agent")
@@ -387,7 +466,8 @@ def check_artifacts(module, client, base: str, home: Path) -> None:
     # --- Listing ----------------------------------------------------------
     listed = client.get(f"{base}/artifacts").json()
 
-    if listed["total"] != 3 or [row["id"] for row in listed["artifacts"]][0] != typed[0]["id"]:
+    # The report was rewritten last, by the title checks; by last change it leads.
+    if listed["total"] != 3 or [row["id"] for row in listed["artifacts"]][0] != first["id"]:
         fail(f"listing should show three artifacts newest first, got {listed}")
     if client.get(f"{base}/artifacts", params={"session": SESSION}).json()["total"] != 2:
         fail("session filter did not narrow the list")
@@ -395,7 +475,8 @@ def check_artifacts(module, client, base: str, home: Path) -> None:
         fail("kind filter did not narrow the list")
     if client.get(f"{base}/artifacts", params={"kind": "sculpture"}).status_code != 400:
         fail("an unknown kind should be a 400")
-    if client.get(f"{base}/artifacts/{first['id']}").json()["version"] != 2:
+    # Version 3: the title checks above rewrote the report once more.
+    if client.get(f"{base}/artifacts/{first['id']}").json()["version"] != 3:
         fail("the single-row route disagrees with the list")
     if client.get(f"{base}/artifacts/nope").status_code != 404:
         fail("an unknown id should 404")
@@ -427,6 +508,8 @@ def check_artifacts(module, client, base: str, home: Path) -> None:
         fail(f"upload misdescribed: {filed}")
     if client.get(f"{base}/artifacts/{filed['id']}/content").content != base64.b64decode(PNG_B64):
         fail("uploaded bytes did not round-trip")
+    if filed["title"] != "Sent picture":
+        fail(f"an upload under the gateway's name is titled for what it is, got {filed['title']!r}")
     if client.post(f"{base}/artifacts", json={"dataUrl": f"data:image/png;base64,{PNG_B64}"}).status_code != 400:
         fail("an upload without a name should be a 400")
     if client.post(f"{base}/artifacts", json={"name": "x.png", "dataUrl": "not a data url"}).status_code != 400:
@@ -440,6 +523,47 @@ def check_artifacts(module, client, base: str, home: Path) -> None:
 
     if client.get(f"{base}/artifacts", params={"session": SESSION}).json()["total"] != 3:
         fail("re-uploading the same picture duplicated it")
+
+    # --- Backfill: rows from before titles existed are given one -----------
+    # The row is inserted with `title` cleared — what a store written by the
+    # previous release holds once the columns are added — and the next open
+    # must title it from its bytes, not leave it blank or fall over.
+    with sqlite3.connect(arts.db_path()) as raw:
+        raw.execute("UPDATE artifacts SET title = NULL, title_custom = 0 WHERE id = ?", (first["id"],))
+
+    if client.get(f"{base}/artifacts/{first['id']}").json()["title"] != "Findings, finally":
+        fail("an untitled row should be titled from its bytes on the next open")
+
+    # And a store whose table predates the columns altogether: the migration
+    # adds them, and `_migrate` on a second connection finds nothing to do.
+    legacy_home = home / "legacy"
+    legacy_home.mkdir()
+    legacy_db = legacy_home / "artifacts.db"
+
+    with sqlite3.connect(legacy_db) as raw:
+        raw.executescript(
+            arts._SCHEMA.replace(",\n    title            TEXT,\n    title_custom     INTEGER NOT NULL DEFAULT 0", "")
+        )
+        raw.execute(
+            "INSERT INTO artifacts (id, name, kind, mime_type, size, sha256, origin, file, created_at, updated_at, version) "
+            "VALUES ('old1', 'old-notes.md', 'document', 'text/markdown', 1, 'x', 'agent', 'old1.md', 1, 1, 1)"
+        )
+
+    (legacy_home / "files").mkdir()
+    (legacy_home / "files" / "old1.md").write_text("# Old notes\n")
+
+    original_store_dir = arts.store_dir
+    arts.store_dir = lambda: legacy_home
+
+    try:
+        migrated = arts.get("old1")
+
+        if migrated is None or migrated["title"] != "Old notes" or migrated["title_custom"] != 0:
+            fail(f"a pre-title store should be migrated and its rows titled from their bytes, got {migrated}")
+        if arts.to_public(migrated)["title"] != "Old notes":
+            fail("the migrated title should be what the row reports")
+    finally:
+        arts.store_dir = original_store_dir
 
     # --- Sharing ----------------------------------------------------------
     shared = client.post(f"{base}/artifacts/{first['id']}/share", json={})

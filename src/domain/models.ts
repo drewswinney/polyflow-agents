@@ -617,7 +617,16 @@ export interface ArtifactShare {
  */
 export interface Artifact {
   id: string
+  /** The filename: what the host and the agent's disk call it. */
   name: string
+  /**
+   * What a person calls it. Read off the file on the host — a page's
+   * `<title>`, a document's heading — or made from the filename; set by hand
+   * from the app, after which a rewrite leaves it alone. Never empty.
+   */
+  title: string
+  /** True once someone named it; false while the file names itself. */
+  titleCustom: boolean
   kind: ArtifactKind
   mimeType: string
   /** Bytes. */
@@ -668,6 +677,8 @@ export interface ArtifactPage {
 export interface ArtifactUpload {
   /** The filename the host stored the upload as — the one a reloaded transcript refers to. */
   name: string
+  /** What to call it, when the app knows better than the filename. The host makes one otherwise. */
+  title?: string
   mimeType: string
   sessionId: SessionId
   /** A data URL or a local file URI. */

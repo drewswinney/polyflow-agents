@@ -32,6 +32,8 @@ function artifact(id: string, createdAt: number, overrides: Partial<Artifact> = 
   return {
     id,
     name: `${id}.md`,
+    title: id,
+    titleCustom: false,
     kind: 'document',
     mimeType: 'text/markdown',
     size: 10,

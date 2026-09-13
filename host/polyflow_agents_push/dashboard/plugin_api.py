@@ -937,6 +937,7 @@ async def upload_artifact(body: dict, request: Request) -> Dict[str, Any]:
 
     `name` is the filename the *host* stored the upload under — what a reloaded
     transcript refers to it by — so the app can match the two on the next open.
+    `title`, if sent, is what the app calls it; otherwise the store makes one.
     """
     name = str(body.get("name") or "").strip()
     data_url = str(body.get("dataUrl") or "")
@@ -965,11 +966,36 @@ async def upload_artifact(body: dict, request: Request) -> Dict[str, Any]:
             tool=None,
             source_path=None,
             mime_type=str(body.get("mimeType") or "") or declared,
+            title=str(body.get("title") or "") or None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
     return {"ok": True, "artifact": artifacts.to_public(artifacts.get(stored["id"]), _route_prefix(request, "/artifacts"))}
+
+
+@router.patch("/artifacts/{artifact_id}")
+async def retitle_artifact(artifact_id: str, body: dict, request: Request) -> Dict[str, Any]:
+    """Rename: `{title}`. An empty or null title hands naming back to the file (`docs/artifacts.md` §4.3).
+
+    The only field a person may change about an artifact — the name is the
+    file's, the kind and size are the bytes', the session is history — so
+    this is a PATCH with one key rather than a route per field.
+    """
+    if "title" not in body:
+        raise HTTPException(status_code=400, detail="title is required (null or empty to clear it)")
+
+    title = body.get("title")
+
+    if title is not None and not isinstance(title, str):
+        raise HTTPException(status_code=400, detail="title must be a string or null")
+
+    row = artifacts.retitle(artifact_id, title)
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="artifact not found")
+
+    return {"ok": True, "artifact": artifacts.to_public(row, _route_prefix(request, "/artifacts"))}
 
 
 @router.delete("/artifacts/{artifact_id}")
