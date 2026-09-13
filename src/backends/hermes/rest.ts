@@ -130,6 +130,9 @@ const ARTIFACT_BYTES_TIMEOUT_MS = 120_000
 export interface ArtifactRow {
   id: string
   name: string
+  /** Absent from a host that predates titles; the backend falls back to the name. */
+  title?: string
+  titleCustom?: boolean
   kind: string
   mimeType: string
   size: number
@@ -511,11 +514,20 @@ export class HermesRest {
     return this.requestBytes(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}/thumbnail?v=${encodeURIComponent(version)}`, 90_000)
   }
 
-  uploadArtifact(body: { name: string; mimeType: string; sessionId: string; dataUrl: string }): Promise<{ ok: boolean; artifact: ArtifactRow }> {
+  uploadArtifact(body: { name: string; title?: string; mimeType: string; sessionId: string; dataUrl: string }): Promise<{ ok: boolean; artifact: ArtifactRow }> {
     return this.request<{ ok: boolean; artifact: ArtifactRow }>(ARTIFACTS_ROUTE, {
       method: 'POST',
       body,
       timeoutMs: ARTIFACT_BYTES_TIMEOUT_MS
+    })
+  }
+
+  /** `{title}`; null hands naming back to the file (`docs/artifacts.md` §4.3). */
+  retitleArtifact(id: string, title: string | null): Promise<{ ok: boolean; artifact: ArtifactRow }> {
+    return this.request<{ ok: boolean; artifact: ArtifactRow }>(`${ARTIFACTS_ROUTE}/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: { title },
+      timeoutMs: 15_000
     })
   }
 

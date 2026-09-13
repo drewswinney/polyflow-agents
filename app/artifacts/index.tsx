@@ -7,7 +7,7 @@ import type { Artifact } from '@/domain'
 import { useBackend, useConnectionFault, useConnectionState } from '@/state/ConnectionProvider'
 import { useAgentScopedRoute } from '@/state/agent-scope'
 import { useSelectedAgent } from '@/state/agents'
-import { artifactsNotInstalled, useArtifacts } from '@/state/artifacts'
+import { artifactsNotInstalled, useArtifactActions, useArtifacts } from '@/state/artifacts'
 import { useSessions } from '@/state/queries'
 import { useSidebar } from '@/state/sidebar'
 import { withAgent } from '@/ui/components/AgentGate'
@@ -63,6 +63,7 @@ function ArtifactsScreen() {
   const [preview, setPreview] = useState<Artifact | null>(null)
 
   const artifacts = useArtifacts(scope, stale ? null : backend, session ? { sessionId: session } : {})
+  const actions = useArtifactActions(scope, stale ? null : backend)
   const sessions = useSessions(scope, session ? backend : null)
   const sessionTitle = session ? sessions.data?.find(row => row.id === session)?.title : undefined
 
@@ -169,7 +170,14 @@ function ArtifactsScreen() {
         )}
       </ScrollView>
 
-      <PreviewSheet visible={preview !== null} backend={backend} artifact={preview} onClose={() => setPreview(null)} onInfo={showInfo} />
+      <PreviewSheet
+        visible={preview !== null}
+        backend={backend}
+        artifact={preview}
+        onClose={() => setPreview(null)}
+        onInfo={showInfo}
+        onRename={(artifact, title) => actions.rename.mutate({ id: artifact.id, title })}
+      />
     </View>
   )
 }
@@ -178,7 +186,7 @@ function ArtifactsScreen() {
  * One day's artifacts: the pictures as a grid, the rest as rows in a card.
  *
  * Pictures first because they are what a glance is for; the rows under them
- * carry the names a glance cannot read off a thumbnail.
+ * carry the titles a glance cannot read off a thumbnail.
  */
 function DayGroup({ artifacts, onOpen }: { artifacts: Artifact[]; onOpen: (artifact: Artifact) => void }) {
   const pictures = artifacts.filter(artifact => artifact.kind === 'image')
@@ -225,7 +233,7 @@ function PictureTile({ artifact, size, onPress }: { artifact: Artifact; size: nu
   const theme = useTheme()
 
   return (
-    <Pressable accessibilityRole="imagebutton" accessibilityLabel={artifact.name} onPress={onPress}>
+    <Pressable accessibilityRole="imagebutton" accessibilityLabel={artifact.title} onPress={onPress}>
       <ArtifactPreview artifact={artifact} mode="cover" width={size} height={size} />
 
       {artifact.origin === 'upload' ? (
@@ -237,7 +245,7 @@ function PictureTile({ artifact, size, onPress }: { artifact: Artifact; size: nu
   )
 }
 
-/** A non-picture: glyph tile, name, provenance, size and age. */
+/** A non-picture: glyph tile, title, provenance, size and age. */
 function ArtifactRow({ artifact, onPress }: { artifact: Artifact; onPress: () => void }) {
   const theme = useTheme()
 
@@ -253,7 +261,7 @@ function ArtifactRow({ artifact, onPress }: { artifact: Artifact; onPress: () =>
       <View style={styles.rowBody}>
         <View style={styles.rowTitle}>
           <Text variant="rowLabelStrong" numberOfLines={1} style={styles.rowName}>
-            {artifact.name}
+            {artifact.title}
           </Text>
           <Text variant="monoSmall">{relativeTime(artifact.updatedAt)}</Text>
         </View>

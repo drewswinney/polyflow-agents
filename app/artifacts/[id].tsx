@@ -2,7 +2,7 @@ import * as Clipboard from 'expo-clipboard'
 import { File } from 'expo-file-system'
 import { router, useLocalSearchParams } from 'expo-router'
 import { useEffect, useState } from 'react'
-import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native'
+import { ActivityIndicator, Alert, Image, Pressable, ScrollView, StyleSheet, TextInput, useWindowDimensions, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import type { Artifact, ArtifactVersion } from '@/domain'
@@ -47,11 +47,14 @@ async function loadSharing(): Promise<typeof import('expo-sharing') | null> {
 }
 
 /**
- * One artifact (`docs/artifacts.md` §6): preview, provenance, and the four
- * things you can do with it — open the conversation it came from, hand the
- * file to another app, share or stop sharing a link, delete it. For a type
- * the preview sheet renders, a row (and the preview itself) opens the sheet,
- * so the screen the sheet's info button leads to also leads back.
+ * One artifact (`docs/artifacts.md` §6): preview, provenance, and the five
+ * things you can do with it — rename it, open the conversation it came from,
+ * hand the file to another app, share or stop sharing a link, delete it. For
+ * a type the preview sheet renders, a row (and the preview itself) opens the
+ * sheet, so the screen the sheet's info button leads to also leads back.
+ *
+ * The heading is the artifact's title (§4.3) and the filename is a row under
+ * it: what a person calls the thing first, what the disk calls it second.
  *
  * With `?v=`, the same screen shows one of the artifact's *earlier* versions
  * (§4.2): the file as it was, its own size and dates, and "Share file" for
@@ -124,7 +127,7 @@ function ArtifactScreen() {
         return
       }
 
-      await Sharing.shareAsync(uri, { mimeType: shown.mimeType, dialogTitle: shown.name })
+      await Sharing.shareAsync(uri, { mimeType: shown.mimeType, dialogTitle: shown.title })
     } catch (error) {
       setNotice(String((error as Error).message))
     } finally {
@@ -154,10 +157,17 @@ function ArtifactScreen() {
     actions.unshare.mutate(artifact.id, { onError: error => setNotice(String((error as Error).message)) })
   }
 
+  const rename = (title: string | null) => {
+    if (!artifact) return
+
+    setNotice(null)
+    actions.rename.mutate({ id: artifact.id, title }, { onError: error => setNotice(String((error as Error).message)) })
+  }
+
   const confirmDelete = () => {
     if (!artifact) return
 
-    Alert.alert('Delete this artifact?', `${artifact.name} is removed from the host. The agent's own copy, if it still has one, is untouched.`, [
+    Alert.alert('Delete this artifact?', `${artifact.title} (${artifact.name}) is removed from the host. The agent's own copy, if it still has one, is untouched.`, [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Delete',
@@ -173,7 +183,7 @@ function ArtifactScreen() {
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg }]}>
-      <ScreenHeader title={shown?.name ?? artifact?.name ?? 'Artifact'} titleVariant="sub" onBack={() => router.back()} />
+      <ScreenHeader title={shown?.title ?? artifact?.title ?? 'Artifact'} titleVariant="sub" onBack={() => router.back()} />
 
       <ScrollView contentContainerStyle={[styles.body, { paddingTop: headerInset, paddingBottom: insets.bottom + 24 }]}>
         {shown && artifact ? (
@@ -194,6 +204,8 @@ function ArtifactScreen() {
                   <Divider />
                 </>
               ) : null}
+              <MetaRow label="File" value={shown.name} mono />
+              <Divider />
               <MetaRow label="Kind" value={`${kindLabel(shown.kind)} · ${shown.mimeType}`} />
               <Divider />
               <MetaRow label="Size" value={formatBytes(shown.size)} />
@@ -228,6 +240,12 @@ function ArtifactScreen() {
                 <>
                   <Divider />
                   <ActionRow icon="comments" label="Open the conversation" onPress={() => router.push(`/chat/${artifact.sessionId}` as never)} />
+                </>
+              ) : null}
+              {!kept ? (
+                <>
+                  <Divider />
+                  <RenameRow artifact={artifact} busy={actions.rename.isPending} onRename={rename} />
                 </>
               ) : null}
             </Card>
@@ -303,7 +321,77 @@ function ArtifactScreen() {
         )}
       </ScrollView>
 
-      <PreviewSheet visible={previewing} backend={backend} artifact={shown} onClose={() => setPreviewing(false)} />
+      <PreviewSheet
+        visible={previewing}
+        backend={backend}
+        artifact={shown}
+        onClose={() => setPreviewing(false)}
+        {...(kept ? {} : { onRename: (_artifact: Artifact, title: string) => rename(title) })}
+      />
+    </View>
+  )
+}
+
+/**
+ * The one field a person may change about an artifact, edited in place: a
+ * "Rename" row that becomes a text field holding the title, and is a row
+ * again when the field is left — by return, by blur, however. Only a change
+ * is sent; and a name cleared to nothing is sent as `null`, which hands
+ * naming back to the file (§4.3), so undoing a rename is the same gesture
+ * as making one, and the detail under the row says so once there is
+ * something to undo.
+ */
+function RenameRow({ artifact, busy, onRename }: { artifact: Artifact; busy: boolean; onRename: (title: string | null) => void }) {
+  const theme = useTheme()
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+
+  const start = () => {
+    setDraft(artifact.title)
+    setEditing(true)
+  }
+
+  const commit = () => {
+    setEditing(false)
+
+    const next = draft.replace(/\s+/g, ' ').trim()
+
+    if (next === artifact.title) return
+    if (next) onRename(next)
+    else if (artifact.titleCustom) onRename(null)
+  }
+
+  if (!editing) {
+    return (
+      <ActionRow
+        icon="pen"
+        label="Rename"
+        detail={artifact.titleCustom ? 'Named by you. Clear the name to let the file name itself again.' : undefined}
+        busy={busy}
+        onPress={start}
+      />
+    )
+  }
+
+  return (
+    <View style={styles.renameRow}>
+      <TextInput
+        value={draft}
+        onChangeText={setDraft}
+        onBlur={commit}
+        onSubmitEditing={commit}
+        returnKeyType="done"
+        blurOnSubmit
+        autoFocus
+        selectTextOnFocus
+        placeholder={artifact.name}
+        placeholderTextColor={theme.color.gray400}
+        accessibilityLabel="Rename"
+        style={[
+          styles.renameInput,
+          { borderColor: theme.color.primary, backgroundColor: theme.color.bgSubtle, color: theme.color.gray900, fontFamily: theme.font.body }
+        ]}
+      />
     </View>
   )
 }
@@ -335,7 +423,7 @@ function Versions({ artifact, versions, error }: { artifact: Artifact; versions:
               {index > 0 ? <Divider /> : null}
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel={`Version ${kept.version} of ${artifact.name}`}
+                accessibilityLabel={`Version ${kept.version} of ${artifact.title}`}
                 onPress={() => router.push(`/artifacts/${artifact.id}?v=${kept.version}` as never)}
                 style={({ pressed }) => [styles.versionRow, pressed && { backgroundColor: theme.color.bgSubtle }]}
               >
@@ -405,13 +493,13 @@ function Preview({ artifact, onOpen }: { artifact: Artifact; onOpen?: () => void
       <>
         <Pressable
           accessibilityRole="imagebutton"
-          accessibilityLabel={`Open ${artifact.name}`}
+          accessibilityLabel={`Open ${artifact.title}`}
           disabled={!file.data}
           onPress={() => setViewing(true)}
           style={[styles.picture, { width: edge, height: edge * 0.75, backgroundColor: theme.color.secondaryTint, borderColor: theme.color.border, borderRadius: theme.radius.card }]}
         >
           {file.data ? (
-            <Image source={{ uri: file.data }} style={StyleSheet.absoluteFill} resizeMode="contain" accessibilityLabel={artifact.name} />
+            <Image source={{ uri: file.data }} style={StyleSheet.absoluteFill} resizeMode="contain" accessibilityLabel={artifact.title} />
           ) : file.error ? (
             <PreviewFallback icon="triangle-exclamation" label={String((file.error as Error).message)} />
           ) : (
@@ -419,7 +507,7 @@ function Preview({ artifact, onOpen }: { artifact: Artifact; onOpen?: () => void
           )}
         </Pressable>
 
-        {viewing && file.data ? <ImageViewer images={[{ name: artifact.name, uri: file.data }]} index={0} onClose={() => setViewing(false)} /> : null}
+        {viewing && file.data ? <ImageViewer images={[{ name: artifact.title, uri: file.data }]} index={0} onClose={() => setViewing(false)} /> : null}
       </>
     )
   }
@@ -448,7 +536,7 @@ function Preview({ artifact, onOpen }: { artifact: Artifact; onOpen?: () => void
   return (
     <Pressable
       accessibilityRole={onOpen ? 'button' : undefined}
-      accessibilityLabel={onOpen ? `Open ${artifact.name}` : undefined}
+      accessibilityLabel={onOpen ? `Open ${artifact.title}` : undefined}
       disabled={!onOpen}
       onPress={onOpen}
       style={({ pressed }) => [styles.pageWrap, { opacity: pressed ? 0.8 : 1 }]}
@@ -544,6 +632,8 @@ const styles = StyleSheet.create({
   actionRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 11 },
   actionIcon: { width: 22, alignItems: 'center' },
   actionBody: { flex: 1, minWidth: 0, gap: 2 },
+  renameRow: { paddingHorizontal: 13, paddingVertical: 9 },
+  renameInput: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15 },
   versionRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 11, paddingHorizontal: 13, paddingVertical: 11 },
   versionBody: { flex: 1, minWidth: 0, gap: 3 },
   versionTitle: { flexDirection: 'row', alignItems: 'center', gap: 8 },

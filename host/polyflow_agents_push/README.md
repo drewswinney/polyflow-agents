@@ -17,7 +17,7 @@ to register one yet.
 | Approval blocking a turn | `pre_approval_request` hook | "Approval needed" + the command |
 | Approval answered anywhere | `post_approval_response` hook | data-only, so the app can dismiss a stale banner |
 | Agent question | `pre_tool_call` on `clarify` | the question |
-| Artifact produced | `post_tool_call` on `ARTIFACT_TOOLS` | "Artifact ready", naming the file — and the file is kept (below) |
+| Artifact produced | `post_tool_call` on `ARTIFACT_TOOLS` | "Artifact ready", naming the artifact by its title — and the file is kept (below) |
 | Turn finished | `post_llm_call` hook | "Turn finished" + the start of the reply |
 | Cron job output | `deliver=polyflow_agents_push` delivery target | the rendered output |
 
@@ -134,7 +134,10 @@ carries its id so a tap opens it. Source code the agent writes is skipped
 (`artifacts.is_source_code`): artifacts are what it made for a person to read,
 and the `.py` it edited on the way is not that. The app files the pictures it
 sends through the same store, which is how a sent picture comes back on a
-different phone.
+different phone. Every artifact carries a *title* beside its filename: the
+page's `<title>`, the document's heading, or the filename said as words
+(`artifacts.derive_title`); the app may rename it, after which rewrites leave
+it alone. A store from before titles is given them on its next open.
 
 ```
 ~/.hermes/polyflow_agents_push/artifacts/
@@ -150,7 +153,8 @@ different phone.
 | `GET /artifacts/{id}/versions` | the earlier versions the store kept, newest first |
 | `GET /artifacts/{id}/content` | the bytes, inline; `?download=1` for a save-as; `?v=n` for a kept earlier version |
 | `GET /artifacts/{id}/thumbnail` | a first-page PNG, rendered on first ask with Pillow / `pdftoppm` / Chromium / LibreOffice, whichever this host has; 404 otherwise; `?v=n` as above |
-| `POST /artifacts` | the app filing a sent picture: `{name, mimeType, sessionId, dataUrl}` |
+| `POST /artifacts` | the app filing a sent picture: `{name, mimeType, sessionId, dataUrl, title?}` |
+| `PATCH /artifacts/{id}` | rename: `{title}`; null or empty hands naming back to the file |
 | `DELETE /artifacts/{id}` | row and bytes |
 | `POST /artifacts/{id}/share` | mint or return a share token; `{expiresInHours?}` |
 | `DELETE /artifacts/{id}/share` | revoke |

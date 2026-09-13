@@ -241,6 +241,10 @@ export class OpenAiCompatBackend implements AgentBackend {
     throw new NotImplemented('artifacts')
   }
 
+  async renameArtifact(): Promise<never> {
+    throw new NotImplemented('artifacts')
+  }
+
   async deleteArtifact(): Promise<never> {
     throw new NotImplemented('artifacts')
   }

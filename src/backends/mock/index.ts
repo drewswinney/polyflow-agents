@@ -209,6 +209,8 @@ export class MockBackend implements AgentBackend {
   private board: KanbanBoard
   /** Seeded on first use, so the constructor stays as it was. */
   private artifacts: Artifact[] | null = null
+  /** What each artifact was titled before anyone renamed it — what a cleared name goes back to. */
+  private readonly derivedTitles = new Map<string, string>()
   /** Bytes by id; an earlier version's under `<id>@<version>` (`versionKey`). */
   private readonly artifactBytes = new Map<string, Uint8Array>()
   private artifactVersions: Map<string, ArtifactVersion[]> | null = null
@@ -860,6 +862,8 @@ export class MockBackend implements AgentBackend {
   private seededArtifacts(): Artifact[] {
     if (this.artifacts === null) {
       this.artifacts = this.options.seed === false ? [] : seedArtifacts(Date.now(), this.artifactBytes)
+
+      for (const artifact of this.artifacts) this.derivedTitles.set(artifact.id, artifact.title)
     }
 
     return this.artifacts
@@ -943,9 +947,12 @@ export class MockBackend implements AgentBackend {
       return existing
     }
 
+    const derived = titleFromName(upload.name)
     const artifact: Artifact = {
       id: `mock-upload-${now.toString(36)}`,
       name: upload.name,
+      title: upload.title?.trim() || derived,
+      titleCustom: Boolean(upload.title?.trim()),
       kind: upload.mimeType.startsWith('image/') ? 'image' : 'other',
       mimeType: upload.mimeType,
       size: bytes.length,
@@ -961,6 +968,21 @@ export class MockBackend implements AgentBackend {
 
     rows.push(artifact)
     this.artifactBytes.set(artifact.id, bytes)
+    this.derivedTitles.set(artifact.id, derived)
+
+    return artifact
+  }
+
+  async renameArtifact(id: string, title: string | null): Promise<Artifact> {
+    await tick(120)
+
+    const artifact = await this.getArtifact(id)
+    const given = title?.replace(/\s+/g, ' ').trim() ?? ''
+
+    // Cleared, the artifact goes back under the name it had before anyone
+    // typed one — the host re-reads its bytes; the demo remembers instead.
+    artifact.title = given || this.derivedTitles.get(id) || titleFromName(artifact.name)
+    artifact.titleCustom = given.length > 0
 
     return artifact
   }
@@ -1146,6 +1168,8 @@ function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] 
     {
       id: 'mock-art-report',
       name: 'scrub-report.md',
+      title: 'Scrub report — tank',
+      titleCustom: false,
       kind: 'document',
       mimeType: 'text/markdown',
       size: 0,
@@ -1169,6 +1193,8 @@ function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] 
     {
       id: 'mock-art-timeline',
       name: 'recovery-timeline.html',
+      title: 'Recovery timeline',
+      titleCustom: false,
       kind: 'document',
       mimeType: 'text/html',
       size: 0,
@@ -1202,6 +1228,8 @@ function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] 
     {
       id: 'mock-art-pool',
       name: 'pool-layout.png',
+      title: 'Pool layout',
+      titleCustom: false,
       kind: 'image',
       mimeType: 'image/png',
       size: 0,
@@ -1218,6 +1246,8 @@ function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] 
     {
       id: 'mock-art-window',
       name: 'backup-window.sh',
+      title: 'Backup window',
+      titleCustom: false,
       kind: 'code',
       mimeType: 'application/x-sh',
       size: 0,
@@ -1234,6 +1264,8 @@ function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] 
     {
       id: 'mock-art-reconnects',
       name: 'reconnects.json',
+      title: 'Reconnects',
+      titleCustom: false,
       kind: 'data',
       mimeType: 'application/json',
       size: 0,
@@ -1250,6 +1282,8 @@ function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] 
     {
       id: 'mock-art-photo',
       name: 'upload_20260907_132822_1.png',
+      title: 'Sent picture',
+      titleCustom: false,
       kind: 'image',
       mimeType: 'image/png',
       size: 0,
@@ -1274,6 +1308,21 @@ function seedArtifacts(now: number, store: Map<string, Uint8Array>): Artifact[] 
 
 function versionKey(id: string, version: number): string {
   return `${id}@${version}`
+}
+
+/**
+ * The filename as a person would say it — the host's rule for a file that
+ * does not name itself (`docs/artifacts.md` §4.3), so an upload titled here
+ * reads the way one titled there does.
+ */
+function titleFromName(name: string): string {
+  const stem = name.replace(/\.[^.]*$/, '')
+
+  if (/^upload_\d{8}_\d{6}(?:_\d+)?$/.test(stem)) return 'Sent picture'
+
+  const words = stem.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim()
+
+  return words ? words[0].toUpperCase() + words.slice(1) : 'Artifact'
 }
 
 /**

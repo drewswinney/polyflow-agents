@@ -62,7 +62,8 @@ export function PreviewSheet({
   backend,
   artifact,
   onClose,
-  onInfo
+  onInfo,
+  onRename
 }: {
   visible: boolean
   backend: AgentBackend | null
@@ -70,6 +71,8 @@ export function PreviewSheet({
   onClose: () => void
   /** Show everything about the artifact: the detail screen. */
   onInfo?: (artifact: Artifact) => void
+  /** Given, the sheet's title is the artifact's and a long press on it renames. */
+  onRename?: (artifact: Artifact, title: string) => void
 }) {
   const theme = useTheme()
   // Kept across closes: the query refetches nothing (the bytes for an id and
@@ -89,19 +92,20 @@ export function PreviewSheet({
   return (
     <Sheet
       visible={visible && shown !== null}
-      title={shown?.name ?? 'Preview'}
+      title={shown?.title ?? 'Preview'}
       restFraction={REST_FRACTION}
       expandable
       onDismiss={onClose}
       onClose={onClose}
-      {...(onInfo && shown ? { action: { icon: 'circle-info', label: `About ${shown.name}`, onPress: () => onInfo(shown) } } : {})}
+      {...(onRename && shown ? { onRename: (title: string) => onRename(shown, title) } : {})}
+      {...(onInfo && shown ? { action: { icon: 'circle-info', label: `About ${shown.title}`, onPress: () => onInfo(shown) } } : {})}
     >
       <View style={styles.body}>
         {file.isLoading ? (
           <ActivityIndicator color={theme.color.secondary} style={styles.loading} />
         ) : file.error || !file.data || !mode ? (
           <Text variant="secondary" color={theme.color.error700} style={styles.message}>
-            {`Could not load ${shown?.name ?? 'the file'}: ${file.error ? String((file.error as Error).message) : 'the file is missing.'}`}
+            {`Could not load ${shown?.title ?? 'the file'}: ${file.error ? String((file.error as Error).message) : 'the file is missing.'}`}
           </Text>
         ) : mode === 'page' || mode === 'pdf' ? (
           // The page is a cached file on this device — nothing is fetched, so

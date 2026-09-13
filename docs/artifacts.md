@@ -58,6 +58,11 @@ and the app writes through the route. A JSON document under that many writers
 is a lost-update waiting to happen; SQLite's locking is the cheapest correct
 answer and it is stdlib, so the plugin stays dependency-free.
 
+**Titled, not just named.** `name` is the filename, and the key a rewrite is
+matched on; `title` is what a person calls the thing (§4.3) — read off the
+file where it says, made from the filename where it does not, and replaceable
+by hand. Everywhere the app labels an artifact, the label is the title.
+
 **Copied, not linked.** The agent may overwrite or delete the file it wrote a
 minute later. An artifact is the snapshot the conversation produced. A rewrite
 of the same path in the same session *updates* the artifact in place and bumps
@@ -108,7 +113,8 @@ the same auth the app already clears.
 | `GET /artifacts/{id}/versions` | the earlier versions the host kept, newest first (§4.2) |
 | `GET /artifacts/{id}/content` | the bytes, inline; `?download=1` for attachment; `?v=n` for a kept earlier version |
 | `GET /artifacts/{id}/thumbnail` | a first-page PNG, rendered on first ask (§4.1); 404 when nothing on the host can; `?v=n` as above |
-| `POST /artifacts` | the app filing a sent image: `{name, mimeType, sessionId, dataUrl}` |
+| `POST /artifacts` | the app filing a sent image: `{name, mimeType, sessionId, dataUrl, title?}` |
+| `PATCH /artifacts/{id}` | rename: `{title}`; `null` or empty hands naming back to the file (§4.3) |
 | `DELETE /artifacts/{id}` | row and bytes |
 | `POST /artifacts/{id}/share` | mint (or return) a share token; `{expiresInHours?}` |
 | `DELETE /artifacts/{id}/share` | revoke |
@@ -131,6 +137,8 @@ One row:
 {
   "id": "a1b2c3…",
   "name": "report.md",
+  "title": "Findings from the scrub",
+  "titleCustom": false,
   "kind": "document",
   "mimeType": "text/markdown",
   "size": 4312,
@@ -177,7 +185,8 @@ written again (a fresh timestamp, no new version) keep nothing.
 `GET /artifacts/{id}/versions` lists them, newest first, each in the shape of
 §4's row *at that version* — same `id`, the version's own `name`, `size`,
 `mimeType`, `version`, `createdAt`/`updatedAt` (when those bytes were
-written), `share: null`, plus `archivedAt` for when they stopped being
+written), `share: null`, the artifact's `title` (a title names the artifact,
+not a draft of it — §4.3), plus `archivedAt` for when they stopped being
 current. The current version is not among them; it is the artifact. That
 shape is deliberate: everything in the app that draws, caches or opens an
 artifact does so by `(id, version)`, so an earlier version is one it can take
@@ -194,6 +203,48 @@ artifact deletes every kept version.
 
 A re-sent picture under the same name is a rewrite like any other, and there
 is no route to delete one version alone: the artifact is the unit.
+
+### 4.3 Titles
+
+`name` was the only label an artifact had, and it is the filename: fine for
+`report.md`, less so for `q3-report-final-v2.md`, and no help at all for the
+`generated-3f9a1c0b2d.png` this plugin names a data-URL generation or the
+`upload_20260907_132822_1.png` the gateway files a sent picture under. So an
+artifact also has a **title** — what a person calls it — and the app labels
+it by that everywhere the filename used to stand in.
+
+The host derives it when the bytes land, from what the file says about
+itself first and its name second (`artifacts.derive_title`):
+
+| File | Title from |
+|---|---|
+| HTML | `<title>`, else the first `<h1>`; tags stripped, entities unescaped |
+| Markdown | a front-matter `title:`, else the first `#` heading |
+| anything else | the filename: extension off, `-` and `_` to spaces, first letter up — `q3-report_final-v2` → `Q3 report final v2` |
+| a data-URL generation (`generated-<sha>`) | `Generated image` |
+| a gateway upload (`upload_<date>_<time>[_n]`) | `Sent picture` |
+
+One line, whitespace collapsed, at most 120 characters, never empty. Only the
+first 64 KB of a text file is read for it: a heading is at the top or it is
+not the title.
+
+**Renaming.** `PATCH /artifacts/{id}` with `{title}` sets it by hand and marks
+the row `titleCustom`; from then on a rewrite changes the bytes and the
+version but not the title. Until then, a rewrite re-derives — a report whose
+heading changed is listed under its new heading. Sending `null` (or an empty
+string) clears the custom title: the host reads the current bytes again and
+answers with whatever they say, so the app can offer "back to the file's own
+name" without ever knowing what that is. `POST /artifacts` takes an optional
+`title` for the same reason, though the app does not send one today: the
+gateway's upload name says nothing, and "Sent picture" is the honest title.
+
+**Backfill.** Rows from before this existed have no title column. `_migrate`
+adds the two columns the first time the new module opens the store and titles
+every untitled row from its bytes — the report's heading, not just its name
+— so an existing store comes up fully titled with nothing to run by hand.
+The check is repeated on every open (one cheap miss when there is nothing to
+do), so a row that lands untitled somehow is titled the next time anything
+opens the database.
 
 `kind` is derived from the MIME type and extension on the host, once, so every
 client agrees on what is an image. `sessionId` is the **stored** id — the one
@@ -240,10 +291,14 @@ reverse proxy that satisfies the gate for that one prefix — is the whole gap.
   without it answers 404, which the Artifacts screen reports as "not set up on
   this host" rather than as a failure.
 - **Screen:** `/artifacts`, in the sidebar between Sessions and Boards. Grouped
-  by day; images as tiles, everything else as rows. Filter by kind. A chat's
-  header links to the same screen scoped to that session.
-- **Detail:** `/artifacts/[id]`. Preview, provenance, *Open session*, *Share
-  file*, *Copy link* / *Stop sharing*, *Delete*. For a type the sheet renders,
+  by day; images as tiles, everything else as rows labelled by title (§4.3).
+  Filter by kind. A chat's header links to the same screen scoped to that
+  session.
+- **Detail:** `/artifacts/[id]`. The title as the heading, then preview,
+  provenance — with the filename as a *File* row, since the title has taken
+  its place up top — *Rename* (a row that becomes a text field in place;
+  clearing it hands naming back to the file), *Open session*, *Share file*,
+  *Copy link* / *Stop sharing*, *Delete*. For a type the sheet renders,
   a *View the page* / *View as formatted text* / *View as a table* / *View the
   PDF* row (and the page preview itself) opens the sheet from here. Below
   the provenance, **Earlier versions** — when the host kept any (§4.2): one
@@ -261,17 +316,18 @@ reverse proxy that satisfies the gate for that one prefix — is the whole gap.
   table sized to its columns, the first 500 rows. A PDF takes the same sheet
   on iOS, whose WebView draws one; Android's has no viewer, so a PDF there
   keeps the detail screen and its share button. Everything else — plain text,
-  code, images, Office files — is the detail screen. The sheet's header
-  carries an info button opposite its close button: the sheet leaves and the
-  detail screen arrives, so a page, a report or a table — the types the agent
-  produces most — is never a dead end with no way to its provenance, its
-  link, its versions or its delete.
+  code, images, Office files — is the detail screen. The sheet's heading is
+  the title, and a long press on it renames, the way a board card's or a
+  scheduled job's does. The header also carries an info button opposite its
+  close button: the sheet leaves and the detail screen arrives, so a page, a
+  report or a table — the types the agent produces most — is never a dead
+  end with no way to its provenance, its link, its versions or its delete.
 - **In the chat itself:** each file the agent produced appears as a tile in the
   transcript, slotted by time under the work section that made it and above
   the reply that mentions it (`withArtifactRows` in `transcript-rows.ts`). The
   tile is the thing at its own proportions — the host's thumbnail (§4.1) via
   `ArtifactPreview`, which every tile in the app draws through, with nothing
-  painted behind it — then the filename and *Open*. A glyph stands in when the
+  painted behind it — then the title and *Open*. A glyph stands in when the
   host could not render one. Several files from one stretch of work sit in a
   strip you scroll sideways. Tap to open the detail. The header's artifacts button carries a count, and opens
   the session-scoped list. The chat re-reads the session's artifacts when a
@@ -287,7 +343,12 @@ reverse proxy that satisfies the gate for that one prefix — is the whole gap.
   images against the session's upload artifacts before falling back to the
   chip. The device cache is still consulted first — it is free.
 - **Push:** the existing `artifacts` notification now carries `artifactId`, and
-  tapping it opens the artifact rather than the session.
+  tapping it opens the artifact rather than the session. Its body is the
+  title — "Q3 report" reads on a lock screen the way `q3-report-final-v2.md`
+  does not.
+- **Older hosts:** a row without `title` (a plugin from before §4.3) is shown
+  under its filename, as it always was; `renameArtifact` against such a host
+  fails the way any missing route does.
 
 ## 7. Not done, deliberately
 
@@ -299,3 +360,8 @@ reverse proxy that satisfies the gate for that one prefix — is the whole gap.
 - No deleting one version on its own, and no restoring an earlier version as
   the current one: the agent's file is the agent's, and "make it like it was"
   is a thing to ask the agent, not the store.
+- No title per kept version. A title names the artifact; a draft of it is
+  listed by its version number and, when it differs, its filename.
+- No title from a PDF's or an Office file's own metadata. Both carry one, but
+  reading it means a parser the plugin does not ship; the filename is the
+  agent's summary of the file and is what it gets.
