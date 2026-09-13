@@ -80,12 +80,12 @@ your sessions.
 
 ## Permissions the app asks for, and why
 
-| Permission | Used for |
-|---|---|
-| Microphone | dictating a message to your agent; the audio is sent to your host for transcription |
-| Photos | attaching a picture from your library to a message, and the recent-photos strip in the composer |
-| Camera | taking a picture to send to your agent |
-| Notifications | the agent telling you it is waiting on you |
+| Permission    | Used for                                                                                        |
+| ------------- | ----------------------------------------------------------------------------------------------- |
+| Microphone    | dictating a message to your agent; the audio is sent to your host for transcription             |
+| Photos        | attaching a picture from your library to a message, and the recent-photos strip in the composer |
+| Camera        | taking a picture to send to your agent                                                          |
+| Notifications | the agent telling you it is waiting on you                                                      |
 
 Each is asked for the first time you use the feature, and the app works without
 any of them.
@@ -101,4 +101,4 @@ Changes to this policy are published at this address with a new effective date.
 
 ## Contact
 
-Questions about this policy: _[contact address — fill in before publishing]_.
+Questions about this policy: _[drew@polyflowlabs.com]_.
