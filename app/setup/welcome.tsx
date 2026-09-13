@@ -14,8 +14,8 @@ import { useTheme } from '@/ui/ThemeProvider'
  * Setup, page one of three (§7.8): what this app is, before it asks for anything.
  *
  * The logo and the name, one line on what the app is, and the three things
- * that make the rest make sense — the agent is not on the phone, it keeps
- * working without you, and it will interrupt you when it needs a decision.
+ * you will do here — talk to the agent, see what it makes (its Artifacts),
+ * approve what needs approving — each of which is a screen in the app.
  * Then one button, to the page that asks for a host — and under it, the way
  * in for someone with no host: a demo agent that runs inside the app
  * (`MockBackend`), scripted but complete, so the app can be seen working
@@ -74,9 +74,9 @@ export default function WelcomeScreen() {
         </View>
 
         <View style={styles.points}>
-          <Point icon="server" title="It runs on your host, not your phone" detail="Sessions live on the machine you connect to. Closing the app does not stop the work." />
-          <Point icon="circle-check" title="It waits for you on the decisions" detail="Anything needing permission halts that session and asks, in the transcript." />
-          <Point icon="bell" title="It says when it is blocked" detail="A push tells you an agent is waiting, so you do not have to keep checking." />
+          <Point icon="comments" title="Talk to your agent from anywhere" detail="Type, dictate, or send a photo. It picks up where you left off." />
+          <Point icon="box-archive" title="Everything it makes, kept as Artifacts" detail="Reports, pages, images and files it produces, ready to open and share." />
+          <Point icon="circle-check" title="Approve the risky bits" detail="When it needs permission, you get a push and a one-tap Allow or Deny." />
         </View>
       </ScrollView>
 
