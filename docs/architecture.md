@@ -782,18 +782,31 @@ query term highlighted, followed by an all-sessions list. Cancel collapses back.
 
 ### 7.8 Pairing / onboarding
 
-**Connect a server; the agents arrive by themselves.** Three steps: host:port,
-then the credential the host asks for, then a list of what was found on it.
+**Three pages (`app/setup/`), and the person types two things.**
 
-The third step is what makes this easy — the person does the part only they can
-do (name a host, authenticate) and the app does the part they cannot (know what
-is on it). Discovered agents come pre-selected, because someone with three
-profiles wants all three; the step is a prune, not a pick. A single result skips
-the step entirely (§4.2), so an OpenAI-compatible host or an A2A card never
-shows a one-checkbox screen.
+1. **Welcome** — the mark, the name, one line on what the app is, and the
+   three facts that make the rest make sense (the agent is not on the phone;
+   it keeps working without you; it interrupts you for decisions). One
+   button.
+2. **Connect** — the host, and the sign-in. The host is **probed as it is
+   typed** (debounced, `ConnectForm`): a pasted dashboard URL is taken as-is
+   (`parseHost`), the scheme is found by asking (`probeScheme`), and what the
+   host runs — version, TLS, which auth provider — is one line under the
+   field. The credential fields **appear once the probe says which** the
+   host wants; until then there is nothing sensible to ask for. No kind
+   picker (the app talks to Hermes), no display name (the address heads the
+   group; Settings renames). Connecting authenticates and asks the host what
+   it carries (§4.2): one profile goes straight through, several show the
+   prune-not-pick list, a host that would not say still yields one agent.
+3. **Plugin** — what needs `polyflow_agents_push` on the host (push,
+   artifacts, approvals from the phone) and the prompt that asks the agent to
+   install it (`pluginInstallPrompt`): send it into a new session, or copy
+   it. The page asks the host every few seconds whether the plugin's routes
+   answer, so the tick appears on its own. *Skip for now* is there because
+   talking to the agent already works.
 
-Display name is no longer typed. Names come from introspection, and the field
-that used to gate the Save button is gone.
+"Connect a server" from Settings (§7.14) is the same form in a modal, with the
+same plugin page after it.
 
 Manual enrolment only. The design leads with a QR scanner and names `hermes
 pair`; neither exists (§2.6), so the manual path stays primary until they do.
@@ -862,12 +875,16 @@ popover closes and you stay where you are.
 
 ### 7.14 Connect a server
 
-**Kind first**, because it determines everything after: "Another Hermes" (full
-support) or "Something else" (any agent speaking OpenAI-compatible streaming).
-Then host:port, then the credential the probe says the host wants, then the
-discovered agents (§7.8). Reachability is probed before pairing; an offline host
-can still be saved, in which case discovery is deferred to the first successful
-connect and the server starts with a single agent standing for itself.
+The Connect page of setup (§7.8), presented as a modal from the agent
+switcher, and followed by the same plugin page. Reachability is probed as the
+host is typed; an offline host can still be saved with a token, in which case
+discovery is deferred to the first successful connect and the server starts
+with a single agent standing for itself.
+
+The kind picker the design drew ("Another Hermes" / "Something else") is not
+shown: the OpenAI-compatible backend is deferred (§12 q3), and a choice with
+one working answer is not a choice. `AgentKind` keeps `other` so a server
+record from before this still loads.
 
 Opening line sets the model: *"Agents stay separate. Sessions, settings, and
 history never mix between them."*
@@ -1162,10 +1179,13 @@ Before the app can connect to the host (`hermes.lan` below):
    discovery rather than a second noun.** A profile is an agent, so the fix was
    to split Server from Agent (§5.2) and introspect (§4.2) — not to expose
    "profile" in the UI, which would have been a Hermes leak in the domain.
-3. Is the OpenAI-compatible backend a v1 deliverable, or does v1 ship Hermes-only
-   with the seam proven by `MockBackend`? Discovery (§4.2) now depends on it for
-   its second implementation — `/v1/models` is the only introspection a
-   non-Hermes host reliably offers — so the seam is exercised either way.
+3. ~~Is the OpenAI-compatible backend a v1 deliverable, or does v1 ship
+   Hermes-only with the seam proven by `MockBackend`?~~ **Hermes-only, for
+   now** (decided 2026-09-12). `OpenAiCompatBackend` stays a stub, discovery
+   keeps its `/v1/models` path, and setup does not offer the kind (§7.14).
+   Making it real means `/v1/chat/completions` streaming plus sessions kept on
+   the phone, since such a host holds none — a bounded piece of work when it
+   is wanted.
 4. Not yet designed (from the handoff): the resumed state after a drop, an expired
    approval, full-payload log detail, and notification-taps that must switch agents.
 

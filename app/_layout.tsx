@@ -241,7 +241,9 @@ export default function RootLayout() {
             <SidebarShell sidebar={<AppSidebar />}>
               <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: stackBg } }}>
                 <Stack.Screen name="index" />
-                <Stack.Screen name="welcome" />
+                <Stack.Screen name="setup/welcome" />
+                <Stack.Screen name="setup/connect" />
+                <Stack.Screen name="setup/plugin" />
                 <Stack.Screen name="sessions" />
                 <Stack.Screen name="artifacts/index" />
                 <Stack.Screen name="artifacts/[id]" />

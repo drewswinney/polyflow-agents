@@ -71,7 +71,7 @@ export default function NewSessionScreen() {
 
   const chosen = model ?? agentModel.data ?? null
 
-  if (!maybeAgent) return <Redirect href="/welcome" />
+  if (!maybeAgent) return <Redirect href={'/setup/welcome' as never} />
 
   const start = (text: string, images: PickedImage[] = []) => {
     if (createSession.isPending) return
