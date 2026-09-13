@@ -1,10 +1,12 @@
 import { Redirect, router } from 'expo-router'
+import { useState } from 'react'
 import { Image, ScrollView, StyleSheet, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
+import { MOCK_HOST } from '@/backends/mock-host'
 import { useAgents } from '@/state/agents'
 import { Icon } from '@/ui/components/Icon'
-import { SetupButton, SetupFooter } from '@/ui/components/SetupChrome'
+import { SetupButton, SetupFooter, SetupLink } from '@/ui/components/SetupChrome'
 import { Text } from '@/ui/components/Text'
 import { useTheme } from '@/ui/ThemeProvider'
 
@@ -14,20 +16,47 @@ import { useTheme } from '@/ui/ThemeProvider'
  * The logo and the name, one line on what the app is, and the three things
  * that make the rest make sense — the agent is not on the phone, it keeps
  * working without you, and it will interrupt you when it needs a decision.
- * Then one button, to the page that asks for a host.
+ * Then one button, to the page that asks for a host — and under it, the way
+ * in for someone with no host: a demo agent that runs inside the app
+ * (`MockBackend`), scripted but complete, so the app can be seen working
+ * before there is anything to connect it to. That is also what a store
+ * reviewer gets, since they have no Hermes either.
  */
 export default function WelcomeScreen() {
   const theme = useTheme()
   const insets = useSafeAreaInsets()
   const agents = useAgents(state => state.agents)
+  const addServer = useAgents(state => state.addServer)
   // Falling back to an empty registry was honest when it meant re-pairing one
   // host. It is not now that one bad read can drop several servers at once, so
   // the first-run screen — where you land when that happens — says so.
   const hydrationError = useAgents(state => state.hydrationError)
+  const [startingDemo, setStartingDemo] = useState(false)
 
   // The only way in is the first-run redirect, which stops applying the moment
   // an agent exists — so arriving here with one means going back out.
   if (agents.length > 0) return <Redirect href="/" />
+
+  /**
+   * The demo needs no form: the sentinel host is what selects the in-process
+   * backend (`registry`), and the connection layer supplies its credential.
+   * Straight home afterwards — there is no host to put a plugin on.
+   */
+  const startDemo = async () => {
+    if (startingDemo) return
+
+    setStartingDemo(true)
+
+    try {
+      await addServer(
+        { id: `server-${Date.now().toString(36)}`, displayName: 'Demo', kind: 'hermes', host: MOCK_HOST, authMode: 'token', connection: 'idle' },
+        [{ scope: null, label: 'Demo agent', isDefault: true }]
+      )
+      router.replace('/')
+    } finally {
+      setStartingDemo(false)
+    }
+  }
 
   return (
     <View style={[styles.screen, { backgroundColor: theme.color.bg, paddingTop: insets.top }]}>
@@ -63,6 +92,8 @@ export default function WelcomeScreen() {
         <Text variant="secondary" style={styles.footnote}>
           You will need the address of a running Hermes and its sign-in.
         </Text>
+
+        <SetupLink label={startingDemo ? 'Starting the demo…' : 'No host yet? Try the demo agent'} onPress={() => void startDemo()} />
       </SetupFooter>
     </View>
   )

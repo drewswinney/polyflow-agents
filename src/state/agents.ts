@@ -396,15 +396,10 @@ export function useSelectAgent() {
   const select = useAgents(state => state.select)
 
   return (id: AgentId) => {
-    console.log('[useSelectAgent] switching to', id)
-    
-    // First, update the agent selection
+    // Selection first, then the cache: components re-render for the new
+    // agent and their queries fire against an empty scope rather than
+    // painting the old agent's rows for a frame.
     select(id)
-    
-    // THEN invalidate the cache - this ensures components re-render with the
-    // new agent and their queries will fire with fresh cache
     queryClient.removeQueries({ queryKey: agentScopeKey })
-    
-    console.log('[useSelectAgent] cache cleared, components will refetch')
   }
 }

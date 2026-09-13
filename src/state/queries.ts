@@ -40,16 +40,11 @@ export const transcriptKey = (scope: string, id: SessionId) => ['agent', scope, 
 
 export function useSessions(scope: string, backend: AgentBackend | null) {
   const queryKey = useMemo(() => sessionsKey(scope), [scope])
-  console.log('[useSessions] scope:', scope, 'backend:', backend ? 'present' : 'null', 'queryKey:', JSON.stringify(queryKey))
+
   return useQuery({
     queryKey,
     enabled: Boolean(backend),
-    queryFn: async () => {
-      console.log('[useSessions] queryFn executing for scope:', scope)
-      const result = await backend!.listSessions({ limit: 50 })
-      console.log('[useSessions] fetched', result.length, 'sessions for scope:', scope)
-      return result
-    }
+    queryFn: () => backend!.listSessions({ limit: 50 })
   })
 }
 
